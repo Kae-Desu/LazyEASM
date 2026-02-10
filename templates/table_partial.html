@@ -1,0 +1,88 @@
+                        {% for asset in assets %}
+                        <tr class="hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer transition-colors" onclick="toggleDetail('row-{{ asset.id }}', 'icon-{{ asset.id }}')">
+                            <td class="px-6 py-5 text-center">
+                                <span id="icon-{{ asset.id }}" class="text-accent font-bold transition-transform">▸</span>
+                            </td>
+                            <td class="px-6 py-5 font-mono text-xs dark:text-white">{{ asset.name }}</td>
+                            <td class="px-6 py-5">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase border {% if asset.status == 'Critical' %}bg-red-500/10 text-red-500 border-red-500/20{% else %}bg-amber-500/10 text-amber-500 border-amber-500/20{% endif %}">
+                                    {{ asset.status }}
+                                </span>
+                            </td>
+                            <td class="px-6 py-5 text-right">
+                                <button onclick="event.stopPropagation(); openConfirmModal('delete', {{ asset.id }})" class="text-slate-300 hover:text-red-500 transition-colors">
+                                    <i class="fas fa-trash-alt"></i>
+                                </button>
+                            </td>
+                        </tr>
+
+                        <tr id="row-{{ asset.id }}" class="hidden bg-slate-50/50 dark:bg-lazy-dark/30">
+                            <td colspan="4" class="px-10 py-8 border-l-4 border-accent">
+                                <div class="grid lg:grid-cols-2 gap-10">
+                                    
+                                    <div>
+                                        {% if asset.type == 'ip' %}
+                                        <h4 class="text-[10px] font-bold text-secondary uppercase tracking-widest mb-4">Discovery: Ports</h4>
+                                        <div class="rounded-xl border border-border dark:border-white/10 overflow-hidden text-xs">
+                                            <table class="w-full text-left font-mono">
+                                                <thead class="bg-slate-100 dark:bg-white/5">
+                                                    <tr><th class="px-4 py-2">PORT</th><th class="px-4 py-2">SERVICE</th></tr>
+                                                </thead>
+                                                <tbody class="dark:text-slate-400">
+                                                    {% for f in asset.findings %}
+                                                    <tr class="border-t border-border dark:border-white/5">
+                                                        <td class="px-4 py-2 text-secondary font-bold">{{ f.port }}</td>
+                                                        <td class="px-4 py-2">{{ f.service }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% else %}
+                                        <h4 class="text-[10px] font-bold text-secondary uppercase tracking-widest mb-4">Discovery: Directories</h4>
+                                        <div class="rounded-xl border border-border dark:border-white/10 overflow-hidden text-xs">
+                                            <table class="w-full text-left font-mono">
+                                                <thead class="bg-slate-100 dark:bg-white/5">
+                                                    <tr><th class="px-4 py-2">PATH</th><th class="px-4 py-2">STATUS</th></tr>
+                                                </thead>
+                                                <tbody class="dark:text-slate-400">
+                                                    {% for d in asset.directories %}
+                                                    <tr class="border-t border-border dark:border-white/5">
+                                                        <td class="px-4 py-2 text-secondary">{{ d.path }}</td>
+                                                        <td class="px-4 py-2 font-bold {% if d.status == '200' %}text-emerald-500{% else %}text-red-500{% endif %}">{{ d.status }}</td>
+                                                    </tr>
+                                                    {% endfor %}
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    <div class="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
+                                        <h4 class="text-accent font-bold uppercase text-[10px] tracking-widest mb-4 flex items-center sticky top-0 bg-slate-50/50 dark:bg-lazy-dark/40 py-2">
+                                            <i class="fas fa-shield-virus mr-2"></i>Vulnerability & AI Insights
+                                        </h4>
+                                        
+                                        {% for cve in asset.cves %}
+                                        <div class="bg-white dark:bg-lazy-dark p-5 rounded-2xl border border-border dark:border-white/5 shadow-sm mb-4 last:mb-0">
+                                            <div class="flex justify-between items-start mb-3">
+                                                <span class="bg-red-500/10 text-red-500 text-[10px] font-bold px-2 py-1 rounded-md border border-red-500/20">{{ cve.id }}</span>
+                                                <span class="text-[10px] font-bold text-slate-400 italic">CVSS: {{ cve.cvss }}</span>
+                                            </div>
+                                            <p class="text-xs text-slate-700 dark:text-slate-200 font-semibold mb-3 tracking-tight">{{ cve.title }}</p>
+                                            
+                                            <div class="mt-4 p-4 bg-accent/5 dark:bg-accent/10 rounded-xl border-l-2 border-accent">
+                                                <div class="flex items-center space-x-2 mb-2">
+                                                    <span class="w-1.5 h-1.5 rounded-full bg-accent animate-pulse"></span>
+                                                    <span class="text-[10px] font-bold text-accent uppercase tracking-widest">Gemini Recommendation</span>
+                                                </div>
+                                                <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed italic">
+                                                    "{{ cve.ai_reco }}"
+                                                </p>
+                                            </div>
+                                        </div>
+                                        {% endfor %}
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}

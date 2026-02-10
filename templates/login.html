@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html lang="en" class="light">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazyEASM | Login</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'lazy-light': '#EAEAEA',
+                        'lazy-dark': '#3F3F3F',
+                        'dark-card': '#2F2F2F', // Discord-ish card background
+                        accent: '#CC9ACC',     
+                        secondary: '#9AC3CC',  
+                        border: '#D1D1D1',     
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                    },
+                }
+            }
+        }
+    </script>
+
+    <style>
+        .glass { backdrop-filter: blur(12px); }
+        .card-glow { transition: all 0.3s ease; }
+        .card-glow:hover { box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1); transform: translateY(-2px); }
+        body { transition: background-color 0.3s ease; }
+    </style>
+</head>
+
+<body class="bg-lazy-light dark:bg-lazy-dark min-h-screen font-sans flex items-center justify-center p-4">
+
+    <button onclick="toggleDarkMode()" class="fixed top-6 right-6 w-12 h-12 flex items-center justify-center rounded-full bg-white dark:bg-dark-card shadow-lg text-lazy-dark dark:text-accent transition-all border border-border dark:border-white/5 z-50">
+        <i id="theme-icon" class="fas fa-moon"></i>
+    </button>
+
+    <main class="w-full max-w-md">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="mb-4 p-4 rounded-xl border text-sm flex items-center space-x-3 {% if category == 'success' %} bg-emerald-100 border-emerald-200 text-emerald-700 {% else %} bg-red-100 border-red-200 text-red-700 {% endif %}">
+                    <i class="fas fa-circle-info"></i>
+                    <p class="flex-1 font-medium">{{ message }}</p>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-3xl overflow-hidden shadow-2xl card-glow">
+            
+            <div class="bg-lazy-dark p-8 text-center border-b border-white/5">
+                <div class="inline-flex items-center justify-center w-20 h-20 bg-accent rounded-2xl mb-4 shadow-lg shadow-accent/20 overflow-hidden p-3">
+                    <img src="../static/images/lazyeasm-dark.png" alt="LazyEASM Dark" class="dark:hidden w-full h-full object-contain">
+                    
+                    <img src="../static/images/lazyeasm-light.png" alt="LazyEASM Light" class="hidden dark:block w-full h-full object-contain">
+                </div>
+                <h1 class="text-2xl font-bold text-white tracking-tight">LazyEASM<span class="text-secondary">.</span></h1>
+                <p class="text-slate-400 text-xs mt-1 uppercase tracking-widest font-semibold">External Attack Surface Management Platform</p>
+            </div>
+
+            <form action="/login" method="POST" class="p-8 space-y-5">
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase ml-1 tracking-wider">Username</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                            <i class="fas fa-user text-xs"></i>
+                        </span>
+                        <input type="text" name="username" required
+                            class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl pl-10 pr-4 py-3.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white placeholder-slate-400 text-sm" 
+                            placeholder="Username">
+                    </div>
+                </div>
+
+                <div class="space-y-2">
+                    <label class="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase ml-1 tracking-wider">Password</label>
+                    <div class="relative">
+                        <span class="absolute inset-y-0 left-0 pl-4 flex items-center text-slate-400">
+                            <i class="fas fa-lock text-xs"></i>
+                        </span>
+                        <input type="password" name="password" required
+                            class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl pl-10 pr-4 py-3.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white placeholder-slate-400 text-sm" 
+                            placeholder="••••••••">
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button type="submit" class="w-full bg-accent hover:bg-[#b886b8] text-white font-bold py-4 rounded-xl transition-all shadow-lg shadow-accent/20 flex items-center justify-center group">
+                        <span>Login</span>
+                        <i class="fas fa-arrow-right ml-2 group-hover:translate-x-1 transition-transform"></i>
+                    </button>
+                </div>
+            </form>
+
+            <div class="px-8 pb-8 text-center">
+                <p class="text-slate-400 text-[10px] uppercase tracking-tighter">
+                    Authorized Access Only &bull; EASM Operator Console
+                </p>
+            </div>
+        </div>
+
+        <p class="text-center mt-8 text-slate-500 dark:text-slate-400 text-xs">
+            &copy; 2025 <span class="font-bold">a Final Project Thesis</span>.
+        </p>
+    </main>
+
+    
+
+    <script>
+        // INIT THEME
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+
+            if (savedTheme === 'dark') {
+                html.classList.add('dark');
+                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
+            } else {
+                html.classList.remove('dark');
+                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
+            }
+        }
+
+        // TOGGLE LOGIC
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
+                localStorage.setItem('theme', 'light');
+            } else {
+                html.classList.add('dark');
+                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // Jalankan saat load
+        initTheme();
+        document.addEventListener('DOMContentLoaded', initTheme);
+    </script>
+</body>
+</html>

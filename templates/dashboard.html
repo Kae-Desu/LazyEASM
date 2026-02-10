@@ -1,0 +1,450 @@
+<!DOCTYPE html>
+<html lang="en" class="light" id="html-tag">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sebuah skripsi</title>
+    
+    <link rel="icon" href="/static/icons/light-icon.png" type="image/png">
+    <script>
+        // BLOCKING SCRIPT: Harus di paling atas
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.classList.add(savedTheme);
+            // Hapus class satunya untuk jaga-jaga
+            document.documentElement.classList.remove(savedTheme === 'dark' ? 'light' : 'dark');
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'lazy-light': '#EAEAEA',
+                        'lazy-dark': '#3F3F3F',
+                        'dark-card': '#2F2F2F', 
+                        accent: '#CC9ACC',
+                        secondary: '#9AC3CC',
+                        border: '#D1D1D1',
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+
+    <style>
+        :root {
+            --lazy-light: #EAEAEA;
+            --lazy-dark: #3F3F3F;
+        }
+
+        /* Memaksa background sedari awal */
+        html.dark { background-color: var(--lazy-dark) !important; }
+        html.light { background-color: var(--lazy-light) !important; }
+
+        /* Sembunyikan body sejenak sampai class terpasang (optional tapi ampuh) */
+        html:not(.dark):not(.light) body {
+            opacity: 0;
+        }
+        .glass { backdrop-filter: blur(12px); }
+        /* Navbar Glass Effect - Menyesuaikan Signature Color */
+        .light .glass { background: rgba(63, 63, 63, 0.95); }
+        .dark .glass { background: rgba(47, 47, 47, 0.95); }
+        
+        .card-glow:hover { box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
+        body { transition: background-color 0.3s ease; }
+        /* Menghapus animasi putar saat baru load agar tidak pusing */
+        .no-transition {
+            transition: none !important;
+        }
+    </style>
+</head>
+<body class="bg-lazy-light dark:bg-lazy-dark text-slate-800 dark:text-slate-100 min-h-screen font-sans">
+
+    <nav class="fixed top-0 w-full z-50 glass border-b border-white/10">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-accent p-1.5 rounded-xl w-10 h-10 flex items-center justify-center overflow-hidden shadow-lg shadow-accent/20">
+                    <img src="../static/images/lazyeasm-dark.png" alt="LazyEASM Dark" class="dark:hidden w-full h-full object-contain">
+                    <img src="../static/images/lazyeasm-light.png" alt="LazyEASM Light" class="hidden dark:block w-full h-full object-contain">
+                </div>
+                <span class="text-xl font-bold tracking-tight text-white">LazyEasm<span class="text-secondary">.</span></span>
+            </div>
+            
+            
+            <div class="flex items-center space-x-4">
+                <div class="relative group">
+                    <button onclick="cycleReload()" id="reload-btn" class="w-10 h-10 flex flex-col items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10 relative">
+                        <i class="fas fa-sync-alt text-[10px]" id="reload-icon"></i>
+                        <span id="reload-label" class="text-[8px] font-bold mt-0.5">OFF</span>
+                        
+                        <span id="reload-indicator" class="absolute -top-1 -right-1 w-3 h-3 bg-secondary rounded-full border-2 border-lazy-dark hidden animate-pulse"></span>
+                    </button>
+                    
+                    <div class="absolute top-12 left-1/2 -translate-x-1/2 bg-lazy-dark text-[10px] text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-white/10">
+                        Set Auto-Reload Interval
+                    </div>
+                </div>
+
+                <button onclick="toggleDarkMode()" class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10">
+                    <i id="theme-icon" class="fas fa-moon"></i>
+                </button>
+
+                <a href="/logout" 
+                    onclick="event.preventDefault(); openConfirmModal('logout')" 
+                    class="text-sm font-semibold bg-red-500/10 text-red-400 px-4 py-2 rounded-full border border-red-500/20 hover:bg-red-500 hover:text-white transition-all">
+                    <i class="fas fa-power-off mr-2"></i>Logout
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 pt-24 pb-12">
+        
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                <div class="mb-6 p-4 rounded-xl border flex items-center space-x-3 {% if category == 'success' %} bg-emerald-100 border-emerald-200 text-emerald-700 {% else %} bg-amber-100 border-amber-200 text-amber-700 {% endif %}">
+                    <i class="fas fa-circle-info"></i>
+                    <p class="flex-1 font-medium text-sm">{{ message }}</p>
+                    <button onclick="this.parentElement.remove()" class="opacity-50 hover:opacity-100"><i class="fas fa-xmark"></i></button>
+                </div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="grid lg:grid-cols-12 gap-6">
+            <div class="lg:col-span-5 space-y-6">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden card-glow transition-all">
+                    <div class="px-6 py-4 border-b border-border dark:border-white/5 bg-lazy-dark flex items-center justify-between text-white">
+                        <h2 class="font-bold flex items-center text-accent uppercase text-xs tracking-widest">
+                            <i class="fas fa-sliders-h mr-3"></i>Configuration
+                        </h2>
+                    </div>
+                    <form action="/save_config" method="POST" class="p-6 space-y-4 text-sm">
+                        <div class="space-y-1.5">
+                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord Webhook</label>
+                            <input type="text" name="discord_webhook" value="{{ config['discord_webhook'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                        </div>
+                        <div class="space-y-1.5">
+                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord UID</label>
+                            <input type="text" name="discord_uid" value="{{ config['discord_uid'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Vulners Key</label>
+                                <input type="password" name="vulners_key" value="{{ config['vulners_key'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Gemini Key</label>
+                                <input type="password" name="gemini_key" value="{{ config['gemini_key'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                            </div>
+                        </div>
+                        <button type="button" onclick="openConfirmModal('save')" class="w-full bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:opacity-90">
+                            <i class="fas fa-save mr-2"></i>Save Engine Config
+                        </button>
+                    </form>
+                </div>
+            </div>
+
+            <div class="lg:col-span-7">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden h-full flex flex-col card-glow transition-all">
+                    <div class="px-6 py-4 border-b border-border dark:border-white/5 bg-lazy-dark flex items-center justify-between text-white">
+                        <h2 class="font-bold flex items-center text-secondary uppercase text-xs tracking-widest">
+                            <i class="fas fa-crosshairs mr-3"></i>Target Assets
+                        </h2>
+                    </div>
+                    <form action="/process_assets" method="POST" class="p-6 flex-grow flex flex-col" onsubmit="showLoading()">
+                        <div class="flex-grow space-y-1.5">
+                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Asset Queue (Newline separated)</label>
+                            <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-64 resize-none dark:text-white" placeholder="example.com"></textarea>
+                        </div>
+                        <button type="button" onclick="openConfirmModal('scan')" class="mt-4 w-full bg-secondary text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:opacity-90">
+                            <i class="fas fa-bolt mr-2 text-white"></i>Start Scanning Process
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+        <div class="mt-10">
+            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
+                <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
+            </h3>
+            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl">
+                <table class="min-w-full text-sm text-left">
+                    <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
+                        <tr>
+                            <th class="px-6 py-4 w-12 text-center">Status</th>
+                            <th class="px-6 py-4">Target Name</th>
+                            <th class="px-6 py-4">Threat Level</th>
+                            <th class="px-6 py-4 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="main-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
+                        {% include 'table_partial.html' %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <div id="loadingOverlay" class="fixed inset-0 bg-lazy-dark/95 backdrop-blur-sm z-[100] hidden flex-col items-center justify-center">
+        <div class="relative">
+            <div class="w-20 h-20 border-4 border-secondary/20 border-t-secondary rounded-full animate-spin"></div>
+            <i class="fas fa-satellite absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-secondary text-xl"></i>
+        </div>
+        <h2 class="mt-6 text-xl font-bold tracking-widest uppercase text-white animate-pulse">Scanning Engine Active</h2>
+    </div>
+
+    <div id="actionModal" class="fixed inset-0 z-[200] hidden items-center justify-center p-4">
+        <div class="absolute inset-0 bg-brand/60 dark:bg-black/80 backdrop-blur-sm" onclick="closeActionModal()"></div>
+        
+        <div class="relative bg-white dark:bg-dark-card w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl border border-border dark:border-white/5 transform transition-all scale-95 opacity-0" id="actionModalContent">
+            <div class="p-8 text-center">
+                <div id="modalIconContainer" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    <i id="modalIcon" class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 id="modalTitle" class="text-xl font-bold text-slate-800 dark:text-white">Confirmation</h3>
+                <p id="modalDesc" class="text-slate-500 dark:text-slate-400 text-sm mt-2 leading-relaxed">
+                    Are you sure you want to perform this action?
+                </p>
+            </div>
+            
+            <div class="flex border-t border-border dark:border-white/5">
+                <button onclick="closeActionModal()" class="flex-1 py-4 text-sm font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-brand transition-colors border-r border-border dark:border-white/5">
+                    Cancel
+                </button>
+                <button id="modalConfirmBtn" class="flex-1 py-4 text-sm font-bold transition-colors text-center">
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- 1. THEME MANAGEMENT ---
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            if (savedTheme === 'dark') {
+                html.classList.add('dark');
+                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
+            } else {
+                html.classList.remove('dark');
+                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
+            }
+        }
+
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
+                localStorage.setItem('theme', 'light');
+            } else {
+                html.classList.add('dark');
+                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        // --- 2. UI LOADING & MODALS ---
+        function showLoading() {
+            const l = document.getElementById('loadingOverlay');
+            l.classList.remove('hidden'); l.classList.add('flex');
+        }
+
+        let currentActionCallback = null;
+
+        function openConfirmModal(type, extraData = null) {
+            const modal = document.getElementById('actionModal');
+            const content = document.getElementById('actionModalContent');
+            const iconCont = document.getElementById('modalIconContainer');
+            const icon = document.getElementById('modalIcon');
+            const title = document.getElementById('modalTitle');
+            const desc = document.getElementById('modalDesc');
+            const confirmBtn = document.getElementById('modalConfirmBtn');
+
+            iconCont.className = "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl ";
+            confirmBtn.className = "flex-1 py-4 text-sm font-bold transition-colors text-center ";
+
+            const configs = {
+                'save': {
+                    icon: 'fa-save',
+                    color: 'bg-emerald-500/10 text-emerald-500',
+                    btn: 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10',
+                    title: 'Update Configuration?',
+                    desc: 'This will modify the scanning engine behavior. Ensure all keys are valid.',
+                    action: () => document.querySelector('form[action="/save_config"]').submit()
+                },
+                'scan': {
+                    icon: 'fa-bolt',
+                    color: 'bg-secondary/10 text-secondary',
+                    btn: 'text-secondary hover:bg-blue-50 dark:hover:bg-secondary/10',
+                    title: 'Initiate Scanning?',
+                    desc: 'Process assets now? This might generate significant network traffic.',
+                    action: () => { showLoading(); document.querySelector('form[action="/process_assets"]').submit(); }
+                },
+                'delete': {
+                    icon: 'fa-trash-alt',
+                    color: 'bg-red-500/10 text-red-500',
+                    btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
+                    title: 'Remove Asset?',
+                    desc: 'Move this asset to trash? This action can be reversed from the Trash menu.',
+                    action: () => { console.log("Deleting asset:", extraData); closeActionModal(); }
+                },
+                'logout': {
+                    icon: 'fa-sign-out-alt',
+                    color: 'bg-brand/10 text-brand dark:text-accent',
+                    btn: 'text-brand dark:text-accent hover:bg-slate-50 dark:hover:bg-brand/30',
+                    title: 'End Session?',
+                    desc: 'Are you sure you want to logout from the SecScan operator console?',
+                    action: () => window.location.href = '/logout'
+                }
+            };
+
+            const config = configs[type];
+            icon.className = `fas ${config.icon}`;
+            iconCont.classList.add(...config.color.split(' '));
+            confirmBtn.classList.add(...config.btn.split(' '));
+            title.innerText = config.title;
+            desc.innerText = config.desc;
+            currentActionCallback = config.action;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function closeActionModal() {
+            const modal = document.getElementById('actionModal');
+            const content = document.getElementById('actionModalContent');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 200);
+        }
+
+        document.getElementById('modalConfirmBtn').onclick = () => {
+            if (currentActionCallback) currentActionCallback();
+        };
+
+        // --- 3. TABLE PERSISTENCE LOGIC ---
+        function toggleDetail(rowId, iconId) {
+            const row = document.getElementById(rowId);
+            const icon = document.getElementById(iconId);
+            const isHidden = row.classList.toggle('hidden');
+            icon.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(90deg)';
+
+            let openedRows = JSON.parse(localStorage.getItem('openedRows') || '[]');
+            if (!isHidden) {
+                if (!openedRows.includes(rowId)) openedRows.push(rowId);
+            } else {
+                openedRows = openedRows.filter(id => id !== rowId);
+            }
+            localStorage.setItem('openedRows', JSON.stringify(openedRows));
+        }
+
+        function restoreOpenedRows() {
+            const openedRows = JSON.parse(localStorage.getItem('openedRows') || '[]');
+            openedRows.forEach(rowId => {
+                const row = document.getElementById(rowId);
+                const iconId = rowId.replace('row-', 'icon-');
+                const icon = document.getElementById(iconId);
+
+                if (row && icon) {
+                    row.classList.remove('hidden');
+                    icon.classList.add('no-transition');
+                    icon.style.transform = 'rotate(90deg)';
+                    setTimeout(() => icon.classList.remove('no-transition'), 100);
+                }
+            });
+        }
+
+        // --- 4. AJAX AUTO-RELOAD (ZERO FLASH) ---
+        let reloadInterval;
+        const reloadStates = [
+            { label: 'OFF', value: null },
+            { label: '5S', value: 5000 },
+            { label: '30S', value: 30000 },
+            { label: '60S', value: 60000 }
+        ];
+
+        async function refreshTableData() {
+            // Jangan refresh jika user sedang membuka modal konfirmasi
+            if (!document.getElementById('actionModal').classList.contains('hidden')) return;
+
+            try {
+                const response = await fetch('/update_table');
+                if (!response.ok) throw new Error('Refresh Failed');
+                
+                const html = await response.text();
+                
+                // Ganti isi tbody saja (pastikan ID ini ada di HTML kamu)
+                const tableBody = document.getElementById('main-table-body');
+                if (tableBody) {
+                    tableBody.innerHTML = html;
+                    // Buka kembali baris yang tadi sedang dibuka
+                    restoreOpenedRows();
+                }
+            } catch (err) {
+                console.error('Fetch error:', err);
+            }
+        }
+
+        function initReload() {
+            const savedStateIndex = localStorage.getItem('reloadStateIndex') || 0;
+            applyReload(parseInt(savedStateIndex));
+        }
+
+        function cycleReload() {
+            let currentIndex = parseInt(localStorage.getItem('reloadStateIndex') || 0);
+            let nextIndex = (currentIndex + 1) % reloadStates.length;
+            localStorage.setItem('reloadStateIndex', nextIndex);
+            applyReload(nextIndex);
+        }
+
+        function applyReload(index) {
+            const state = reloadStates[index];
+            const label = document.getElementById('reload-label');
+            const indicator = document.getElementById('reload-indicator');
+            const icon = document.getElementById('reload-icon');
+
+            label.innerText = state.label;
+            if (reloadInterval) clearInterval(reloadInterval);
+
+            if (state.value) {
+                indicator.classList.remove('hidden');
+                icon.classList.add('fa-spin');
+                // Ganti location.reload dengan refreshTableData
+                reloadInterval = setInterval(refreshTableData, state.value);
+            } else {
+                indicator.classList.add('hidden');
+                icon.classList.remove('fa-spin');
+            }
+        }
+
+        // --- 5. INITIALIZATION ---
+        document.addEventListener('DOMContentLoaded', () => {
+            initTheme();
+            initReload();
+            restoreOpenedRows();
+        });
+    </script>
+</body>
+</html>
