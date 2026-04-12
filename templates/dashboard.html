@@ -101,8 +101,10 @@
 
                 <a href="/logout" 
                     onclick="event.preventDefault(); openConfirmModal('logout')" 
-                    class="text-sm font-semibold bg-red-500/10 text-red-400 px-4 py-2 rounded-full border border-red-500/20 hover:bg-red-500 hover:text-white transition-all">
-                    <i class="fas fa-power-off mr-2"></i>Logout
+                    title="Logout"
+                    class="w-10 h-10 flex items-center justify-center rounded-full bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all md:w-auto md:px-4 md:py-2">
+                    <i class="fas fa-power-off md:mr-2"></i>
+                    <span class="hidden md:inline">Logout</span>
                 </a>
             </div>
         </div>
@@ -113,7 +115,7 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}
-                <div class="mb-6 p-4 rounded-xl border flex items-center space-x-3 {% if category == 'success' %} bg-emerald-100 border-emerald-200 text-emerald-700 {% else %} bg-amber-100 border-amber-200 text-amber-700 {% endif %}">
+                <div class="mb-6 p-4 rounded-xl border flex items-center space-x-3 {% if category == 'success' %} bg-emerald-100 border-emerald-200 text-emerald-700 {% elif category == 'error' %} bg-red-100 border-red-200 text-red-700 {% elif category == 'warning' %} bg-amber-100 border-amber-200 text-amber-700 {% else %} bg-blue-100 border-blue-200 text-blue-700 {% endif %}">
                     <i class="fas fa-circle-info"></i>
                     <p class="flex-1 font-medium text-sm">{{ message }}</p>
                     <button onclick="this.parentElement.remove()" class="opacity-50 hover:opacity-100"><i class="fas fa-xmark"></i></button>
@@ -131,24 +133,62 @@
                         </h2>
                     </div>
                     <form action="/save_config" method="POST" class="p-6 space-y-4 text-sm">
+                        <input type="hidden" name="CLEAR_DISCORD_WEBHOOK_URL" value="0" id="clear_DISCORD_WEBHOOK_URL">
+                        <input type="hidden" name="CLEAR_DISCORD_USER_ID" value="0" id="clear_DISCORD_USER_ID">
+                        <input type="hidden" name="CLEAR_SECURITYTRAILS_API_KEY" value="0" id="clear_SECURITYTRAILS_API_KEY">
+                        <input type="hidden" name="CLEAR_VULNERS_API_KEY" value="0" id="clear_VULNERS_API_KEY">
+                        <input type="hidden" name="CLEAR_GEMINI_API_KEY" value="0" id="clear_GEMINI_API_KEY">
+                        
                         <div class="space-y-1.5">
-                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord Webhook</label>
-                            <input type="text" name="discord_webhook" value="{{ config['discord_webhook'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord Webhook URL</label>
+                            <div class="relative">
+                                <input type="text" name="DISCORD_WEBHOOK_URL" value="" placeholder="{{ config.DISCORD_WEBHOOK_URL.masked if config.DISCORD_WEBHOOK_URL.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                <button type="button" onclick="openConfirmModal('clear_field', 'DISCORD_WEBHOOK_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="space-y-1.5">
-                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord UID</label>
-                            <input type="text" name="discord_uid" value="{{ config['discord_uid'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord User ID (optional)</label>
+                            <div class="relative">
+                                <input type="text" name="DISCORD_USER_ID" value="" placeholder="{{ config.DISCORD_USER_ID.masked if config.DISCORD_USER_ID.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                <button type="button" onclick="openConfirmModal('clear_field', 'DISCORD_USER_ID')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </div>
                         </div>
                         <div class="grid grid-cols-2 gap-4">
                             <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Vulners Key</label>
-                                <input type="password" name="vulners_key" value="{{ config['vulners_key'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">SecurityTrails Key</label>
+                                <div class="relative">
+                                    <input type="password" name="SECURITYTRAILS_API_KEY" value="" placeholder="{{ config.SECURITYTRAILS_API_KEY.masked if config.SECURITYTRAILS_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SECURITYTRAILS_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
                             </div>
                             <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Gemini Key</label>
-                                <input type="password" name="gemini_key" value="{{ config['gemini_key'] }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Vulners Key</label>
+                                <div class="relative">
+                                    <input type="password" name="VULNERS_API_KEY" value="" placeholder="{{ config.VULNERS_API_KEY.masked if config.VULNERS_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'VULNERS_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
                             </div>
                         </div>
+                        <div class="space-y-1.5">
+                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Gemini API Key</label>
+                            <div class="relative">
+                                <input type="password" name="GEMINI_API_KEY" value="" placeholder="{{ config.GEMINI_API_KEY.masked if config.GEMINI_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                <button type="button" onclick="openConfirmModal('clear_field', 'GEMINI_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </div>
+                        </div>
+                        <button type="button" onclick="testWebhook()" class="w-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 rounded-xl transition-all border border-emerald-500/20 hover:bg-emerald-500/20">
+                            <i class="fas fa-paper-plane mr-2"></i>Test Discord Webhook
+                        </button>
                         <button type="button" onclick="openConfirmModal('save')" class="w-full bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:opacity-90">
                             <i class="fas fa-save mr-2"></i>Save Engine Config
                         </button>
@@ -179,13 +219,14 @@
             <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
                 <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
             </h3>
-            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl">
+            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-x-auto shadow-2xl">
                 <table class="min-w-full text-sm text-left">
                     <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
                         <tr>
-                            <th class="px-6 py-4 w-12 text-center">Status</th>
+                            <th class="px-6 py-4 w-12 text-center"></th>
                             <th class="px-6 py-4">Target Name</th>
-                            <th class="px-6 py-4">Threat Level</th>
+                            <th class="px-6 py-4">Status</th>
+                            <th class="px-6 py-4">SSL Expiry</th>
                             <th class="px-6 py-4 text-right">Action</th>
                         </tr>
                     </thead>
@@ -230,6 +271,8 @@
         </div>
     </div>
 
+    <div id="toastContainer" class="fixed top-20 left-1/2 -translate-x-1/2 z-[300] space-y-2 pointer-events-none"></div>
+
     <script>
         // --- 1. THEME MANAGEMENT ---
         function initTheme() {
@@ -263,6 +306,14 @@
         function showLoading() {
             const l = document.getElementById('loadingOverlay');
             l.classList.remove('hidden'); l.classList.add('flex');
+        }
+
+        function testWebhook() {
+            const form = document.createElement('form');
+            form.method = 'POST';
+            form.action = '/test_webhook';
+            document.body.appendChild(form);
+            form.submit();
         }
 
         let currentActionCallback = null;
@@ -304,6 +355,25 @@
                     desc: 'Move this asset to trash? This action can be reversed from the Trash menu.',
                     action: () => { console.log("Deleting asset:", extraData); closeActionModal(); }
                 },
+                'clear_field': {
+                    icon: 'fa-trash-alt',
+                    color: 'bg-red-500/10 text-red-500',
+                    btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
+                    title: 'Delete Configuration?',
+                    desc: 'This will immediately delete this configuration. You can always add it again later.',
+                    action: () => {
+                        const hiddenField = document.getElementById(`clear_${extraData}`);
+                        const input = document.querySelector(`input[name="${extraData}"]`);
+                        
+                        if (hiddenField && input) {
+                            hiddenField.value = '1';
+                            input.value = '';
+                        }
+                        
+                        closeActionModal();
+                        document.querySelector('form[action="/save_config"]').submit();
+                    }
+                },
                 'logout': {
                     icon: 'fa-sign-out-alt',
                     color: 'bg-brand/10 text-brand dark:text-accent',
@@ -311,6 +381,17 @@
                     title: 'End Session?',
                     desc: 'Are you sure you want to logout from the SecScan operator console?',
                     action: () => window.location.href = '/logout'
+                },
+                'regenerate_ai': {
+                    icon: 'fa-sync-alt',
+                    color: 'bg-accent/10 text-accent',
+                    btn: 'text-accent hover:bg-accent/10',
+                    title: 'Regenerate AI Analysis?',
+                    desc: 'This will overwrite the current recommendation with a new one. Continue?',
+                    action: () => {
+                        queueGenerateAI(extraData.vulnId, extraData.cveId);
+                        closeActionModal();
+                    }
                 }
             };
 
@@ -374,6 +455,109 @@
                     setTimeout(() => icon.classList.remove('no-transition'), 100);
                 }
             });
+        }
+
+        const aiGenerationQueue = [];
+        let aiGenerationInProgress = false;
+
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            const bgColor = {
+                'success': 'bg-emerald-500',
+                'error': 'bg-red-500',
+                'warning': 'bg-amber-500',
+                'info': 'bg-blue-500'
+            }[type] || 'bg-blue-500';
+            
+            toast.className = `${bgColor} text-white px-6 py-3 rounded-xl shadow-lg font-semibold text-sm pointer-events-auto transform transition-all duration-300 translate-y-[-20px] opacity-0`;
+            toast.innerText = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-y-[-20px]', 'opacity-0');
+            }, 10);
+            
+            setTimeout(() => {
+                toast.classList.add('translate-y-[-20px]', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, 4000);
+        }
+
+        function queueGenerateAI(vulnId, cveId) {
+            const btn = document.getElementById(`generate-btn-${vulnId}`);
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generating...';
+            }
+            
+            aiGenerationQueue.push({ vulnId, cveId });
+            showToast(`Queued (position ${aiGenerationQueue.length})`, 'info');
+            processAIQueue();
+        }
+
+        function processAIQueue() {
+            if (aiGenerationInProgress || aiGenerationQueue.length === 0) return;
+            
+            aiGenerationInProgress = true;
+            const request = aiGenerationQueue.shift();
+            
+            generateAIInternal(request.vulnId, request.cveId, () => {
+                aiGenerationInProgress = false;
+                if (aiGenerationQueue.length > 0) processAIQueue();
+            });
+        }
+
+        async function generateAIInternal(vulnId, cveId, callback) {
+            try {
+                const response = await fetch('/generate_ai', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ vuln_id: vulnId })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok || data.error) {
+                    showToast(data.error || 'AI generation failed. Check GEMINI_API_KEY.', 'error');
+                    const btn = document.getElementById(`generate-btn-${vulnId}`);
+                    if (btn) {
+                        btn.disabled = false;
+                        btn.innerHTML = '<i class="fas fa-magic mr-1"></i>Generate AI Analysis ✨';
+                    }
+                    return;
+                }
+                
+                const recoDiv = document.getElementById(`reco-${vulnId}`);
+                if (recoDiv) {
+                    recoDiv.innerHTML = `
+                        <div class="flex items-center space-x-2 mb-2">
+                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                            <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">AI Analysis</span>
+                        </div>
+                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">${data.recommendation}</p>
+                        <button onclick="event.stopPropagation(); showRegenerateConfirm(${vulnId}, '${cveId}')" class="mt-3 text-[10px] text-accent hover:text-secondary font-bold transition-colors">
+                            <i class="fas fa-sync-alt mr-1"></i>Regenerate Analysis
+                        </button>
+                    `;
+                }
+                
+                showToast('AI analysis generated!', 'success');
+            } catch (err) {
+                showToast('Network error. Please try again.', 'error');
+                const btn = document.getElementById(`generate-btn-${vulnId}`);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fas fa-magic mr-1"></i>Generate AI Analysis ✨';
+                }
+            }
+            
+            if (callback) callback();
+        }
+
+        function showRegenerateConfirm(vulnId, cveId) {
+            openConfirmModal('regenerate_ai', { vulnId, cveId });
         }
 
         // --- 4. AJAX AUTO-RELOAD (ZERO FLASH) ---

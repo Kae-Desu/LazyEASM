@@ -1,8 +1,58 @@
-from google import genai
+"""
+Module: AskAI.py
+Purpose: AI-powered recommendations using Google Gemini
+"""
 
-client = genai.Client(api_key="GEMINIKEY")
+import os
+import sys
 
-def send_message(cve_id, tech_version, cve_description, nama_aset):
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from utils.config import get_env
+
+try:
+    from google import genai
+    GEMINI_AVAILABLE = True
+except ImportError:
+    GEMINI_AVAILABLE = False
+
+_api_key = get_env('GEMINI_API_KEY')
+_client = None
+
+def _get_client():
+    """Get or create Gemini client."""
+    global _client
+    
+    if not GEMINI_AVAILABLE:
+        return None
+    
+    if not _api_key:
+        return None
+    
+    if _client is None:
+        _client = genai.Client(api_key=_api_key)
+    
+    return _client
+
+
+def send_message(cve_id: str, tech_version: str, cve_description: str, asset_name: str):
+    """
+    Generate AI-powered vulnerability recommendation.
+    
+    Args:
+        cve_id: CVE identifier
+        tech_version: Technology version
+        cve_description: CVE description
+        asset_name: Asset name
+    
+    Returns:
+        Recommendation text or None if error
+    """
+    client = _get_client()
+    
+    if not client:
+        return None
+    
     prompt = f"""
     Acting as a Cyber Security Assistant.
     
@@ -10,7 +60,7 @@ def send_message(cve_id, tech_version, cve_description, nama_aset):
     Your task is to REWRITE it for a non-technical user in Indonesian and suggest fixes.
 
     --- SOURCE DATA ---
-    Asset Name: {nama_aset}
+    Asset Name: {asset_name}
     User's Current Version: {tech_version}
     CVE ID: {cve_id}
     Raw Description: "{cve_description}"
@@ -26,7 +76,7 @@ def send_message(cve_id, tech_version, cve_description, nama_aset):
        - **Step 2**: Provide one additional mitigation step (e.g., check config, firewall, or monitor logs).
 
     STRICT OUTPUT FORMAT (Pure Text):
-    Pemberitahuan, Telah terdeteksi kerentanan pada aset {nama_aset} berikut adalah detailnya.
+    Pemberitahuan, Telah terdeteksi kerentanan pada aset {asset_name} berikut adalah detailnya.
     CVE ID = {cve_id}
     Deskripsi Singkat = [Gemini writes the summary here]
 
@@ -37,19 +87,30 @@ def send_message(cve_id, tech_version, cve_description, nama_aset):
     
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash-preview-09-2025",
+            model="gemini-2.5-flash",
             contents=prompt
         )
         return response.text
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"Gemini API error: {e}")
+        return None
 
-def compare_cve_details(desc_nvd, desc_vulners):
-    # generation_config = genai.types.GenerateContentConfig(
-    #     temperature=0.2,
-    #     top_p=1,
-    #     max_output_tokens=10,
-    # )
+
+def compare_cve_details(desc_nvd: str, desc_vulners: str):
+    """
+    Compare two CVE descriptions for semantic match.
+    
+    Args:
+        desc_nvd: NVD description
+        desc_vulners: Vulners description
+    
+    Returns:
+        True if match found, False otherwise
+    """
+    client = _get_client()
+    
+    if not client:
+        return False
 
     prompt = f"""
     Role: Senior Security Auditor.
@@ -77,13 +138,33 @@ def compare_cve_details(desc_nvd, desc_vulners):
 
     try:
         response = client.models.generate_content(
-            model="gemini-2.5-flash-preview-09-2025",
+            model="gemini-2.5-flash",
             contents=prompt
         )
         
-        if "true" in response:
+        if response and "true" in response.text.lower():
             return True
         return False
     except Exception as e:
-        print(f"Error Gemini: {e}")
-        return False # Fail-safe
+        print(f"Gemini API error: {e}")
+        return False
+
+
+if __name__ == '__main__':
+    print("Testing AskAI...")
+    print(f"Gemini API Key configured: {'Yes' if _api_key else 'No'}")
+    print(f"Gemini available: {'Yes' if GEMINI_AVAILABLE else 'No'}")
+    
+    if _api_key and GEMINI_AVAILABLE:
+        print("\nTesting send_message...")
+        result = send_message(
+            cve_id="CVE-2023-1234",
+            tech_version="nginx 1.18.0",
+            cve_description="A vulnerability in nginx allows remote attackers to cause a denial of service.",
+            asset_name="test-server"
+        )
+        if result:
+            print("Response received:")
+            print(result[:500])
+        else:
+            print("No response received")

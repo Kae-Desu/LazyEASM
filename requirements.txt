@@ -1,0 +1,8 @@
+flask
+pyjwt
+requests
+tldextract
+dnspython>=2.4.0
+python-dotenv
+python-Wappalyzer
+setuptools<70
