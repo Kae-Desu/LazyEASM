@@ -68,7 +68,7 @@ def mask_discord_webhook(webhook_url: str) -> str:
     """
     Mask Discord webhook URL for privacy.
     
-    Input:  https://discord.com/api/webhooks/1449721652383584307/_3XWrZYY...mTXG
+    Input:  https://discord.com/api/webhooks/123456789/abc123...
     Output: discord.com/.../1449...4307/...mTXG
     
     Returns empty string if input is empty or invalid format.

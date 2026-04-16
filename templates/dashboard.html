@@ -50,11 +50,7 @@
         /* Memaksa background sedari awal */
         html.dark { background-color: var(--lazy-dark) !important; }
         html.light { background-color: var(--lazy-light) !important; }
-
-        /* Sembunyikan body sejenak sampai class terpasang (optional tapi ampuh) */
-        html:not(.dark):not(.light) body {
-            opacity: 0;
-        }
+        html:not(.dark):not(.light) { background-color: var(--lazy-light) !important; }
         .glass { backdrop-filter: blur(12px); }
         /* Navbar Glass Effect - Menyesuaikan Signature Color */
         .light .glass { background: rgba(63, 63, 63, 0.95); }
@@ -208,8 +204,17 @@
                             <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Asset Queue (Newline separated)</label>
                             <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-64 resize-none dark:text-white" placeholder="example.com"></textarea>
                         </div>
-                        <button type="button" onclick="openConfirmModal('scan')" class="mt-4 w-full bg-secondary text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:opacity-90">
-                            <i class="fas fa-bolt mr-2 text-white"></i>Start Scanning Process
+                        <button type="button" 
+                                onclick="openConfirmModal('scan')" 
+                                id="scanButton"
+                                {% if queue_active %}disabled{% endif %}
+                                class="mt-4 w-full font-bold py-3 rounded-xl transition-all shadow-lg 
+                                       {% if queue_active %}bg-gray-400 text-gray-200 cursor-not-allowed{% else %}bg-secondary text-white hover:opacity-90{% endif %}">
+                            {% if queue_active %}
+                                <i class="fas fa-spinner fa-spin mr-2"></i>Processing {{ queue_status.running }} of {{ queue_status.total }}...
+                            {% else %}
+                                <i class="fas fa-bolt mr-2 text-white"></i>Start Scanning Process
+                            {% endif %}
                         </button>
                     </form>
                 </div>
@@ -353,7 +358,20 @@
                     btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
                     title: 'Remove Asset?',
                     desc: 'Move this asset to trash? This action can be reversed from the Trash menu.',
-                    action: () => { console.log("Deleting asset:", extraData); closeActionModal(); }
+                    action: () => {
+                        fetch(`/delete_asset/${extraData.type}/${extraData.id}`, { method: 'DELETE' })
+                            .then(res => res.json())
+                            .then(data => {
+                                if (data.success) {
+                                    showToast('Asset deleted', 'success');
+                                    setTimeout(() => location.reload(), 500);
+                                } else {
+                                    showToast(data.error || 'Delete failed', 'error');
+                                }
+                            })
+                            .catch(() => showToast('Request failed', 'error'));
+                        closeActionModal();
+                    }
                 },
                 'clear_field': {
                     icon: 'fa-trash-alt',
@@ -457,10 +475,26 @@
             });
         }
 
+        function toggleTable(type, assetId, totalCount) {
+            const btn = document.getElementById(`${type}-btn-${assetId}`);
+            const extraRows = document.querySelectorAll(`.${type}-extra-${assetId}`);
+            const isExpanded = btn.dataset.expanded === 'true';
+            
+            if (isExpanded) {
+                extraRows.forEach(row => row.classList.add('hidden'));
+                btn.innerHTML = `<i class="fas fa-chevron-down mr-1"></i>Show ${totalCount - 5} more`;
+                btn.dataset.expanded = 'false';
+            } else {
+                extraRows.forEach(row => row.classList.remove('hidden'));
+                btn.innerHTML = `<i class="fas fa-chevron-up mr-1"></i>Show less`;
+                btn.dataset.expanded = 'true';
+            }
+        }
+
         const aiGenerationQueue = [];
         let aiGenerationInProgress = false;
 
-        function showToast(message, type = 'info') {
+        function showToast(message, type = 'info', duration = 4000) {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
             
@@ -482,7 +516,7 @@
             setTimeout(() => {
                 toast.classList.add('translate-y-[-20px]', 'opacity-0');
                 setTimeout(() => toast.remove(), 300);
-            }, 4000);
+            }, duration);
         }
 
         function queueGenerateAI(vulnId, cveId) {

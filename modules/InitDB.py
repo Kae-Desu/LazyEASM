@@ -64,6 +64,7 @@ def init_db():
         subdomain_name TEXT UNIQUE NOT NULL,
         first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
         last_seen TEXT,
+        last_scanned TEXT,
         status TEXT DEFAULT 'up',
         FOREIGN KEY(dom_id) REFERENCES domain_asset(dom_id) ON DELETE SET NULL
     )
@@ -280,6 +281,14 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_status ON scan_queue(status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_cycle ON scan_queue(cycle)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_target_type ON scan_queue(target_type)')
+
+    # ============================================
+    # MIGRATIONS (for existing databases)
+    # ============================================
+    cursor.execute("PRAGMA table_info(subdomain_asset)")
+    subdomain_columns = [col[1] for col in cursor.fetchall()]
+    if 'last_scanned' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_scanned TEXT")
 
     conn.commit()
     conn.close()

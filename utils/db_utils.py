@@ -439,7 +439,8 @@ def get_http_targets() -> list:
         conn.close()
 
 
-def upsert_http_service(host: str, ip_id: int, port_num: int, 
+def upsert_http_service(host: str, port_num: int,
+                        ip_id: int = None,
                         is_https: int = 0, title: str = None, 
                         web_server: str = None) -> int:
     """
@@ -447,8 +448,8 @@ def upsert_http_service(host: str, ip_id: int, port_num: int,
     
     Args:
         host: Domain/subdomain name
-        ip_id: IP ID from database
         port_num: Port number
+        ip_id: IP ID from database (optional, None for Cloudflare/CDN sites)
         is_https: 1 for HTTPS, 0 for HTTP
         title: Page title
         web_server: Web server software
@@ -915,7 +916,11 @@ def get_all_assets_for_display() -> list:
                 d.domain_name as name,
                 'domain' as type,
                 d.status,
-                CASE WHEN COUNT(p.port_id) > 0 THEN 1 ELSE 0 END as is_scanned
+                d.last_scanned,
+                CASE WHEN 
+                    COUNT(p.port_id) > 0 
+                    OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = d.domain_name)
+                THEN 1 ELSE 0 END as is_scanned
             FROM domain_asset d
             LEFT JOIN domain_ip di ON di.dom_id = d.dom_id
             LEFT JOIN ip_asset i ON i.ip_id = di.ip_id
@@ -930,7 +935,8 @@ def get_all_assets_for_display() -> list:
             asset['cert'] = _get_cert_expiry(cursor, asset['name'])
             asset['technologies'] = _get_technologies_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['cves'] = _get_cves_for_host(cursor, asset['name']) if asset['is_scanned'] else []
-            asset['directories'] = _get_placeholder_directories() if asset['is_scanned'] else []
+            asset['findings'] = _get_ports_for_domain(cursor, asset['id']) if asset['is_scanned'] else []
+            asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             assets.append(asset)
         
         cursor.execute('''
@@ -939,7 +945,11 @@ def get_all_assets_for_display() -> list:
                 s.subdomain_name as name,
                 'subdomain' as type,
                 s.status,
-                CASE WHEN COUNT(p.port_id) > 0 THEN 1 ELSE 0 END as is_scanned
+                s.last_scanned,
+                CASE WHEN 
+                    COUNT(p.port_id) > 0 
+                    OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = s.subdomain_name)
+                THEN 1 ELSE 0 END as is_scanned
             FROM subdomain_asset s
             LEFT JOIN subdomain_ip si ON si.sub_id = s.sub_id
             LEFT JOIN ip_asset i ON i.ip_id = si.ip_id
@@ -954,7 +964,8 @@ def get_all_assets_for_display() -> list:
             asset['cert'] = _get_cert_expiry(cursor, asset['name'])
             asset['technologies'] = _get_technologies_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['cves'] = _get_cves_for_host(cursor, asset['name']) if asset['is_scanned'] else []
-            asset['directories'] = _get_placeholder_directories() if asset['is_scanned'] else []
+            asset['findings'] = _get_ports_for_subdomain(cursor, asset['id']) if asset['is_scanned'] else []
+            asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             assets.append(asset)
         
         cursor.execute('''
@@ -963,7 +974,11 @@ def get_all_assets_for_display() -> list:
                 i.ip_value as name,
                 'ip' as type,
                 i.status,
-                CASE WHEN COUNT(p.port_id) > 0 THEN 1 ELSE 0 END as is_scanned
+                i.last_scanned,
+                CASE WHEN 
+                    COUNT(p.port_id) > 0 
+                    OR EXISTS(SELECT 1 FROM http_services h WHERE h.ip_id = i.ip_id)
+                THEN 1 ELSE 0 END as is_scanned
             FROM ip_asset i
             LEFT JOIN ports p ON p.ip_id = i.ip_id
             WHERE i.ip_id NOT IN (
@@ -991,22 +1006,24 @@ def get_all_assets_for_display() -> list:
 def _get_technologies_for_host(cursor, host: str) -> list:
     """
     Get technologies for a hostname (domain or subdomain).
+    Returns one entry per technology per port.
     
     Args:
         cursor: Database cursor
         host: Hostname
     
     Returns:
-        List of {'name': str, 'version': str or None}
+        List of {'name': str, 'version': str or None, 'port': int}
     """
     cursor.execute('''
-        SELECT DISTINCT
+        SELECT 
             t.tech_name as name,
-            t.tech_version as version
+            t.tech_version as version,
+            h.port_num as port
         FROM technologies t
         INNER JOIN http_services h ON h.http_id = t.http_id
         WHERE h.host = ?
-        ORDER BY t.tech_name
+        ORDER BY h.port_num, t.tech_name
     ''', (host,))
     
     techs = []
@@ -1101,18 +1118,107 @@ def _get_ports_for_ip(cursor, ip_id: int) -> list:
     return findings
 
 
-def _get_placeholder_directories() -> list:
+def _get_ports_for_domain(cursor, dom_id: int) -> list:
     """
-    Get placeholder directory data (gobuster not implemented yet).
+    Get ports for all IPs linked to a domain.
+    
+    Args:
+        cursor: Database cursor
+        dom_id: Domain ID
     
     Returns:
-        List of {'path': str, 'status': str}
+        List of {'port': str, 'service': str, 'ip': str}
     """
-    return [
-        {'path': '/admin', 'status': '403'},
-        {'path': '/robots.txt', 'status': '200'},
-        {'path': '/api', 'status': '401'}
-    ]
+    cursor.execute('''
+        SELECT DISTINCT
+            p.port_num,
+            p.service_name,
+            i.ip_value
+        FROM ports p
+        INNER JOIN ip_asset i ON i.ip_id = p.ip_id
+        INNER JOIN domain_ip di ON di.ip_id = i.ip_id
+        WHERE di.dom_id = ?
+        ORDER BY p.port_num
+    ''', (dom_id,))
+    
+    findings = []
+    seen = set()
+    for row in cursor.fetchall():
+        key = (row['port_num'], row['service_name'])
+        if key in seen:
+            continue
+        seen.add(key)
+        findings.append({
+            'port': f"{row['port_num']}/TCP",
+            'service': row['service_name'] or 'unknown'
+        })
+    
+    return findings
+
+
+def _get_ports_for_subdomain(cursor, sub_id: int) -> list:
+    """
+    Get ports for all IPs linked to a subdomain.
+    
+    Args:
+        cursor: Database cursor
+        sub_id: Subdomain ID
+    
+    Returns:
+        List of {'port': str, 'service': str}
+    """
+    cursor.execute('''
+        SELECT DISTINCT
+            p.port_num,
+            p.service_name
+        FROM ports p
+        INNER JOIN ip_asset i ON i.ip_id = p.ip_id
+        INNER JOIN subdomain_ip si ON si.ip_id = i.ip_id
+        WHERE si.sub_id = ?
+        ORDER BY p.port_num
+    ''', (sub_id,))
+    
+    findings = []
+    for row in cursor.fetchall():
+        findings.append({
+            'port': f"{row['port_num']}/TCP",
+            'service': row['service_name'] or 'unknown'
+        })
+    
+    return findings
+
+
+def _get_directories_for_host(cursor, host: str) -> list:
+    """
+    Get directories discovered for a hostname.
+    
+    Args:
+        cursor: Database cursor
+        host: Hostname
+    
+    Returns:
+        List of {'path': str, 'status': int, 'length': int}
+    """
+    cursor.execute('''
+        SELECT DISTINCT
+            d.path,
+            d.status_code as status,
+            d.content_length as length
+        FROM directories d
+        INNER JOIN http_services h ON h.http_id = d.http_id
+        WHERE h.host = ?
+        ORDER BY d.path
+    ''', (host,))
+    
+    dirs = []
+    for row in cursor.fetchall():
+        dirs.append({
+            'path': row['path'],
+            'status': row['status'] or 0,
+            'length': row['length'] or 0
+        })
+    
+    return dirs
 
 
 # ============================================
@@ -1383,6 +1489,39 @@ def update_ip_status(ip_id: int, status: str) -> bool:
         conn.close()
 
 
+def update_asset_last_scanned(asset_id: int, asset_type: str) -> None:
+    """
+    Update last_scanned timestamp for an asset.
+    
+    Args:
+        asset_id: Asset ID (dom_id or sub_id)
+        asset_type: 'domain', 'subdomain', or 'ip'
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        if asset_type == 'domain':
+            cursor.execute('''
+                UPDATE domain_asset SET last_scanned = ? WHERE dom_id = ?
+            ''', (now, asset_id))
+        elif asset_type == 'subdomain':
+            cursor.execute('''
+                UPDATE subdomain_asset SET last_scanned = ? WHERE sub_id = ?
+            ''', (now, asset_id))
+        elif asset_type == 'ip':
+            cursor.execute('''
+                UPDATE ip_asset SET last_scanned = ? WHERE ip_id = ?
+            ''', (now, asset_id))
+        
+        conn.commit()
+    except Exception as e:
+        print(f"Error updating last_scanned: {e}")
+    finally:
+        conn.close()
+
+
 def upsert_certificate(hostname: str, issuer: str = None, not_before: str = None, 
                        not_after: str = None, serial_number: str = None, 
                        fingerprint: str = None, sub_id: int = None, source: str = 'ctlogs') -> int:
@@ -1492,6 +1631,30 @@ def get_expired_certificates() -> list:
         return [dict(row) for row in cursor.fetchall()]
     finally:
         conn.close()
+
+
+def get_http_service_id(host: str, port: int) -> Optional[int]:
+    """
+    Get http_id for host:port combination.
+    
+    Args:
+        host: Hostname
+        port: Port number
+    
+    Returns:
+        http_id or None if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT http_id FROM http_services WHERE host = ? AND port_num = ?
+    ''', (host, port))
+    
+    result = cursor.fetchone()
+    conn.close()
+    
+    return result['http_id'] if result else None
 
 
 if __name__ == '__main__':

@@ -5,4 +5,5 @@ tldextract
 dnspython>=2.4.0
 python-dotenv
 python-Wappalyzer
+dirsearch
 setuptools<70

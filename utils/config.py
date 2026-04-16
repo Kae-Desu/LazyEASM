@@ -33,10 +33,8 @@ def get_env(key: str, default: str = None) -> str:
     """
     Get environment variable.
     
-    Priority:
-    1. .env file (via env_manager - allows runtime updates)
-    2. os.environ (loaded by dotenv)
-    3. default value
+    For EDITABLE_KEYS: Only reads from .env file (runtime updatable)
+    For other keys: Falls back to os.environ
     
     Args:
         key: Environment variable name
@@ -45,11 +43,15 @@ def get_env(key: str, default: str = None) -> str:
     Returns:
         Environment variable value or default
     """
-    from utils.env_manager import read_env_file
+    from utils.env_manager import read_env_file, EDITABLE_KEYS
     
     load_env()
     
     file_config = read_env_file()
+    
+    if key in EDITABLE_KEYS:
+        return file_config.get(key) or default
+    
     if key in file_config and file_config[key]:
         return file_config[key]
     

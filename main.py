@@ -1,6 +1,7 @@
 import jwt
 import datetime
 import threading
+import secrets
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, make_response, jsonify
 import os
@@ -12,12 +13,23 @@ from utils.config import get_env
 from utils.env_manager import set_env_key, delete_env_key, get_config_for_ui, EDITABLE_KEYS
 from utils.db_utils import get_all_assets_for_display, get_db_connection
 from utils.parsing import parse_input
+from utils.queue_manager import task_queue
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
 
 app = Flask(__name__)
-app.secret_key = get_env('FLASK_SECRET_KEY', 'default-secret-change-in-production')
-JWT_SECRET = get_env('JWT_SECRET', 'default-jwt-secret-change-in-production')
+flask_secret = get_env('FLASK_SECRET_KEY')
+jwt_secret = get_env('JWT_SECRET')
+
+if not flask_secret:
+    flask_secret = secrets.token_hex(32)
+    set_env_key('FLASK_SECRET_KEY', flask_secret)
+if not jwt_secret:
+    jwt_secret = secrets.token_hex(32)
+    set_env_key('JWT_SECRET', jwt_secret)
+
+app.secret_key = flask_secret
+JWT_SECRET = jwt_secret
 
 KEY_NAMES = {
     'DISCORD_WEBHOOK_URL': 'Discord Webhook',
@@ -81,45 +93,43 @@ def token_required(f):
         token = request.cookies.get('session_token')
         
         if not token:
-            return redirect(url_for('login_page'))
+            return redirect(url_for('login'))
         
         try:
             jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
         except:
-            return redirect(url_for('login_page'))
+            return redirect(url_for('login'))
             
         return f(*args, **kwargs)
     return decorated
 
 
-@app.route('/login', methods=['GET'])
-def login_page():
-    return render_template('login.html')
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    if request.method == 'POST':
+        username = request.form.get('username')
+        password = request.form.get('password')
 
-
-@app.route('/login', methods=['POST'])
-def login_action():
-    username = request.form.get('username')
-    password = request.form.get('password')
-
-    if username == "admin" and password == "password":
-        payload = {
-            'user': username,
-            'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
-        }
-        token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+        if username == get_env('ADMIN_USER', 'admin') and password == get_env('ADMIN_PASS', 'changeme'):
+            payload = {
+                'user': username,
+                'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+            }
+            token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+            
+            resp = make_response(redirect(url_for('dashboard')))
+            resp.set_cookie('session_token', token, httponly=True)
+            return resp
         
-        resp = make_response(redirect(url_for('dashboard')))
-        resp.set_cookie('session_token', token, httponly=True)
-        return resp
+        flash("Username atau Password salah!", "error")
+        return redirect(url_for('login'))
     
-    flash("Username atau Password salah!", "error")
-    return redirect(url_for('login_page'))
+    return render_template('login.html')
 
 
 @app.route('/logout')
 def logout():
-    resp = make_response(redirect(url_for('login_page')))
+    resp = make_response(redirect(url_for('login')))
     resp.set_cookie('session_token', '', expires=0)
     flash("Berhasil logout.", "success")
     return resp
@@ -130,7 +140,37 @@ def logout():
 def dashboard():
     config = get_config_for_ui()
     assets = get_all_assets_for_display()
-    return render_template('dashboard.html', assets=assets, config=config)
+    queue_status = task_queue.get_status()
+    queue_active = task_queue.is_active()
+    return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active)
+
+
+@app.route('/delete_asset/<asset_type>/<int:asset_id>', methods=['DELETE'])
+@token_required
+def delete_asset(asset_type, asset_id):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        if asset_type == 'domain':
+            cursor.execute('DELETE FROM domain_asset WHERE dom_id = ?', (asset_id,))
+            cursor.execute('DELETE FROM domain_ip WHERE dom_id = ?', (asset_id,))
+        elif asset_type == 'subdomain':
+            cursor.execute('DELETE FROM subdomain_asset WHERE sub_id = ?', (asset_id,))
+            cursor.execute('DELETE FROM subdomain_ip WHERE sub_id = ?', (asset_id,))
+        elif asset_type == 'ip':
+            cursor.execute('DELETE FROM ip_asset WHERE ip_id = ?', (asset_id,))
+            cursor.execute('DELETE FROM domain_ip WHERE ip_id = ?', (asset_id,))
+            cursor.execute('DELETE FROM subdomain_ip WHERE ip_id = ?', (asset_id,))
+        else:
+            return jsonify({'success': False, 'error': 'Invalid asset type'}), 400
+        
+        conn.commit()
+        return jsonify({'success': True})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+    finally:
+        conn.close()
 
 
 @app.route('/save_config', methods=['POST'])
@@ -197,6 +237,13 @@ def test_webhook_endpoint():
 def update_table():
     assets = get_all_assets_for_display()
     return render_template('table_partial.html', assets=assets)
+
+
+@app.route('/queue/status')
+@token_required
+def queue_status():
+    """API endpoint for queue status polling."""
+    return jsonify(task_queue.get_status())
 
 
 @app.route('/generate_ai', methods=['POST'])
@@ -295,15 +342,15 @@ def process_assets():
     thread.daemon = True
     thread.start()
     
-    flash(f'Asset accepted. Processing may take up to 10 minutes. You will be notified on Discord when complete.', 'success')
+    flash(f'Asset accepted. Processing may take up to 10 minutes. Phase 1 will start automatically after discovery.', 'success')
     return redirect(url_for('dashboard'))
 
 
 def run_phase1_background(targets: dict):
     """
-    Background worker for Phase 1.
+    Background worker for Phase 0 (Asset Discovery).
     
-    Called from process_assets route.
+    After Phase 0 completes, enqueues assets for Phase 1 processing.
     Sends Discord notification on completion or error.
     """
     import importlib
@@ -315,12 +362,12 @@ def run_phase1_background(targets: dict):
         # Initialize expander
         expander = phase1_module.Phase1Expander()
         
-        # Run Phase 1
+        # Run Phase 0 (Asset Discovery)
         stats = expander.run_phase1(targets)
         
-        # Send success notification
+        # Send success notification for Phase 0
         message = (
-            f"✅ **Phase 1 Complete**\n"
+            f"✅ **Phase 0 Complete**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"**Domains added:** {stats['domains_added']}\n"
             f"**Subdomains discovered:** {stats['subdomains_discovered']}\n"
@@ -333,15 +380,58 @@ def run_phase1_background(targets: dict):
             message += f"\n**Errors:** {len(stats['errors'])}"
         
         discord_send_message(message)
-        print(f"[Phase 1] Complete: {stats}")
+        print(f"[Phase 0] Complete: {stats}")
+        
+        # After Phase 0, enqueue assets for Phase 1
+        if stats['domains_added'] > 0 or stats['subdomains_new'] > 0 or stats['ips_resolved'] > 0:
+            enqueue_assets_for_phase1()
+            discord_send_message(f"📋 **Phase 1 Queued**: Processing assets...")
         
     except Exception as e:
         # Send error notification
         import traceback
-        error_msg = f"❌ **Phase 1 Failed**\nError: {str(e)}"
+        error_msg = f"❌ **Phase 0 Failed**\nError: {str(e)}"
         discord_send_message(error_msg)
-        print(f"[Phase 1] Error: {e}")
+        print(f"[Phase 0] Error: {e}")
         traceback.print_exc()
+
+
+def enqueue_assets_for_phase1():
+    """
+    Enqueue all discovered assets from database for Phase 1 processing.
+    
+    Queries domain_asset, subdomain_asset, and ip_asset tables
+    for assets with status='up'.
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        # Enqueue domains
+        cursor.execute("SELECT dom_id, domain_name FROM domain_asset WHERE status='up'")
+        for row in cursor.fetchall():
+            task_queue.enqueue(row['dom_id'], 'domain', row['domain_name'])
+        
+        # Enqueue subdomains
+        cursor.execute("SELECT sub_id, subdomain_name FROM subdomain_asset WHERE status='up'")
+        for row in cursor.fetchall():
+            task_queue.enqueue(row['sub_id'], 'subdomain', row['subdomain_name'])
+        
+        # Enqueue IPs (standalone, not linked to domain/subdomain)
+        cursor.execute('''
+            SELECT ip_id, ip_value FROM ip_asset 
+            WHERE status='up'
+              AND ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
+        ''')
+        for row in cursor.fetchall():
+            task_queue.enqueue(row['ip_id'], 'ip', row['ip_value'])
+        
+        conn.close()
+        
+        print(f"[Queue] Enqueued assets for Phase 1")
+        
+    except Exception as e:
+        print(f"[Queue] Error enqueueing assets: {e}")
 
 
 if __name__ == '__main__':

@@ -228,14 +228,14 @@ class WappalyzerScanner:
         
         return None
     
-    def scan_target(self, host: str, ip_id: int, port: int, is_https: int) -> Dict:
+    def scan_target(self, host: str, port: int, ip_id: int | None = None, is_https: int = 0) -> Dict:
         """
         Scan a single target and store results.
         
         Args:
             host: Domain/subdomain name
-            ip_id: IP ID from database
             port: Port number
+            ip_id: IP ID from database (optional, None for Cloudflare/CDN sites)
             is_https: 1 for HTTPS, 0 for HTTP
         
         Returns:
@@ -270,8 +270,8 @@ class WappalyzerScanner:
         
         http_id = upsert_http_service(
             host=host,
-            ip_id=ip_id,
             port_num=port,
+            ip_id=ip_id,
             is_https=is_https,
             title=None,
             web_server=web_server
@@ -298,8 +298,8 @@ class WappalyzerScanner:
             
             self.stats['technologies_found'] += 1
             
-            if self.enable_cve:
-                tech_string = f"{tech_name} {tech_version}" if tech_version else tech_name
+            if self.enable_cve and tech_version:
+                tech_string = f"{tech_name} {tech_version}"
                 
                 time.sleep(self.cve_delay)
                 

@@ -143,57 +143,75 @@ class Phase1Expander:
             certificates: [{'hostname': str, 'issuer': str, 'not_before': str, 'not_after': str, 'serial_number': str}, ...]
         """
         url = self.CTLOGS_URL.format(domain=domain)
+        domain_lower = domain.lower()
         subdomains = set()
         certificates = []
         seen_certs = set()
         
-        try:
-            response = self.session.get(url, timeout=30)
-            
-            if response.status_code == 200:
-                data = response.json()
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                response = self.session.get(url, timeout=60)
                 
-                for entry in data:
-                    # Common name
-                    if 'common_name' in entry:
-                        cn = entry['common_name'].lower()
-                        if cn.endswith(domain) or cn == domain:
-                            subdomains.add(cn)
+                if response.status_code == 200:
+                    data = response.json()
+                    logger.debug(f"CTLogs returned {len(data)} entries for {domain}")
                     
-                    # Subject Alternative Names
-                    if 'name_value' in entry:
-                        for name in entry['name_value'].split('\n'):
-                            name = name.strip().lower()
-                            if name.endswith(domain) or name == domain:
-                                subdomains.add(name)
-                    
-                    # Extract certificate info for expiry tracking
-                    hostname = entry.get('common_name', '').lower()
-                    if hostname and hostname.endswith(domain):
+                    for entry in data:
+                        # Common name
+                        if 'common_name' in entry:
+                            cn = entry['common_name'].lower()
+                            if cn.endswith(domain_lower) or cn == domain_lower:
+                                subdomains.add(cn)
+                        
+                        # Subject Alternative Names
+                        if 'name_value' in entry:
+                            for name in entry['name_value'].split('\n'):
+                                name = name.strip().lower()
+                                if name.endswith(domain_lower) or name == domain_lower:
+                                    subdomains.add(name)
+                        
+                        # Extract certificate info for expiry tracking
+                        hostname = entry.get('common_name', '').lower()
                         not_after = entry.get('not_after')
-                        if not_after:
-                            cert_key = f"{hostname}|{not_after}"
-                            if cert_key not in seen_certs:
-                                seen_certs.add(cert_key)
-                                certificates.append({
-                                    'hostname': hostname,
-                                    'issuer': entry.get('issuer_name', ''),
-                                    'not_before': entry.get('not_before'),
-                                    'not_after': not_after,
-                                    'serial_number': entry.get('serial_number')
-                                })
+                        
+                        if hostname and not_after:
+                            # Match wildcard certs (*.domain) and direct matches
+                            if hostname.endswith(domain_lower) or hostname == domain_lower:
+                                cert_key = f"{hostname}|{not_after}"
+                                if cert_key not in seen_certs:
+                                    seen_certs.add(cert_key)
+                                    certificates.append({
+                                        'hostname': hostname,
+                                        'issuer': entry.get('issuer_name', ''),
+                                        'not_before': entry.get('not_before'),
+                                        'not_after': not_after,
+                                        'serial_number': entry.get('serial_number')
+                                    })
+                    
+                    logger.info(f"CTLogs found {len(subdomains)} subdomains and {len(certificates)} certificates for {domain}")
+                    break
                 
-                logger.info(f"CTLogs found {len(subdomains)} subdomains and {len(certificates)} certificates for {domain}")
+                else:
+                    logger.warning(f"CTLogs returned status {response.status_code} for {domain}")
+                    if attempt < max_retries - 1:
+                        time.sleep(2 ** attempt)
             
-            else:
-                logger.warning(f"CTLogs returned status {response.status_code} for {domain}")
-        
-        except requests.exceptions.Timeout:
-            logger.error(f"CTLogs timeout for {domain}")
-        except requests.exceptions.RequestException as e:
-            logger.error(f"CTLogs request error for {domain}: {e}")
-        except Exception as e:
-            logger.error(f"CTLogs unexpected error for {domain}: {e}")
+            except requests.exceptions.Timeout:
+                logger.warning(f"CTLogs timeout for {domain} (attempt {attempt + 1}/{max_retries})")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    logger.error(f"CTLogs failed after {max_retries} attempts for {domain}")
+            except requests.exceptions.RequestException as e:
+                logger.error(f"CTLogs request error for {domain}: {e}")
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                else:
+                    break
+            except Exception as e:
+                logger.error(f"CTLogs unexpected error for {domain}: {e}")
+                break
         
         return list(subdomains), certificates
     
@@ -373,18 +391,24 @@ class Phase1Expander:
             # 6. DNS resolve + Ping check subdomains (parallel)
             sub_id_map = {}
             if new_subdomains:
+                logger.info(f"Resolving DNS for {len(new_subdomains)} subdomains of {domain}...")
                 results = resolve_and_ping_batch(
                     new_subdomains,
                     max_workers=self.max_dns_workers,
                     ping_timeout=self.ping_timeout
                 )
+                resolved_count = sum(1 for v in results.values() if v.get('ips'))
+                logger.info(f"DNS resolved: {resolved_count}/{len(new_subdomains)} subdomains have IPs for {domain}")
                 
                 # 7. Store subdomains and IPs
-                for subdomain in new_subdomains:
+                logger.info(f"Storing {len(new_subdomains)} subdomains in database...")
+                for idx, subdomain in enumerate(new_subdomains):
                     sub_id = self._store_subdomain(subdomain, domain, dom_id, results)
                     if sub_id:
                         sub_id_map[subdomain] = sub_id
                     stats['ips_resolved'] += len(results.get(subdomain, {}).get('ips', []))
+                    if (idx + 1) % 50 == 0:
+                        logger.info(f"Stored {idx + 1}/{len(new_subdomains)} subdomains for {domain}")
             
             # 8. Store certificates from CTLogs
             if certificates:

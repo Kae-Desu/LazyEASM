@@ -97,9 +97,9 @@ domain_asset          subdomain_asset        ip_asset
 
 ---
 
-## Phase 1: Active Scanning (TODO)
+## Phase 1: Active Scanning (IMPLEMENTED ✅)
 
-### Architecture Requirements
+### Architecture
 
 ```
 Phase 0 Complete (asset discovered)
@@ -114,60 +114,60 @@ Phase 0 Complete (asset discovered)
               │
               ▼
 ┌────────────────────────────────────────────────────────────────────┐
-│  QUEUE PROCESSOR (new)                                              │
+│  QUEUE PROCESSOR (utils/queue_manager.py)                          │
 │                                                                     │
-│  Sequential processing (no parallel):                               │
+│  ThreadPoolExecutor(max_workers=4)                                  │
+│  Sequential processing per asset:                                    │
 │                                                                     │
 │  while queue.has_pending():                                          │
 │      task = queue.get_next()                                         │
 │      queue.mark_running(task)                                        │
 │      │                                                               │
-│      ├─► 1. PORT SCAN (02-port-scanner.py)                           │
+│      ├─► 1. PORT SCAN (modules/02-port-scanner.py)                   │
 │      │     - nmap --top-ports 100 -sV                               │
 │      │     - Skip shared hosting/Cloudflare                          │
 │      │     - Store in `ports` table                                  │
 │      │                                                               │
-│      ├─► 2. HTTP DISCOVERY (05-http-discovery.py - TODO)            │
-│      │     - From ports: 80, 443, 8080, 8443                         │
+│      ├─► 2. WAPPALYZER (modules/Wappalyzer.py)                       │
+│      │     - Tech fingerprinting                                     │
 │      │     - Create http_services entries                            │
-│      │     - Grab title, web_server                                  │
+│      │     - Store in `technologies` table                           │
 │      │                                                               │
-│      ├─► 3. DIRSEARCH (06-dirsearch.py - TODO)                      │
+│      ├─► 3. DIRSEARCH (modules/05-dirsearch.py)                     │
 │      │     - Non-recursive, fast wordlist (dicc.txt)                 │
 │      │     - Store in `directories` table                            │
 │      │                                                               │
-│      ├─► 4. WAPPALYZER (Wappalyzer.py - exists, needs integration)   │
-│      │     - Tech fingerprinting                                     │
-│      │     - Store in `technologies` table                           │
-│      │                                                               │
-│      ├─► 5. CVE MATCH (CVEmatch.py - exists, needs integration)      │
+│      ├─► 4. CVE MATCH (modules/Wappalyzer.py internal)              │
 │      │     - NVD API + Vulners fallback                              │
 │      │     - Store in `vulnerabilities` table                        │
 │      │                                                               │
-│      └─► 6. Discord: CVE alert grouped by asset                      │
+│      └─► 5. Discord: "Phase 1 Complete"                             │
 │                                                                     │
 │      queue.mark_done(task)                                           │
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-### Files to Create/Modify
+### Implementation Status
 
-| File | Action | Description |
-|------|--------|-------------|
-| `utils/queue_manager.py` | CREATE | Queue enqueue/dequeue, status management |
-| `modules/05-http-discovery.py` | CREATE | HTTP service detection from open ports |
-| `modules/06-dirsearch.py` | CREATE | Non-recursive directory enumeration |
-| `main.py` | MODIFY | Add Phase 1 queue trigger after Phase 0 |
-| `modules/Wappalyzer.py` | MODIFY | Integrate with Phase 1 pipeline |
-| `modules/CVEmatch.py` | MODIFY | Integrate with Phase 1 pipeline |
+| Component | File | Status |
+|-----------|------|--------|
+| Queue Manager | `utils/queue_manager.py` | ✅ Created |
+| Phase 1 Runner | `modules/phase1_runner.py` | ✅ Created |
+| Port Scanner | `modules/02-port-scanner.py` | ✅ Exists |
+| Wappalyzer | `modules/Wappalyzer.py` | ✅ Exists |
+| Dirsearch | `modules/05-dirsearch.py` | ✅ Created |
+| CVE Matching | `modules/CVEmatch.py` | ✅ Exists |
+| Discord Alerts | `modules/Notify.py` | ✅ Exists |
+| Dashboard Button | `templates/dashboard.html` | ✅ Modified |
+| Main Integration | `main.py` | ✅ Modified |
 
-### Questions Before Implementation
+### Queue Behavior
 
-1. **Dirsearch binary**: Require user to install `dirsearch`? Or pure Python?
-2. **Wordlist**: Use `dicc.txt` (~10k entries)? Custom wordlist?
-3. **HTTP ports**: Only 80/443/8080/8443? Or detect HTTP on any port?
-4. **AI recommendations**: Per CVE (current)? Or summary per asset?
-5. **Queue persistence**: Survive server restart (DB)? Or in-memory only?
+- **Max Workers:** 4 assets in parallel
+- **In-Memory:** Queue state lost on restart (no persistence)
+- **Fail-Fast:** Failed assets are skipped, queue continues
+- **UI:** Button disabled when queue active
+- **Auto-refresh:** User's existing table refresh shows updates
 
 ---
 
