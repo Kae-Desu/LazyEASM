@@ -16,9 +16,17 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Port Scanning** - Nmap top 100 ports with service detection
 - **Technology Fingerprinting** - Wappalyzer integration (100+ technologies)
 - **CVE Matching** - Vulners API with CVSS filtering (min 5.0)
-- **Directory Enumeration** - Dirsearch integration with timeout handling
 - **AI Recommendations** - Google Gemini-powered vulnerability analysis
 - **Discord Notifications** - Real-time alerts for completed scans and CVEs
+
+### Phase 2: Deep Scanning (In Development)
+- **Full Port Enumeration** - Complete scan of all 65535 ports with service detection
+- **Directory Discovery** - Recursive dirsearch with configurable depth
+- **Scheduled Execution** - Runs every 2 days via cron for bandwidth management
+- **CDN-Aware** - Skips full port scans for CDN-hosted IPs, runs dirsearch on hostname
+- **Bandwidth Throttling** - 3 threads, polite timing (T2) to avoid network saturation
+
+> Phase 2 is designed for scheduled deep scanning without impacting Phase 1 responsiveness.
 
 ### Dashboard Features
 - **Dark/Light Mode** - Toggle with persistent theme preference
@@ -156,6 +164,7 @@ subdomain_asset ─┬── subdomain_ip ──┘
 - CTLogs API may return 503 when overloaded
 - Shared/CDN IPs skipped for port scanning
 - CVE matching requires version detection
+- Phase 2 deep scanning not yet integrated (in development)
 
 ## Thesis
 

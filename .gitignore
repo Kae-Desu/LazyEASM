@@ -93,3 +93,5 @@ wordlists/
 output/
 results/
 reports/
+# Temp files
+temp/

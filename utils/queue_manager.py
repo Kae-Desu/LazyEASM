@@ -38,6 +38,14 @@ class TaskQueue:
             'active': False
         }
     
+    def _cleanup_workers(self):
+        """Remove completed futures from workers list."""
+        before = len(self.workers)
+        self.workers = [f for f in self.workers if not f.done()]
+        after = len(self.workers)
+        if before != after:
+            logger.debug(f"Cleaned up {before - after} completed workers")
+    
     def enqueue(self, target_id: int, target_type: str, target_name: str):
         """
         Add asset to queue. Updates DB scan_queue table.
@@ -66,10 +74,14 @@ class TaskQueue:
             self.stats['total'] += 1
             self.stats['active'] = True
         
+        # Clean up finished workers before checking
+        self._cleanup_workers()
+        
         # Start worker if available
         if len(self.workers) < self.executor._max_workers:
             future = self.executor.submit(self._worker)
             self.workers.append(future)
+            logger.debug(f"Started new worker, total: {len(self.workers)}")
         
         logger.info(f"Enqueued: {target_name} (queue_id={queue_id})")
     
@@ -85,27 +97,35 @@ class TaskQueue:
     
     def _worker(self):
         """Process tasks from queue."""
-        while True:
-            try:
-                task = self.queue.get(timeout=60)
-                if task is None:
+        worker_id = id(threading.current_thread())
+        logger.debug(f"Worker {worker_id} started")
+        
+        try:
+            while True:
+                try:
+                    task = self.queue.get(timeout=60)
+                    if task is None:
+                        break
+                    
+                    self._process_task(task)
+                    self.queue.task_done()
+                    
+                except queue.Empty:
+                    with self._lock:
+                        self.stats['active'] = False
+                    logger.debug(f"Worker {worker_id} exiting (idle)")
                     break
-                
-                self._process_task(task)
-                self.queue.task_done()
-                
-            except queue.Empty:
-                # No more tasks
-                with self._lock:
-                    self.stats['active'] = False
-                break
-            except Exception as e:
-                logger.error(f"Worker error: {e}")
+                except Exception as e:
+                    logger.error(f"Worker {worker_id} error: {e}")
+        finally:
+            self._cleanup_workers()
     
     def _process_task(self, task: Dict):
         """Run Phase 1 pipeline for one asset."""
         queue_id = task['queue_id']
         target_name = task['target_name']
+        
+        logger.info(f"Processing: {target_name}")
         
         # Update status: running
         self._update_db_status(queue_id, 'running')
@@ -156,7 +176,7 @@ class TaskQueue:
         conn.commit()
         conn.close()
         
-        return queue_id
+        return queue_id or 0
     
     def _update_db_status(self, queue_id: int, status: str, **kwargs):
         """Update scan_queue status."""

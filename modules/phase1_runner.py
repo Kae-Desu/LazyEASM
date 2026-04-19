@@ -4,9 +4,10 @@ Phase 1 Runner - Execute full pipeline for one asset.
 Pipeline:
     1. Port scan (nmap --top-ports 100)
     2. Wappalyzer (tech fingerprinting + http_services)
-    3. Dirsearch (directory enumeration)
-    4. CVE match (already integrated in Wappalyzer)
-    5. Discord notification
+    3. CVE match (already integrated in Wappalyzer)
+    4. Discord notification
+
+Note: Dirsearch moved to Phase 2 (see modules/phase2_dirsearch.py)
 """
 
 import logging
@@ -27,13 +28,12 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         asset_name: Hostname or IP address
     
     Returns:
-        Dict with stats: {ports_found, tech_found, cve_found, dirs_found}
+        Dict with stats: {ports_found, tech_found, cve_found}
     """
     stats = {
         'ports_found': 0,
         'tech_found': 0,
         'cve_found': 0,
-        'dirs_found': 0,
         'skipped_ips': 0,
         'skip_reasons': []
     }
@@ -147,30 +147,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
     except Exception as e:
         logger.error(f"Wappalyzer failed for {asset_name}: {e}")
     
-    # 3. Dirsearch (always run on hostname)
-    # Works through Cloudflare/CDN proxy
-    try:
-        dirsearch_module = importlib.import_module('modules.05-dirsearch')
-        
-        for port in [80, 443]:
-            try:
-                dirs = dirsearch_module.run_dirsearch(
-                    asset_id=asset_id,
-                    host=asset_name,
-                    port=port
-                )
-                stats['dirs_found'] += len(dirs) if dirs else 0
-            except Exception as e:
-                logger.error(f"Dirsearch failed for {asset_name}:{port} - {e}")
-        
-        logger.info(f"Dirsearch complete for {asset_name}: {stats['dirs_found']} directories")
-            
-    except ImportError:
-        logger.warning("Dirsearch module not available, skipping")
-    except Exception as e:
-        logger.error(f"Dirsearch failed for {asset_name}: {e}")
-    
-    # 4. Discord notification
+    # 3. Discord notification
     try:
         from modules.Notify import send_message
         
@@ -182,7 +159,6 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                    f"**Port Scan:** Skipped\n"
                    f"**Technologies:** {stats['tech_found']}\n"
                    f"**CVEs:** {stats['cve_found']}\n"
-                   f"**Directories:** {stats['dirs_found']}\n"
                    f"\n**Skipped IPs ({stats['skipped_ips']}):**")
         elif stats['skipped_ips'] > 0:
             # Some IPs skipped, some scanned
@@ -191,7 +167,6 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                    f"**Ports:** {stats['ports_found']}\n"
                    f"**Technologies:** {stats['tech_found']}\n"
                    f"**CVEs:** {stats['cve_found']}\n"
-                   f"**Directories:** {stats['dirs_found']}\n"
                    f"\n**Skipped IPs ({stats['skipped_ips']}):**")
         else:
             # Normal scan, no skipped IPs
@@ -199,8 +174,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                    f"━━━━━━━━━━━━━━━━━━\n"
                    f"**Ports:** {stats['ports_found']}\n"
                    f"**Technologies:** {stats['tech_found']}\n"
-                   f"**CVEs:** {stats['cve_found']}\n"
-                   f"**Directories:** {stats['dirs_found']}")
+                   f"**CVEs:** {stats['cve_found']}")
         
         # Add all skipped IPs (not just first 3)
         if stats['skipped_ips'] > 0:
