@@ -54,7 +54,7 @@ SCAN_PROFILES = {
     },
     'long': {
         'ports': '-p-',
-        'options': '-sV -T3',
+        'options': '-sV -T5',
         'description': 'Full scan (all 65535 ports)',
         'timeout': 1800
     }

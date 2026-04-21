@@ -224,21 +224,99 @@
             <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
                 <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
             </h3>
-            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-x-auto shadow-2xl">
-                <table class="min-w-full text-sm text-left">
-                    <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
-                        <tr>
-                            <th class="px-6 py-4 w-12 text-center"></th>
-                            <th class="px-6 py-4">Target Name</th>
-                            <th class="px-6 py-4">Status</th>
-                            <th class="px-6 py-4">SSL Expiry</th>
-                            <th class="px-6 py-4 text-right">Action</th>
-                        </tr>
-                    </thead>
-                    <tbody id="main-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
-                        {% include 'table_partial.html' %}
-                    </tbody>
-                </table>
+            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
+                    <table class="min-w-[800px] w-full text-sm text-left">
+                        <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
+                            <tr>
+                                <th class="px-6 py-4 w-12 text-center"></th>
+                                <th class="px-6 py-4">Target Name</th>
+                                <th class="px-6 py-4">Status</th>
+                                <th class="px-6 py-4">Queue</th>
+                                <th class="px-6 py-4">SSL Expiry</th>
+                                <th class="px-6 py-4 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="main-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
+                            {% include 'table_partial.html' %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Phase 2 Queue Status Panel -->
+        <div class="mt-6">
+            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
+                <i class="fas fa-list-alt mr-2 text-accent"></i>Phase 2 Queue
+            </h3>
+            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
+                    <table class="min-w-[600px] w-full text-sm text-left">
+                        <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
+                            <tr>
+                                <th class="px-6 py-4">Target</th>
+                                <th class="px-6 py-4">Status</th>
+                                <th class="px-6 py-4">Queued At</th>
+                                <th class="px-6 py-4">Started At</th>
+                                <th class="px-6 py-4">Results</th>
+                                <th class="px-6 py-4 text-right">Action</th>
+                            </tr>
+                        </thead>
+                        <tbody id="queue-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
+                            {% if phase2_queue and phase2_queue|length > 0 %}
+                                {% for item in phase2_queue %}
+                                <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
+                                    <td class="px-6 py-4 font-mono text-xs dark:text-white">{{ item.target }}</td>
+                                    <td class="px-6 py-4">
+                                        {% if item.status == 'pending' %}
+                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">QUEUED</span>
+                                        {% elif item.status == 'processing' %}
+                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20 animate-pulse">SCANNING</span>
+                                        {% elif item.status == 'completed' %}
+                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">COMPLETED</span>
+                                        {% elif item.status == 'failed' %}
+                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-red-500/10 text-red-500 border border-red-500/20">FAILED</span>
+                                        {% else %}
+                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-500/10 text-slate-500 border border-slate-500/20">{{ item.status }}</span>
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-6 py-4 text-xs text-slate-500">{{ item.queued_at or '-' }}</td>
+                                    <td class="px-6 py-4 text-xs text-slate-500">{{ item.started_at or '-' }}</td>
+                                    <td class="px-6 py-4 text-xs text-slate-400">
+                                        {% if item.status == 'completed' %}
+                                            {{ item.dirs_found or 0 }} dirs, {{ item.ports_found or 0 }} ports
+                                        {% elif item.status == 'failed' %}
+                                            <span class="text-red-500">{{ item.error_message or 'Error' }}</span>
+                                        {% else %}
+                                            -
+                                        {% endif %}
+                                    </td>
+                                    <td class="px-6 py-4 text-right">
+                                        {% if item.status == 'pending' %}
+                                        <button onclick="openConfirmModal('cancel_scan', {name: '{{ item.target }}'})" 
+                                                class="text-amber-500 hover:text-amber-700 transition-colors text-xs">
+                                            <i class="fas fa-times-circle mr-1"></i>Cancel
+                                        </button>
+                                        {% elif item.status == 'processing' %}
+                                        <span class="text-slate-400 text-xs italic">In progress...</span>
+                                        {% else %}
+                                        <span class="text-slate-400 text-xs">-</span>
+                                        {% endif %}
+                                    </td>
+                                </tr>
+                                {% endfor %}
+                            {% else %}
+                                <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
+                                    <td colspan="6" class="px-6 py-8 text-center text-slate-400">
+                                        <i class="fas fa-check-circle text-emerald-400 text-2xl mb-2"></i>
+                                        <p class="text-xs">No items in queue. Click "Run Deep Scan" on an asset to start.</p>
+                                    </td>
+                                </tr>
+                            {% endif %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </main>
@@ -408,6 +486,64 @@
                     desc: 'This will overwrite the current recommendation with a new one. Continue?',
                     action: () => {
                         queueGenerateAI(extraData.vulnId, extraData.cveId);
+                        closeActionModal();
+                    }
+                },
+                'deep_scan': {
+                    icon: 'fa-search-plus',
+                    color: 'bg-secondary/10 text-secondary',
+                    btn: 'text-secondary hover:bg-blue-50 dark:hover:bg-secondary/10',
+                    title: 'Run Phase 2 Deep Scan?',
+                    desc: `This will perform a full port scan (1-65535) and directory enumeration on ${extraData ? extraData.name : 'this asset'}.\n\nEstimated time: 5-15 minutes.\nThis task runs in the background.`,
+                    action: () => {
+                        const formData = new FormData();
+                        formData.append('asset_id', extraData.id);
+                        formData.append('asset_type', extraData.type);
+                        formData.append('asset_name', extraData.name);
+                        
+                        fetch('/api/phase2/scan', {
+                            method: 'POST',
+                            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                            body: formData
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showToast('Deep scan queued', 'success');
+                                setTimeout(() => refreshTableData(), 500);
+                            } else {
+                                showToast(data.error || 'Failed to queue scan', 'error');
+                            }
+                        })
+                        .catch(() => showToast('Request failed', 'error'));
+                        closeActionModal();
+                    }
+                },
+                'cancel_scan': {
+                    icon: 'fa-times-circle',
+                    color: 'bg-amber-500/10 text-amber-500',
+                    btn: 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10',
+                    title: 'Cancel Queued Scan?',
+                    desc: `This will remove ${extraData ? extraData.name : 'this asset'} from the scan queue.\n\nThe scan has not started yet and can be re-queued later.`,
+                    action: () => {
+                        const formData = new FormData();
+                        formData.append('asset_name', extraData.name);
+                        
+                        fetch('/api/phase2/cancel', {
+                            method: 'POST',
+                            headers: { 'X-Requested-With': 'XMLHttpRequest' },
+                            body: formData
+                        })
+                        .then(res => res.json())
+                        .then(data => {
+                            if (data.success) {
+                                showToast('Scan cancelled', 'success');
+                                setTimeout(() => refreshTableData(), 500);
+                            } else {
+                                showToast(data.error || 'Failed to cancel scan', 'error');
+                            }
+                        })
+                        .catch(() => showToast('Request failed', 'error'));
                         closeActionModal();
                     }
                 }
@@ -604,21 +740,29 @@
         ];
 
         async function refreshTableData() {
-            // Jangan refresh jika user sedang membuka modal konfirmasi
             if (!document.getElementById('actionModal').classList.contains('hidden')) return;
 
             try {
-                const response = await fetch('/update_table');
-                if (!response.ok) throw new Error('Refresh Failed');
+                const [tableResponse, queueResponse] = await Promise.all([
+                    fetch('/update_table'),
+                    fetch('/update_queue')
+                ]);
                 
-                const html = await response.text();
+                if (!tableResponse.ok || !queueResponse.ok) throw new Error('Refresh Failed');
                 
-                // Ganti isi tbody saja (pastikan ID ini ada di HTML kamu)
+                const tableHtml = await tableResponse.text();
+                const queueHtml = await queueResponse.text();
+                
                 const tableBody = document.getElementById('main-table-body');
+                const queueBody = document.getElementById('queue-table-body');
+                
                 if (tableBody) {
-                    tableBody.innerHTML = html;
-                    // Buka kembali baris yang tadi sedang dibuka
+                    tableBody.innerHTML = tableHtml;
                     restoreOpenedRows();
+                }
+                
+                if (queueBody) {
+                    queueBody.innerHTML = queueHtml;
                 }
             } catch (err) {
                 console.error('Fetch error:', err);

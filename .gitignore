@@ -95,3 +95,7 @@ results/
 reports/
 # Temp files
 temp/
+
+# Docker test
+docker-test/
+test-output.log

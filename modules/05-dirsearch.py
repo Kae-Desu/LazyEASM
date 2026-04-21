@@ -21,8 +21,13 @@ from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
-# Dirsearch paths to check
+# Find project root and venv
+PROJECT_ROOT = os.path.dirname(os.path.dirname(__file__))
+VENV_BIN = os.path.join(PROJECT_ROOT, '.venv', 'bin')
+
+# Dirsearch paths to check (venv first, then system)
 DIRSEARCH_PATHS = [
+    os.path.join(VENV_BIN, 'dirsearch'),
     '/usr/local/bin/dirsearch',
     '/usr/bin/dirsearch',
     '/opt/dirsearch/dirsearch.py',
@@ -62,9 +67,10 @@ def find_dirsearch() -> Optional[str]:
 
 
 def run_dirsearch(asset_id: int, host: str, port: int,
-                  wordlist: str = None,
-                  threads: int = 20,
-                  timeout: int = 180) -> List[Dict]:
+                   wordlist: str = None,
+                   threads: int = 25,
+                   recursive: bool = False,
+                   timeout: int = None) -> List[Dict]:
     """
     Run dirsearch on target.
     
@@ -73,8 +79,9 @@ def run_dirsearch(asset_id: int, host: str, port: int,
         host: Hostname or IP
         port: Port number
         wordlist: Wordlist filename (optional, uses built-in if not specified)
-        threads: Number of threads
-        timeout: Timeout in seconds
+        threads: Number of threads (default: 25)
+        recursive: Enable recursive scanning (default: False)
+        timeout: Timeout in seconds (default: None = no timeout)
     
     Returns:
         List of discovered directories
@@ -99,26 +106,46 @@ def run_dirsearch(asset_id: int, host: str, port: int,
     cmd.extend([
         '-u', url,
         '-t', str(threads),
-        '-r', 'false',
-        '--format', 'json',
-        '--quiet',
-        '-f',
-        '-e', '.html,.php,.js,.json,.txt,.xml,.bak,.old'
+        '--format', 'json'
     ])
     
     if wordlist:
         cmd.extend(['-w', wordlist])
     
+    # Create temp file for output (dirsearch writes to file, not stdout)
+    output_file = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as tmp:
+            output_file = tmp.name
+        cmd.extend(['-o', output_file])
+    except Exception as e:
+        logger.warning(f"Failed to create temp file: {e}")
+        output_file = None
+    
     logger.info(f"Running dirsearch on {url}")
     
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if timeout:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        else:
+            result = subprocess.run(cmd, capture_output=True, text=True)
         
         if result.returncode > 1:
             logger.error(f"Dirsearch failed for {url}: {result.stderr}")
             return []
         
-        output = result.stdout.strip()
+        # Read from output file (dirsearch writes JSON to file, not stdout)
+        output = ""
+        if output_file and os.path.exists(output_file):
+            try:
+                with open(output_file, 'r') as f:
+                    output = f.read()
+            except Exception as e:
+                logger.error(f"Failed to read output file: {e}")
+        else:
+            # Fallback to stdout if no output file
+            output = result.stdout.strip()
+        
         if not output:
             logger.info(f"No output from dirsearch for {url}")
             return []
@@ -160,6 +187,13 @@ def run_dirsearch(asset_id: int, host: str, port: int,
     except Exception as e:
         logger.error(f"Dirsearch error for {url}: {e}")
         return []
+    finally:
+        # Clean up temp file
+        if output_file and os.path.exists(output_file):
+            try:
+                os.unlink(output_file)
+            except:
+                pass
 
 
 def save_directories(asset_id: int, host: str, port: int, directories: List[Dict]) -> List[Dict]:

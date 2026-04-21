@@ -1,0 +1,584 @@
+<!DOCTYPE html>
+<html lang="en" class="light" id="html-tag">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazyEASM - Mock Dashboard (Phase 2 Deep Scan UI)</title>
+    
+    <style>
+        :root {
+            --lazy-light: #EAEAEA;
+            --lazy-dark: #3F3F3F;
+        }
+        
+        html.dark { background-color: var(--lazy-dark) !important; }
+        html.light { background-color: var(--lazy-light) !important; }
+        html:not(.dark):not(.light) { background-color: var(--lazy-light) !important; }
+        
+        .glass { backdrop-filter: blur(12px); }
+        .light .glass { background: rgba(63, 63, 63, 0.95); }
+        .dark .glass { background: rgba(47, 47, 47, 0.95); }
+        
+        .card-glow:hover { box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
+        body { transition: background-color 0.3s ease; font-family: 'Plus Jakarta Sans', sans-serif; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+    </style>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'lazy-light': '#EAEAEA',
+                        'lazy-dark': '#3F3F3F',
+                        'dark-card': '#2F2F2F',
+                        accent: '#CC9ACC',
+                        secondary: '#9AC3CC',
+                        border: '#D1D1D1',
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-lazy-light dark:bg-lazy-dark text-slate-800 dark:text-slate-100 min-h-screen font-sans">
+
+    <nav class="fixed top-0 w-full z-50 glass border-b border-white/10">
+        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-accent p-1.5 rounded-xl w-10 h-10 flex items-center justify-center shadow-lg shadow-accent/20">
+                    <i class="fas fa-satellite text-white"></i>
+                </div>
+                <span class="text-xl font-bold tracking-tight text-white">LazyEasm<span class="text-secondary">.</span></span>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <button onclick="toggleDarkMode()" class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10">
+                    <i id="theme-icon" class="fas fa-moon"></i>
+                </button>
+            </div>
+        </div>
+    </nav>
+
+    <main class="max-w-7xl mx-auto px-4 pt-24 pb-12">
+        
+        <div class="mb-6 p-4 rounded-xl border bg-blue-100 border-blue-200 text-blue-700 dark:bg-blue-900/20 dark:border-blue-500/20 dark:text-blue-400">
+            <p class="flex-1 font-medium text-sm">
+                <i class="fas fa-info-circle mr-2"></i>
+                This is a <strong>mockup</strong> demonstrating the new Phase 2 Deep Scan UI. Three assets shown:
+                <strong>example.com</strong> (normal), <strong>sub.example.com</strong> (queued), <strong>test.example.com</strong> (scanning).
+            </p>
+        </div>
+
+        <div class="mt-6">
+            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
+                <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
+            </h3>
+            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
+                    <table class="min-w-[800px] w-full text-sm text-left">
+                    <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
+                        <tr>
+                            <th class="px-6 py-4 w-12 text-center"></th>
+                            <th class="px-6 py-4">Target Name</th>
+                            <th class="px-6 py-4">Status</th>
+                            <th class="px-6 py-4">Queue</th>
+                            <th class="px-6 py-4">SSL Expiry</th>
+                            <th class="px-6 py-4 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="main-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
+                        
+                        <!-- Asset 1: Normal (no queue) -->
+                        <tr class="hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer transition-colors" onclick="toggleDetail('row-domain-1', 'icon-domain-1')">
+                            <td class="px-6 py-5 text-center">
+                                <span id="icon-domain-1" class="text-accent font-bold transition-transform">▸</span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <div class="font-mono text-xs dark:text-white">example.com</div>
+                                <div class="text-[10px] text-slate-400 mt-1">192.168.1.1, 10.0.0.1</div>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                    up
+                                </span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="text-slate-400 text-xs">-</span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="text-emerald-500 text-xs"><i class="fas fa-lock mr-1"></i>89d</span>
+                            </td>
+                            <td class="px-6 py-5 text-right">
+                                <button onclick="event.stopPropagation(); openConfirmModal('deep_scan', {id: 1, type: 'domain', name: 'example.com'})" 
+                                        class="text-secondary hover:text-accent transition-colors p-1 mr-1" 
+                                        title="Run Phase 2 Deep Scan">
+                                    <i class="fas fa-search-plus"></i>
+                                </button>
+                                <button onclick="event.stopPropagation(); openConfirmModal('delete', {id: 1, type: 'domain'})" 
+                                        class="text-red-500 hover:text-red-700 transition-colors p-1" 
+                                        title="Delete asset">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </td>
+                        </tr>
+
+                        <!-- Asset 1: Expanded view -->
+                        <tr id="row-domain-1" class="hidden bg-slate-50/50 dark:bg-lazy-dark/30">
+                            <td colspan="6" class="px-10 py-8 border-l-4 border-accent">
+                                <div class="grid lg:grid-cols-2 gap-10">
+                                    <div class="space-y-6">
+                                        <div>
+                                            <h4 class="text-[10px] font-bold text-secondary uppercase tracking-widest mb-4 flex items-center">
+                                                <i class="fas fa-microchip mr-2"></i>Tech Stack (3)
+                                            </h4>
+                                            <div class="rounded-xl border border-border dark:border-white/10 overflow-hidden text-xs">
+                                                <table class="w-full text-left font-mono">
+                                                    <thead class="bg-slate-100 dark:bg-white/5">
+                                                        <tr><th class="px-4 py-2">PORT</th><th class="px-4 py-2">TECHNOLOGY</th><th class="px-4 py-2">VERSION</th></tr>
+                                                    </thead>
+                                                    <tbody class="dark:text-slate-400">
+                                                        <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-slate-500">80/TCP</td><td class="px-4 py-2 text-secondary font-bold">nginx</td><td class="px-4 py-2">1.18.0</td></tr>
+                                                        <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-slate-500">443/TCP</td><td class="px-4 py-2 text-secondary font-bold">PHP</td><td class="px-4 py-2">7.4.3</td></tr>
+                                                        <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-slate-500">22/TCP</td><td class="px-4 py-2 text-secondary font-bold">OpenSSH</td><td class="px-4 py-2">8.2</td></tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <h4 class="text-[10px] font-bold text-secondary uppercase tracking-widest mb-4">Discovery: Ports</h4>
+                                            <div class="rounded-xl border border-border dark:border-white/10 overflow-hidden text-xs">
+                                                <table class="w-full text-left font-mono">
+                                                    <thead class="bg-slate-100 dark:bg-white/5">
+                                                        <tr><th class="px-4 py-2">PORT</th><th class="px-4 py-2">SERVICE</th></tr>
+                                                    </thead>
+                                                    <tbody class="dark:text-slate-400">
+                                                        <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-secondary font-bold">22/TCP</td><td class="px-4 py-2">ssh</td></tr>
+                                                        <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-secondary font-bold">80/TCP</td><td class="px-4 py-2">http</td></tr>
+                                                        <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-secondary font-bold">443/TCP</td><td class="px-4 py-2">https</td></tr>
+                                                    </tbody>
+                                                </table>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="space-y-4">
+                                        <h4 class="text-accent font-bold uppercase text-[10px] tracking-widest mb-4 flex items-center">
+                                            <i class="fas fa-shield-virus mr-2"></i>Vulnerability & AI Insights (0)
+                                        </h4>
+                                        <div class="bg-white dark:bg-lazy-dark p-6 rounded-2xl border border-border dark:border-white/5 shadow-sm text-center">
+                                            <i class="fas fa-check-circle text-emerald-400 text-3xl mb-3"></i>
+                                            <p class="text-xs text-slate-500 dark:text-slate-400">No vulnerabilities found for this asset.</p>
+                                        </div>
+                                        <div class="mt-4 text-[10px] text-slate-400 flex items-center">
+                                            <i class="fas fa-clock mr-1"></i>Last scanned: 2 hours ago
+                                        </div>
+                                        <!-- Phase 2 Deep Scan Section -->
+                                        <div class="mt-4 pt-4 border-t border-border dark:border-white/5">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center space-x-4">
+                                                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center">
+                                                        <i class="fas fa-search-plus mr-2"></i>Phase 2 Deep Scan
+                                                    </h4>
+                                                    <span class="text-[10px] text-slate-400">Last run: 3 days ago</span>
+                                                </div>
+                                                <button onclick="event.stopPropagation(); openConfirmModal('deep_scan', {id: 1, type: 'domain', name: 'example.com'})" 
+                                                        class="px-3 py-1.5 text-[10px] font-bold bg-secondary/10 text-secondary rounded-lg border border-secondary/20 hover:bg-secondary/20 transition-all">
+                                                    <i class="fas fa-search-plus mr-1"></i>Run Deep Scan
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- Asset 2: QUEUED -->
+                        <tr class="hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer transition-colors" onclick="toggleDetail('row-subdomain-2', 'icon-subdomain-2')">
+                            <td class="px-6 py-5 text-center">
+                                <span id="icon-subdomain-2" class="text-accent font-bold transition-transform">▸</span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <div class="font-mono text-xs dark:text-white">sub.example.com</div>
+                                <div class="text-[10px] text-slate-400 mt-1">192.168.1.2</div>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                    up
+                                </span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">
+                                    QUEUED
+                                </span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="text-amber-500 text-xs"><i class="fas fa-clock mr-1"></i>45d</span>
+                            </td>
+                            <td class="px-6 py-5 text-right">
+                                <!-- Cancel button (when queued) -->
+                                <button onclick="event.stopPropagation(); openConfirmModal('cancel_scan', {name: 'sub.example.com'})" 
+                                        class="text-amber-500 hover:text-amber-700 transition-colors p-1 mr-1" 
+                                        title="Cancel queued scan">
+                                    <i class="fas fa-times-circle"></i>
+                                </button>
+                                <!-- Deep Scan button (disabled when queued) -->
+                                <button onclick="event.stopPropagation()" 
+                                        class="text-secondary opacity-50 cursor-not-allowed transition-colors p-1 mr-1" 
+                                        title="Scan already queued"
+                                        disabled>
+                                    <i class="fas fa-search-plus"></i>
+                                </button>
+                                <button onclick="event.stopPropagation(); openConfirmModal('delete', {id: 2, type: 'subdomain'})" 
+                                        class="text-red-500 hover:text-red-700 transition-colors p-1" 
+                                        title="Delete asset">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </td>
+                        </tr>
+
+                        <!-- Asset 2: Expanded view (QUEUED) -->
+                        <tr id="row-subdomain-2" class="hidden bg-slate-50/50 dark:bg-lazy-dark/30">
+                            <td colspan="6" class="px-10 py-8 border-l-4 border-accent">
+                                <div class="grid lg:grid-cols-2 gap-10">
+                                    <div>
+                                        <p class="text-sm text-slate-600 dark:text-slate-400">Expanded content for sub.example.com</p>
+                                    </div>
+                                    <div>
+                                        <div class="mt-4 text-[10px] text-slate-400 flex items-center">
+                                            <i class="fas fa-clock mr-1"></i>Last scanned: 4 hours ago
+                                        </div>
+                                        <!-- Phase 2 Deep Scan Section (QUEUED) -->
+                                        <div class="mt-4 pt-4 border-t border-border dark:border-white/5">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center space-x-4">
+                                                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center">
+                                                        <i class="fas fa-search-plus mr-2"></i>Phase 2 Deep Scan
+                                                    </h4>
+                                                </div>
+                                                <button onclick="event.stopPropagation(); openConfirmModal('cancel_scan', {name: 'sub.example.com'})" 
+                                                        class="px-3 py-1.5 text-[10px] font-bold bg-amber-500/10 text-amber-500 rounded-lg border border-amber-500/20 hover:bg-amber-500/20 transition-all">
+                                                    <i class="fas fa-times mr-1"></i>Cancel Queue
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+
+                        <!-- Asset 3: SCANNING (processing) -->
+                        <tr class="hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer transition-colors" onclick="toggleDetail('row-subdomain-3', 'icon-subdomain-3')">
+                            <td class="px-6 py-5 text-center">
+                                <span id="icon-subdomain-3" class="text-accent font-bold transition-transform">▸</span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <div class="font-mono text-xs dark:text-white">test.example.com</div>
+                                <div class="text-[10px] text-slate-400 mt-1">192.168.1.3</div>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                                    up
+                                </span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20 animate-pulse">
+                                    SCANNING
+                                </span>
+                            </td>
+                            <td class="px-6 py-5">
+                                <span class="text-slate-400 text-xs">N/A</span>
+                            </td>
+                            <td class="px-6 py-5 text-right">
+                                <!-- Deep Scan button (disabled when scanning) -->
+                                <button onclick="event.stopPropagation()" 
+                                        class="text-secondary opacity-50 cursor-not-allowed transition-colors p-1 mr-1" 
+                                        title="Scan in progress"
+                                        disabled>
+                                    <i class="fas fa-search-plus"></i>
+                                </button>
+                                <button onclick="event.stopPropagation(); openConfirmModal('delete', {id: 3, type: 'subdomain'})" 
+                                        class="text-red-500 hover:text-red-700 transition-colors p-1" 
+                                        title="Delete asset">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                </button>
+                            </td>
+                        </tr>
+
+                        <!-- Asset 3: Expanded view (SCANNING) -->
+                        <tr id="row-subdomain-3" class="hidden bg-slate-50/50 dark:bg-lazy-dark/30">
+                            <td colspan="6" class="px-10 py-8 border-l-4 border-accent">
+                                <div class="grid lg:grid-cols-2 gap-10">
+                                    <div>
+                                        <p class="text-sm text-slate-600 dark:text-slate-400">Expanded content for test.example.com</p>
+                                    </div>
+                                    <div>
+                                        <div class="mt-4 text-[10px] text-slate-400 flex items-center">
+                                            <i class="fas fa-clock mr-1"></i>Last scanned: 1 hour ago
+                                        </div>
+                                        <!-- Phase 2 Deep Scan Section (SCANNING) -->
+                                        <div class="mt-4 pt-4 border-t border-border dark:border-white/5">
+                                            <div class="flex items-center justify-between">
+                                                <div class="flex items-center space-x-4">
+                                                    <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest flex items-center">
+                                                        <i class="fas fa-search-plus mr-2"></i>Phase 2 Deep Scan
+                                                    </h4>
+                                                </div>
+                                                <button class="px-3 py-1.5 text-[10px] font-bold bg-blue-500/10 text-blue-500 rounded-lg border border-blue-500/20 cursor-not-allowed" disabled>
+                                                    <i class="fas fa-spinner fa-spin mr-1"></i>Scanning...
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </td>
+                        </tr>
+
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+
+        <!-- Queue Status Panel (Optional) -->
+        <div class="mt-6">
+            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
+                <i class="fas fa-list-alt mr-2 text-accent"></i>Phase 2 Queue
+            </h3>
+            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
+                    <table class="min-w-[600px] w-full text-sm text-left">
+                    <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
+                        <tr>
+                            <th class="px-6 py-4">Target</th>
+                            <th class="px-6 py-4">Status</th>
+                            <th class="px-6 py-4">Queued At</th>
+                            <th class="px-6 py-4">Started At</th>
+                            <th class="px-6 py-4">Results</th>
+                            <th class="px-6 py-4 text-right">Action</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-white/5">
+                        <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
+                            <td class="px-6 py-4 font-mono text-xs dark:text-white">sub.example.com</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">pending</span>
+                            </td>
+                            <td class="px-6 py-4 text-xs text-slate-500">2026-04-19 18:00:00</td>
+                            <td class="px-6 py-4 text-xs text-slate-400">-</td>
+                            <td class="px-6 py-4 text-xs text-slate-400">-</td>
+                            <td class="px-6 py-4 text-right">
+                                <button onclick="openConfirmModal('cancel_scan', {name: 'sub.example.com'})" 
+                                        class="text-amber-500 hover:text-amber-700 transition-colors text-xs">
+                                    <i class="fas fa-times-circle mr-1"></i>Cancel
+                                </button>
+                            </td>
+                        </tr>
+                        <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
+                            <td class="px-6 py-4 font-mono text-xs dark:text-white">test.example.com</td>
+                            <td class="px-6 py-4">
+                                <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20 animate-pulse">processing</span>
+                            </td>
+                            <td class="px-6 py-4 text-xs text-slate-500">2026-04-19 17:45:00</td>
+                            <td class="px-6 py-4 text-xs text-slate-500">2026-04-19 18:05:00</td>
+                            <td class="px-6 py-4 text-xs text-slate-400">In progress...</td>
+                            <td class="px-6 py-4 text-right">
+                                <span class="text-slate-400 text-xs italic">Cannot cancel</span>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                </div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Action Modal -->
+    <div id="actionModal" class="fixed inset-0 z-[200] hidden items-center justify-center p-4">
+        <div class="absolute inset-0 bg-brand/60 dark:bg-black/80 backdrop-blur-sm" onclick="closeActionModal()"></div>
+        
+        <div class="relative bg-white dark:bg-dark-card w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl border border-border dark:border-white/5 transform transition-all scale-95 opacity-0" id="actionModalContent">
+            <div class="p-8 text-center">
+                <div id="modalIconContainer" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    <i id="modalIcon" class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 id="modalTitle" class="text-xl font-bold text-slate-800 dark:text-white">Confirmation</h3>
+                <p id="modalDesc" class="text-slate-500 dark:text-slate-400 text-sm mt-2 leading-relaxed whitespace-pre-line">
+                    Are you sure you want to perform this action?
+                </p>
+            </div>
+            
+            <div class="flex border-t border-border dark:border-white/5">
+                <button onclick="closeActionModal()" class="flex-1 py-4 text-sm font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-brand transition-colors border-r border-border dark:border-white/5">
+                    Cancel
+                </button>
+                <button id="modalConfirmBtn" class="flex-1 py-4 text-sm font-bold transition-colors text-center">
+                    Confirm
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Container -->
+    <div id="toastContainer" class="fixed top-20 left-1/2 -translate-x-1/2 z-[300] space-y-2 pointer-events-none"></div>
+
+    <script>
+        let currentActionCallback = null;
+
+        function initTheme() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            if (savedTheme === 'dark') {
+                html.classList.add('dark');
+                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
+            } else {
+                html.classList.remove('dark');
+                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
+            }
+        }
+
+        function toggleDarkMode() {
+            const html = document.documentElement;
+            const icon = document.getElementById('theme-icon');
+            if (html.classList.contains('dark')) {
+                html.classList.remove('dark');
+                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
+                localStorage.setItem('theme', 'light');
+            } else {
+                html.classList.add('dark');
+                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
+                localStorage.setItem('theme', 'dark');
+            }
+        }
+
+        function toggleDetail(rowId, iconId) {
+            const row = document.getElementById(rowId);
+            const icon = document.getElementById(iconId);
+            const isHidden = row.classList.toggle('hidden');
+            icon.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(90deg)';
+        }
+
+        function openConfirmModal(type, extraData = null) {
+            const modal = document.getElementById('actionModal');
+            const content = document.getElementById('actionModalContent');
+            const iconCont = document.getElementById('modalIconContainer');
+            const icon = document.getElementById('modalIcon');
+            const title = document.getElementById('modalTitle');
+            const desc = document.getElementById('modalDesc');
+            const confirmBtn = document.getElementById('modalConfirmBtn');
+
+            iconCont.className = "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl ";
+            confirmBtn.className = "flex-1 py-4 text-sm font-bold transition-colors text-center ";
+
+            const configs = {
+                'deep_scan': {
+                    icon: 'fa-search-plus',
+                    color: 'bg-secondary/10 text-secondary',
+                    btn: 'text-secondary hover:bg-blue-50 dark:hover:bg-secondary/10',
+                    title: 'Run Phase 2 Deep Scan?',
+                    desc: `This will perform a full port scan (1-65535) and directory enumeration on ${extraData ? extraData.name : 'this asset'}.\n\nEstimated time: 5-15 minutes.\nThis task runs in the background.`,
+                    action: () => {
+                        showToast(`Deep scan queued for ${extraData ? extraData.name : 'asset'}`, 'success');
+                        closeActionModal();
+                    }
+                },
+                'cancel_scan': {
+                    icon: 'fa-times-circle',
+                    color: 'bg-amber-500/10 text-amber-500',
+                    btn: 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10',
+                    title: 'Cancel Queued Scan?',
+                    desc: `This will remove ${extraData ? extraData.name : 'this asset'} from the scan queue.\n\nThe scan has not started yet and can be re-queued later.`,
+                    action: () => {
+                        showToast(`Scan cancelled for ${extraData ? extraData.name : 'asset'}`, 'success');
+                        closeActionModal();
+                    }
+                },
+                'delete': {
+                    icon: 'fa-trash-alt',
+                    color: 'bg-red-500/10 text-red-500',
+                    btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
+                    title: 'Remove Asset?',
+                    desc: 'Move this asset to trash? This action can be reversed from the Trash menu.',
+                    action: () => {
+                        showToast('Asset deleted', 'success');
+                        closeActionModal();
+                    }
+                }
+            };
+
+            const config = configs[type];
+            icon.className = `fas ${config.icon}`;
+            iconCont.classList.add(...config.color.split(' '));
+            confirmBtn.classList.add(...config.btn.split(' '));
+            title.innerText = config.title;
+            desc.innerText = config.desc;
+            currentActionCallback = config.action;
+
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            setTimeout(() => {
+                content.classList.remove('scale-95', 'opacity-0');
+                content.classList.add('scale-100', 'opacity-100');
+            }, 10);
+        }
+
+        function closeActionModal() {
+            const modal = document.getElementById('actionModal');
+            const content = document.getElementById('actionModalContent');
+            content.classList.add('scale-95', 'opacity-0');
+            setTimeout(() => {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }, 200);
+        }
+
+        document.getElementById('modalConfirmBtn').onclick = () => {
+            if (currentActionCallback) currentActionCallback();
+        };
+
+        function showToast(message, type = 'info', duration = 4000) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            
+            const bgColor = {
+                'success': 'bg-emerald-500',
+                'error': 'bg-red-500',
+                'warning': 'bg-amber-500',
+                'info': 'bg-blue-500'
+            }[type] || 'bg-blue-500';
+            
+            toast.className = `${bgColor} text-white px-6 py-3 rounded-xl shadow-lg font-semibold text-sm pointer-events-auto transform transition-all duration-300 translate-y-[-20px] opacity-0`;
+            toast.innerText = message;
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.classList.remove('translate-y-[-20px]', 'opacity-0');
+            }, 10);
+            
+            setTimeout(() => {
+                toast.classList.add('translate-y-[-20px]', 'opacity-0');
+                setTimeout(() => toast.remove(), 300);
+            }, duration);
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            initTheme();
+        });
+    </script>
+</body>
+</html>

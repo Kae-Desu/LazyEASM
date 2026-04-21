@@ -19,14 +19,20 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **AI Recommendations** - Google Gemini-powered vulnerability analysis
 - **Discord Notifications** - Real-time alerts for completed scans and CVEs
 
-### Phase 2: Deep Scanning (In Development)
-- **Full Port Enumeration** - Complete scan of all 65535 ports with service detection
-- **Directory Discovery** - Recursive dirsearch with configurable depth
-- **Scheduled Execution** - Runs every 2 days via cron for bandwidth management
-- **CDN-Aware** - Skips full port scans for CDN-hosted IPs, runs dirsearch on hostname
-- **Bandwidth Throttling** - 3 threads, polite timing (T2) to avoid network saturation
+### Phase 2: Deep Scanning
+- **On-Demand Queue** - User-initiated deep scans per asset from dashboard
+- **Full Port Enumeration** - Nmap all 65535 ports with `-T5` timing
+- **Directory Discovery** - Dirsearch (25 threads, non-recursive)
+- **CDN-Aware** - Skips nmap for CDN/Cloudflare IPs, still runs dirsearch on hostname
+- **Discord Notifications** - Alerts on scan start, completion, and nmap skip
+- **Queue Management** - Cancel pending scans, view queue status in real-time
 
-> Phase 2 is designed for scheduled deep scanning without impacting Phase 1 responsiveness.
+### Phase 3: Monitoring (Planned)
+- **Liveness Monitoring** - ICMP/TCP checks every 5 minutes
+- **CT Logs Monitoring** - Poll for new subdomains every 1 hour
+- **Certificate Expiry** - Warnings for certs expiring within 3 days
+- **Auto-Discovery** - New subdomains from CT logs added via Phase 0
+- **UI Toggle** - Enable/disable monitoring from dashboard
 
 ### Dashboard Features
 - **Dark/Light Mode** - Toggle with persistent theme preference
@@ -99,6 +105,7 @@ LazyEASM/
 │   ├── 03-asset-expansion.py  # Phase 0 discovery pipeline
 │   ├── 05-dirsearch.py        # Directory enumeration
 │   ├── phase1_runner.py       # Phase 1 scanning pipeline
+│   ├── phase2_dirsearch.py    # Phase 2 deep scan runner
 │   ├── Wappalyzer.py          # Technology fingerprinting
 │   ├── CVEmatch.py            # CVE lookup via Vulners
 │   ├── AskAI.py               # Gemini AI recommendations
@@ -109,10 +116,12 @@ LazyEASM/
 │   ├── env_manager.py         # .env file management
 │   ├── parsing.py             # Input parsing utilities
 │   ├── utility.py             # DNS, Ping, shared hosting detection
-│   └── queue_manager.py       # Task queue for Phase 1
+│   ├── queue_manager.py       # Task queue for Phase 1
+│   └── phase2_worker.py       # Background worker for Phase 2 queue
 ├── templates/
 │   ├── dashboard.html         # Main dashboard UI
 │   ├── table_partial.html     # Asset table component
+│   ├── queue_partial.html     # Phase 2 queue table component
 │   └── login.html             # Login page
 ├── static/
 │   └── images/                # Logo and icons
@@ -164,7 +173,7 @@ subdomain_asset ─┬── subdomain_ip ──┘
 - CTLogs API may return 503 when overloaded
 - Shared/CDN IPs skipped for port scanning
 - CVE matching requires version detection
-- Phase 2 deep scanning not yet integrated (in development)
+- Phase 3 monitoring not yet implemented (planned)
 
 ## Thesis
 

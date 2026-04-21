@@ -227,11 +227,12 @@ JWT_SECRET=your_jwt_secret_here
 
 ## Next Steps
 
-1. [ ] Create `utils/queue_manager.py` - Queue management
-2. [ ] Create `modules/05-http-discovery.py` - HTTP service detection
-3. [ ] Create `modules/06-dirsearch.py` - Directory enumeration
-4. [ ] Modify `main.py` - Phase 0 complete → trigger Phase 1 queue
-5. [ ] Integrate Wappalyzer + CVEmatch into Phase 1 pipeline
-6. [ ] Test full pipeline: Phase 0 → Phase 1 → Discord alert
-7. [ ] Update .env.example with all required keys
-8. [ ] Clean up backup files
+### Phase 3: Monitoring (TODO)
+
+1. [ ] Create `utils/liveness_checker.py` - ICMP/TCP liveness checks
+2. [ ] Create `utils/ct_monitor.py` - crt.sh polling for new certs/subdomains
+3. [ ] Create `utils/phase3_worker.py` - Background threads (5 min liveness, 1 hr CT)
+4. [ ] Add `settings` table for Phase 3 toggle
+5. [ ] Add UI toggle for Phase 3 enable/disable
+6. [ ] Dashboard updates for liveness status
+7. [ ] CT logs events display

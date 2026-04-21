@@ -917,10 +917,15 @@ def get_all_assets_for_display() -> list:
                 'domain' as type,
                 d.status,
                 d.last_scanned,
+                d.last_deep_scan,
                 CASE WHEN 
                     COUNT(p.port_id) > 0 
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = d.domain_name)
-                THEN 1 ELSE 0 END as is_scanned
+                THEN 1 ELSE 0 END as is_scanned,
+                (SELECT sq.status FROM scan_queue sq 
+                 WHERE sq.target = d.domain_name 
+                   AND sq.scan_type = 'phase2_deep_scan' 
+                 ORDER BY sq.queued_at DESC LIMIT 1) as phase2_status
             FROM domain_asset d
             LEFT JOIN domain_ip di ON di.dom_id = d.dom_id
             LEFT JOIN ip_asset i ON i.ip_id = di.ip_id
@@ -946,10 +951,15 @@ def get_all_assets_for_display() -> list:
                 'subdomain' as type,
                 s.status,
                 s.last_scanned,
+                s.last_deep_scan,
                 CASE WHEN 
                     COUNT(p.port_id) > 0 
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = s.subdomain_name)
-                THEN 1 ELSE 0 END as is_scanned
+                THEN 1 ELSE 0 END as is_scanned,
+                (SELECT sq.status FROM scan_queue sq 
+                 WHERE sq.target = s.subdomain_name 
+                   AND sq.scan_type = 'phase2_deep_scan' 
+                 ORDER BY sq.queued_at DESC LIMIT 1) as phase2_status
             FROM subdomain_asset s
             LEFT JOIN subdomain_ip si ON si.sub_id = s.sub_id
             LEFT JOIN ip_asset i ON i.ip_id = si.ip_id
@@ -1655,6 +1665,31 @@ def get_http_service_id(host: str, port: int) -> Optional[int]:
     conn.close()
     
     return result['http_id'] if result else None
+
+
+def clear_phase1_queue() -> int:
+    """
+    Clear pending/running Phase 1 items from scan queue.
+    
+    Called by Phase 2 before starting to ensure clean slate.
+    
+    Returns:
+        Number of items deleted
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        DELETE FROM scan_queue
+        WHERE scan_type = 'phase1'
+          AND status IN ('pending', 'running')
+    ''')
+    
+    deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    return deleted
 
 
 if __name__ == '__main__':

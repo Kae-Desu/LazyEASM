@@ -142,7 +142,22 @@ def dashboard():
     assets = get_all_assets_for_display()
     queue_status = task_queue.get_status()
     queue_active = task_queue.is_active()
-    return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active)
+    
+    # Get Phase 2 queue items
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT queue_id, scan_type, target, target_id, target_type, status, 
+               queued_at, started_at, completed_at, ports_found, dirs_found, error_message
+        FROM scan_queue
+        WHERE scan_type = 'phase2_deep_scan'
+        ORDER BY queued_at DESC
+        LIMIT 20
+    ''')
+    phase2_queue = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue)
 
 
 @app.route('/delete_asset/<asset_type>/<int:asset_id>', methods=['DELETE'])
@@ -239,11 +254,70 @@ def update_table():
     return render_template('table_partial.html', assets=assets)
 
 
+@app.route('/update_queue')
+@token_required
+def update_queue():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT queue_id, target, target_id, target_type, status, 
+               queued_at, started_at, completed_at, ports_found, dirs_found, error_message
+        FROM scan_queue
+        WHERE scan_type = 'phase2_deep_scan'
+        ORDER BY queued_at DESC
+        LIMIT 50
+    ''')
+    
+    phase2_queue = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return render_template('queue_partial.html', phase2_queue=phase2_queue)
+
+
 @app.route('/queue/status')
 @token_required
 def queue_status():
     """API endpoint for queue status polling."""
     return jsonify(task_queue.get_status())
+
+
+@app.route('/phase_status')
+def phase_status():
+    """
+    Get current phase status for dashboard.
+    
+    Returns:
+        JSON with phase, progress, ETA, next run time
+    """
+    from utils.phase_lock import get_phase2_progress, get_current_phase, PHASE_NONE, get_next_phase2_time
+    
+    current_phase = get_current_phase()
+    
+    if current_phase == PHASE_NONE:
+        return jsonify({
+            'phase': 0,
+            'phase_name': 'none',
+            'message': 'No phase running',
+            'next_run': get_next_phase2_time()
+        })
+    
+    progress = get_phase2_progress()
+    
+    phase_names = {
+        1: 'phase0',
+        2: 'phase1',
+        3: 'phase2'
+    }
+    
+    return jsonify({
+        'phase': current_phase,
+        'phase_name': phase_names.get(current_phase, 'unknown'),
+        'total': progress['total'],
+        'processed': progress['processed'],
+        'eta_minutes': progress['eta_minutes'],
+        'next_run': get_next_phase2_time()
+    })
 
 
 @app.route('/generate_ai', methods=['POST'])
@@ -320,6 +394,18 @@ def process_assets():
     Returns immediately with "Asset accepted" message.
     Sends Discord notification when complete.
     """
+    from utils.phase_lock import is_phase2_running, get_phase2_progress
+    
+    # Check if Phase 2 is running
+    if is_phase2_running():
+        progress = get_phase2_progress()
+        flash(
+            f"Phase 2 is currently running ({progress['processed']}/{progress['total']} assets). "
+            f"Please wait for it to complete. New assets will be scanned in the next Phase 2 cycle.",
+            'warning'
+        )
+        return redirect(url_for('dashboard'))
+    
     input_text = request.form.get('asset_input', '')
     
     if not input_text or not input_text.strip():
@@ -434,5 +520,179 @@ def enqueue_assets_for_phase1():
         print(f"[Queue] Error enqueueing assets: {e}")
 
 
+# ============================================
+# Phase 2 API Endpoints
+# ============================================
+
+@app.route('/api/phase2/scan', methods=['POST'])
+@token_required
+def queue_phase2_scan():
+    """
+    Queue a Phase 2 deep scan for an asset.
+    
+    Request body:
+        asset_id: int
+        asset_type: 'domain' | 'subdomain'
+        asset_name: str
+    """
+    # Get data from form or JSON
+    if request.is_json:
+        data = request.get_json()
+        asset_id = data.get('asset_id')
+        asset_type = data.get('asset_type')
+        asset_name = data.get('asset_name')
+    else:
+        asset_id = request.form.get('asset_id')
+        asset_type = request.form.get('asset_type')
+        asset_name = request.form.get('asset_name')
+    
+    if not asset_id or not asset_type or not asset_name:
+        return jsonify({'success': False, 'error': f'Missing parameters. Got: asset_id={asset_id}, asset_type={asset_type}, asset_name={asset_name}'}), 400
+    
+    try:
+        asset_id = int(asset_id)
+    except (ValueError, TypeError):
+        return jsonify({'success': False, 'error': 'asset_id must be an integer'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if already queued or processing
+    cursor.execute('''
+        SELECT queue_id, status FROM scan_queue 
+        WHERE target = ? AND scan_type = 'phase2_deep_scan' 
+          AND status IN ('pending', 'processing')
+    ''', (asset_name,))
+    
+    existing = cursor.fetchone()
+    if existing:
+        conn.close()
+        return jsonify({
+            'success': False, 
+            'error': f'Asset already in queue with status: {existing["status"]}'
+        }), 400
+    
+    # Add to queue
+    cursor.execute('''
+        INSERT INTO scan_queue (scan_type, cycle, target, target_id, target_type, status, queued_at)
+        VALUES (?, 'phase2', ?, ?, ?, 'pending', datetime('now'))
+    ''', ('phase2_deep_scan', asset_name, asset_id, asset_type))
+    
+    queue_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    
+    # Send Discord notification
+    try:
+        from modules.Notify import send_message
+        send_message(
+            f"**Phase 2 Deep Scan Queued**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"Asset: {asset_name}\n"
+            f"Type: {asset_type}\n"
+            f"Queue ID: {queue_id}"
+        )
+    except Exception as e:
+        print(f"[Phase2] Discord notification failed: {e}")
+    
+    return jsonify({
+        'success': True, 
+        'message': f'Deep scan queued for {asset_name}',
+        'queue_id': queue_id
+    })
+
+
+@app.route('/api/phase2/cancel', methods=['POST'])
+@token_required
+def cancel_phase2_scan():
+    """
+    Cancel a pending Phase 2 scan.
+    
+    Request body:
+        asset_name: str
+    """
+    asset_name = request.form.get('asset_name') or request.json.get('asset_name') if request.is_json else None
+    
+    if not asset_name:
+        return jsonify({'success': False, 'error': 'Missing asset_name'}), 400
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Find pending scan
+    cursor.execute('''
+        SELECT queue_id, status FROM scan_queue 
+        WHERE target = ? AND scan_type = 'phase2_deep_scan' 
+          AND status = 'pending'
+    ''', (asset_name,))
+    
+    scan = cursor.fetchone()
+    
+    if not scan:
+        conn.close()
+        return jsonify({'success': False, 'error': 'No pending scan found for this asset'}), 404
+    
+    if scan['status'] != 'pending':
+        conn.close()
+        return jsonify({'success': False, 'error': f'Cannot cancel scan with status: {scan["status"]}'}), 400
+    
+    # Delete from queue
+    cursor.execute('DELETE FROM scan_queue WHERE queue_id = ?', (scan['queue_id'],))
+    conn.commit()
+    conn.close()
+    
+    # Send Discord notification
+    try:
+        from modules.Notify import send_message
+        send_message(
+            f"**Phase 2 Scan Cancelled**\n"
+            f"━━━━━━━━━━━━━━━━━━\n"
+            f"Asset: {asset_name}"
+        )
+    except Exception as e:
+        print(f"[Phase2] Discord notification failed: {e}")
+    
+    return jsonify({
+        'success': True, 
+        'message': f'Scan cancelled for {asset_name}'
+    })
+
+
+@app.route('/api/phase2/queue', methods=['GET'])
+@token_required
+def get_phase2_queue():
+    """Get all Phase 2 scans in queue."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT queue_id, target, target_id, target_type, status, 
+               queued_at, started_at, completed_at, ports_found, dirs_found, error_message
+        FROM scan_queue
+        WHERE scan_type = 'phase2_deep_scan'
+        ORDER BY queued_at DESC
+        LIMIT 50
+    ''')
+    
+    queue_items = [dict(row) for row in cursor.fetchall()]
+    conn.close()
+    
+    return jsonify({
+        'success': True,
+        'queue': queue_items
+    })
+
+
 if __name__ == '__main__':
-    app.run(debug=True, host='0.0.0.0', port=8080)
+    # Start Phase 2 worker in background thread
+    from utils.phase2_worker import phase2_worker_loop
+    
+    worker_thread = threading.Thread(
+        target=phase2_worker_loop,
+        args=(5,),
+        daemon=True
+    )
+    worker_thread.start()
+    print("[Phase2] Worker thread started")
+    
+    app.run(debug=True, host='0.0.0.0', port=10001)

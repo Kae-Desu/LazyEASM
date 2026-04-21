@@ -283,12 +283,48 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_target_type ON scan_queue(target_type)')
 
     # ============================================
+    # PHASE STATUS TRACKING
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS phase_status (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            current_phase INTEGER DEFAULT 0,
+            started_at TEXT,
+            total_assets INTEGER DEFAULT 0,
+            processed_assets INTEGER DEFAULT 0,
+            eta_minutes INTEGER
+        )
+    ''')
+    
+    cursor.execute('INSERT OR IGNORE INTO phase_status (id, current_phase) VALUES (1, 0)')
+
+    # ============================================
     # MIGRATIONS (for existing databases)
     # ============================================
     cursor.execute("PRAGMA table_info(subdomain_asset)")
     subdomain_columns = [col[1] for col in cursor.fetchall()]
     if 'last_scanned' not in subdomain_columns:
         cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_scanned TEXT")
+    
+    # Add last_deep_scan column to domain_asset
+    cursor.execute("PRAGMA table_info(domain_asset)")
+    domain_columns = [col[1] for col in cursor.fetchall()]
+    if 'last_deep_scan' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_deep_scan TEXT")
+    
+    # Add last_deep_scan column to subdomain_asset
+    if 'last_deep_scan' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_deep_scan TEXT")
+    
+    # Add ports_found and dirs_found to scan_queue if not exists
+    cursor.execute("PRAGMA table_info(scan_queue)")
+    queue_columns = [col[1] for col in cursor.fetchall()]
+    if 'ports_found' not in queue_columns:
+        cursor.execute("ALTER TABLE scan_queue ADD COLUMN ports_found INTEGER DEFAULT 0")
+    if 'dirs_found' not in queue_columns:
+        cursor.execute("ALTER TABLE scan_queue ADD COLUMN dirs_found INTEGER DEFAULT 0")
+    if 'error_message' not in queue_columns:
+        cursor.execute("ALTER TABLE scan_queue ADD COLUMN error_message TEXT")
 
     conn.commit()
     conn.close()

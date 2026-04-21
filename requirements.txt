@@ -6,4 +6,5 @@ dnspython>=2.4.0
 python-dotenv
 python-Wappalyzer
 dirsearch
+psutil>=5.9.0
 setuptools<70
