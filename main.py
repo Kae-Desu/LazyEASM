@@ -135,6 +135,116 @@ def logout():
     return resp
 
 
+@app.route('/health')
+def health():
+    """
+    Health check endpoint for Docker/monitoring.
+    
+    No auth required for localhost, auth required for external.
+    
+    Returns:
+        {
+            'status': 'healthy' | 'unhealthy',
+            'checks': {
+                'database': 'ok' | 'error: ...',
+                'phase0_worker': 'ok' | 'error: ...',
+                'phase1_queue': 'ok' | 'error: ...',
+                'phase2_worker': 'ok' | 'error: ...',
+                'phase3_liveness': 'ok' | 'error: ...',
+                'phase3_ctlogs': 'ok' | 'error: ...'
+            }
+        }
+    """
+    from flask import request
+    from utils.phase0_worker import get_phase0_status
+    from utils.phase2_worker import get_phase2_status
+    from utils.phase3_worker import get_phase3_status
+    
+    # Check if request is from localhost (no auth required)
+    client_ip = request.remote_addr
+    is_localhost = client_ip in ['127.0.0.1', '::1', 'localhost']
+    
+    # If not localhost, require auth
+    if not is_localhost:
+        token = request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+        if not token:
+            return jsonify({'status': 'unhealthy', 'error': 'Authentication required'}), 401
+        
+        try:
+            jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+        except jwt.ExpiredSignatureError:
+            return jsonify({'status': 'unhealthy', 'error': 'Token expired'}), 401
+        except jwt.InvalidTokenError:
+            return jsonify({'status': 'unhealthy', 'error': 'Invalid token'}), 401
+    
+    checks = {}
+    all_healthy = True
+    
+    # 1. Database check
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1")
+        conn.close()
+        checks['database'] = 'ok'
+    except Exception as e:
+        checks['database'] = f'error: {str(e)[:50]}'
+        all_healthy = False
+    
+    # 2. Phase 0 worker check
+    try:
+        phase0_status = get_phase0_status()
+        if phase0_status.get('thread_alive'):
+            checks['phase0_worker'] = 'ok'
+        else:
+            checks['phase0_worker'] = 'error: thread not running'
+            all_healthy = False
+    except Exception as e:
+        checks['phase0_worker'] = f'error: {str(e)[:50]}'
+        all_healthy = False
+    
+    # 3. Phase 1 queue check (ThreadPoolExecutor creates threads on demand)
+    try:
+        queue_status = task_queue.get_status()
+        workers_status = task_queue.get_workers_status()
+        # Consider healthy if queue exists and process is running
+        checks['phase1_queue'] = 'ok'
+    except Exception as e:
+        checks['phase1_queue'] = f'error: {str(e)[:50]}'
+        all_healthy = False
+    
+    # 4. Phase 2 worker check
+    try:
+        phase2_status = get_phase2_status()
+        if phase2_status.get('thread_alive'):
+            checks['phase2_worker'] = 'ok'
+        else:
+            checks['phase2_worker'] = 'error: thread not running'
+            all_healthy = False
+    except Exception as e:
+        checks['phase2_worker'] = f'error: {str(e)[:50]}'
+        all_healthy = False
+    
+    # 5. Phase 3 workers check
+    try:
+        phase3_status = get_phase3_status()
+        
+        if phase3_status.get('running'):
+            checks['phase3_workers'] = 'ok'
+        else:
+            checks['phase3_workers'] = 'error: workers not running'
+            all_healthy = False
+    except Exception as e:
+        checks['phase3_workers'] = f'error: {str(e)[:50]}'
+        all_healthy = False
+    
+    status_code = 200 if all_healthy else 503
+    return jsonify({
+        'status': 'healthy' if all_healthy else 'unhealthy',
+        'checks': checks
+    }), status_code
+
+
 @app.route('/')
 @token_required
 def dashboard():
@@ -486,6 +596,7 @@ def enqueue_assets_for_phase1():
     """
     Enqueue all discovered assets from database for Phase 1 processing.
     
+    Only enqueues assets that haven't been scanned yet (last_scanned IS NULL).
     Queries domain_asset, subdomain_asset, and ip_asset tables
     for assets with status='up'.
     """
@@ -493,20 +604,26 @@ def enqueue_assets_for_phase1():
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        # Enqueue domains
-        cursor.execute("SELECT dom_id, domain_name FROM domain_asset WHERE status='up'")
+        # Enqueue domains that haven't been scanned
+        cursor.execute('''
+            SELECT dom_id, domain_name FROM domain_asset 
+            WHERE status='up' AND last_scanned IS NULL
+        ''')
         for row in cursor.fetchall():
             task_queue.enqueue(row['dom_id'], 'domain', row['domain_name'])
         
-        # Enqueue subdomains
-        cursor.execute("SELECT sub_id, subdomain_name FROM subdomain_asset WHERE status='up'")
+        # Enqueue subdomains that haven't been scanned
+        cursor.execute('''
+            SELECT sub_id, subdomain_name FROM subdomain_asset 
+            WHERE status='up' AND last_scanned IS NULL
+        ''')
         for row in cursor.fetchall():
             task_queue.enqueue(row['sub_id'], 'subdomain', row['subdomain_name'])
         
-        # Enqueue IPs (standalone, not linked to domain/subdomain)
+        # Enqueue IPs (standalone, not linked to domain/subdomain) that haven't been scanned
         cursor.execute('''
             SELECT ip_id, ip_value FROM ip_asset 
-            WHERE status='up'
+            WHERE status='up' AND last_scanned IS NULL
               AND ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
         ''')
         for row in cursor.fetchall():
@@ -518,6 +635,49 @@ def enqueue_assets_for_phase1():
         
     except Exception as e:
         print(f"[Queue] Error enqueueing assets: {e}")
+
+
+def enqueue_single_asset_for_phase1(asset_name: str, asset_type: str):
+    """
+    Enqueue a single asset for Phase 1 processing.
+    
+    Uses INSERT OR IGNORE to prevent duplicates.
+    Called by Phase 0 worker after processing each subdomain.
+    
+    Args:
+        asset_name: Domain, subdomain, or IP name
+        asset_type: 'domain', 'subdomain', or 'ip'
+    """
+    try:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        
+        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Get asset ID based on type
+        asset_id = None
+        if asset_type == 'domain':
+            cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (asset_name,))
+            row = cursor.fetchone()
+            asset_id = row['dom_id'] if row else None
+        elif asset_type == 'subdomain':
+            cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (asset_name,))
+            row = cursor.fetchone()
+            asset_id = row['sub_id'] if row else None
+        
+        # Insert into queue
+        cursor.execute('''
+            INSERT OR IGNORE INTO scan_queue (scan_type, cycle, target, target_id, target_type, status, queued_at)
+            VALUES ('phase1', 'standard', ?, ?, ?, 'pending', ?)
+        ''', (asset_name, asset_id, asset_type, now))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"[Phase0] Enqueued {asset_name} for Phase 1")
+        
+    except Exception as e:
+        print(f"[Phase0] Error enqueueing {asset_name}: {e}")
 
 
 # ============================================
@@ -683,9 +843,115 @@ def get_phase2_queue():
     })
 
 
+# ============================================
+# PHASE 3: CONTINUOUS MONITORING ENDPOINTS
+# ============================================
+
+@app.route('/api/phase3/status', methods=['GET'])
+@token_required
+def phase3_status():
+    """Get Phase 3 monitoring status."""
+    from utils.phase3_worker import get_phase3_status
+    from utils.liveness_checker import get_liveness_summary
+    from utils.ct_monitor import get_cert_expiry_summary
+    
+    status = get_phase3_status()
+    liveness = get_liveness_summary()
+    certs = get_cert_expiry_summary()
+    
+    return jsonify({
+        'success': True,
+        'running': status['running'],
+        'enabled': status['enabled'],
+        'last_liveness_check': status['last_liveness_check'],
+        'last_ctlogs_check': status['last_ctlogs_check'],
+        'liveness_interval_min': status['liveness_interval_min'],
+        'ctlogs_interval_hr': status['ctlogs_interval_hr'],
+        'assets': {
+            'total': liveness['total'],
+            'up': liveness['up'],
+            'down': liveness['down']
+        },
+        'certificates': {
+            'total': certs['total_certs'],
+            'expiring_3_days': certs['expiring_3_days'],
+            'expiring_7_days': certs['expiring_7_days'],
+            'expiring_30_days': certs['expiring_30_days']
+        }
+    })
+
+
+@app.route('/api/phase3/toggle', methods=['POST'])
+@token_required
+def phase3_toggle():
+    """Enable or disable Phase 3 monitoring."""
+    from utils.db_utils import set_setting
+    from utils.phase3_worker import start_phase3_workers, stop_phase3_workers, get_phase3_status
+    
+    data = request.get_json() or {}
+    enabled = data.get('enabled', True)
+    
+    # Update setting
+    set_setting('phase3_enabled', '1' if enabled else '0')
+    
+    # Start or stop workers
+    if enabled:
+        start_phase3_workers()
+    else:
+        stop_phase3_workers()
+    
+    status = get_phase3_status()
+    
+    return jsonify({
+        'success': True,
+        'enabled': status['enabled'],
+        'running': status['running'],
+        'message': f"Phase 3 monitoring {'enabled' if enabled else 'disabled'}"
+    })
+
+
+@app.route('/api/phase3/liveness/check', methods=['POST'])
+@token_required
+def phase3_liveness_check():
+    """Manually trigger a liveness check."""
+    from utils.liveness_checker import check_all_liveness
+    from utils.phase3_worker import send_liveness_notification
+    
+    result = check_all_liveness()
+    
+    # Send notification if any changes
+    if result['down'] or result['recovered']:
+        send_liveness_notification(result)
+    
+    return jsonify({
+        'success': True,
+        'result': result
+    })
+
+
+@app.route('/api/phase3/ctlogs/check', methods=['POST'])
+@token_required
+def phase3_ctlogs_check():
+    """Manually trigger a CT logs check."""
+    from utils.ct_monitor import poll_all_domains
+    from utils.phase3_worker import send_ctlogs_notification
+    
+    result = poll_all_domains()
+    
+    # Send notification if any discoveries
+    if result['new_subdomains'] or result['cert_expiring']:
+        send_ctlogs_notification(result)
+    
+    return jsonify({
+        'success': True,
+        'result': result
+    })
+
+
 if __name__ == '__main__':
     # Start Phase 2 worker in background thread
-    from utils.phase2_worker import phase2_worker_loop
+    from utils.phase2_worker import phase2_worker_loop, _phase2_thread as phase2_thread_ref
+    import utils.phase2_worker
     
     worker_thread = threading.Thread(
         target=phase2_worker_loop,
@@ -693,6 +959,19 @@ if __name__ == '__main__':
         daemon=True
     )
     worker_thread.start()
+    
+    # Store thread reference for health check
+    utils.phase2_worker._phase2_thread = worker_thread
     print("[Phase2] Worker thread started")
+    
+    # Start Phase 0 worker in background thread
+    from utils.phase0_worker import start_phase0_worker
+    start_phase0_worker()
+    print("[Phase0] Discovery worker started")
+    
+    # Start Phase 3 workers in background
+    from utils.phase3_worker import start_phase3_workers
+    start_phase3_workers()
+    print("[Phase3] Monitoring workers started")
     
     app.run(debug=True, host='0.0.0.0', port=10001)

@@ -258,6 +258,25 @@ def init_db():
     ''')
 
     # ============================================
+    # SETTINGS (Phase 3 and general config)
+    # ============================================
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        description TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # Insert default settings
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('phase3_enabled', '1', 'Enable Phase 3 continuous monitoring')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('liveness_interval_min', '5', 'Liveness check interval in minutes')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('ctlogs_interval_hr', '1', 'CT logs polling interval in hours')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_liveness_check', NULL, 'Last liveness check timestamp')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_ctlogs_check', NULL, 'Last CT logs check timestamp')")
+
+    # ============================================
     # INDEXES FOR PERFORMANCE
     # ============================================
 
@@ -281,6 +300,13 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_status ON scan_queue(status)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_cycle ON scan_queue(cycle)')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_target_type ON scan_queue(target_type)')
+    
+    # Unique index to prevent duplicate pending/processing entries
+    cursor.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_pending_queue
+        ON scan_queue (scan_type, target)
+        WHERE status IN ('pending', 'processing')
+    ''')
 
     # ============================================
     # PHASE STATUS TRACKING

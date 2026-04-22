@@ -12,12 +12,16 @@ from datetime import datetime
 import importlib
 import sys
 import os
+import threading
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.db_utils import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+# Global thread reference for health check
+_phase2_thread = None
 
 
 def get_next_queued_scan():
@@ -256,6 +260,8 @@ def phase2_worker_loop(interval: int = 5):
     
     This is designed to run in a background thread.
     """
+    global _phase2_thread
+    
     logger.info("Phase 2 worker started")
     
     while True:
@@ -267,3 +273,44 @@ def phase2_worker_loop(interval: int = 5):
         except Exception as e:
             logger.error(f"Phase 2 worker error: {e}")
             time.sleep(interval)
+
+
+def get_phase2_status() -> dict:
+    """
+    Get Phase 2 worker status.
+    
+    Returns:
+        {
+            'running': bool,
+            'thread_alive': bool,
+            'pending': int,
+            'processing': int
+        }
+    """
+    from utils.db_utils import get_db_connection
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT COUNT(*) as count FROM scan_queue
+        WHERE scan_type = 'phase2_deep_scan' AND status = 'pending'
+    ''')
+    
+    pending = cursor.fetchone()['count']
+    
+    cursor.execute('''
+        SELECT COUNT(*) as count FROM scan_queue
+        WHERE scan_type = 'phase2_deep_scan' AND status = 'processing'
+    ''')
+    
+    processing = cursor.fetchone()['count']
+    
+    conn.close()
+    
+    return {
+        'running': _phase2_thread is not None,
+        'thread_alive': _phase2_thread.is_alive() if _phase2_thread else False,
+        'pending': pending,
+        'processing': processing
+    }

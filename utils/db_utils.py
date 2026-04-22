@@ -1534,7 +1534,7 @@ def update_asset_last_scanned(asset_id: int, asset_type: str) -> None:
 
 def upsert_certificate(hostname: str, issuer: str = None, not_before: str = None, 
                        not_after: str = None, serial_number: str = None, 
-                       fingerprint: str = None, sub_id: int = None, source: str = 'ctlogs') -> int:
+                       fingerprint: str = None, sub_id: int = None, source: str = 'ctlogs') -> dict:
     """
     Insert or update certificate record.
     
@@ -1549,22 +1549,54 @@ def upsert_certificate(hostname: str, issuer: str = None, not_before: str = None
         source: Source of cert data ('ctlogs', 'ssl_scan')
     
     Returns:
-        cert_id
+        {
+            'cert_id': int,
+            'is_new': bool,
+            'signature_changed': bool,
+            'old_serial': str or None,
+            'old_fingerprint': str or None
+        }
     """
     conn = get_db_connection()
     cursor = conn.cursor()
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     
+    result = {
+        'cert_id': 0,
+        'is_new': False,
+        'signature_changed': False,
+        'old_serial': None,
+        'old_fingerprint': None
+    }
+    
     try:
+        # Check if cert exists with same hostname and not_after
         cursor.execute('''
-            SELECT cert_id FROM certificates 
+            SELECT cert_id, serial_number, fingerprint FROM certificates 
             WHERE hostname = ? AND not_after = ?
         ''', (hostname, not_after))
         
-        result = cursor.fetchone()
+        existing = cursor.fetchone()
         
-        if result:
-            cert_id = result['cert_id']
+        if existing:
+            # Cert exists - check if signature changed
+            cert_id = existing['cert_id']
+            old_serial = existing['serial_number']
+            old_fingerprint = existing['fingerprint']
+            
+            # Detect signature change
+            signature_changed = False
+            if old_serial and serial_number and old_serial != serial_number:
+                signature_changed = True
+            if old_fingerprint and fingerprint and old_fingerprint != fingerprint:
+                signature_changed = True
+            
+            if signature_changed:
+                result['signature_changed'] = True
+                result['old_serial'] = old_serial
+                result['old_fingerprint'] = old_fingerprint
+            
+            # Update cert info
             cursor.execute('''
                 UPDATE certificates 
                 SET issuer = ?, not_before = ?, serial_number = ?, fingerprint = ?, 
@@ -1572,17 +1604,22 @@ def upsert_certificate(hostname: str, issuer: str = None, not_before: str = None
                 WHERE cert_id = ?
             ''', (issuer, not_before, serial_number, fingerprint, sub_id, now, cert_id))
             conn.commit()
-            return cert_id
+            result['cert_id'] = cert_id
         else:
+            # New certificate
             cursor.execute('''
                 INSERT INTO certificates (hostname, issuer, not_before, not_after, serial_number, fingerprint, sub_id, source, first_seen)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ''', (hostname, issuer, not_before, not_after, serial_number, fingerprint, sub_id, source, now))
             conn.commit()
-            return cursor.lastrowid
+            result['cert_id'] = cursor.lastrowid
+            result['is_new'] = True
+        
+        return result
+        
     except Exception as e:
         print(f"Error upserting certificate: {e}")
-        return 0
+        return result
     finally:
         conn.close()
 
@@ -1690,6 +1727,191 @@ def clear_phase1_queue() -> int:
     conn.close()
     
     return deleted
+
+
+# ============================================
+# PHASE 3 SETTINGS FUNCTIONS
+# ============================================
+
+def get_setting(key: str) -> str:
+    """
+    Get setting value from settings table.
+    
+    Args:
+        key: Setting key
+    
+    Returns:
+        Setting value or empty string if not found
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    result = cursor.fetchone()
+    conn.close()
+    
+    return result['value'] if result else ''
+
+
+def set_setting(key: str, value: str) -> bool:
+    """
+    Update or insert setting.
+    
+    Args:
+        key: Setting key
+        value: Setting value
+    
+    Returns:
+        True if successful
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    cursor.execute('''
+        INSERT INTO settings (key, value, updated_at)
+        VALUES (?, ?, ?)
+        ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
+    ''', (key, value, now, value, now))
+    
+    conn.commit()
+    conn.close()
+    
+    return True
+
+
+def get_all_assets_for_liveness() -> list:
+    """
+    Get all domains and subdomains with their current status.
+    
+    Returns:
+        List of dicts with asset_id, asset_type, name, status
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    assets = []
+    
+    # Get domains
+    cursor.execute('''
+        SELECT dom_id as asset_id, 'domain' as asset_type, domain_name as name, status
+        FROM domain_asset
+    ''')
+    assets.extend([dict(row) for row in cursor.fetchall()])
+    
+    # Get subdomains
+    cursor.execute('''
+        SELECT sub_id as asset_id, 'subdomain' as asset_type, subdomain_name as name, status
+        FROM subdomain_asset
+    ''')
+    assets.extend([dict(row) for row in cursor.fetchall()])
+    
+    conn.close()
+    
+    return assets
+
+
+def update_asset_status(asset_id: int, asset_type: str, status: str) -> bool:
+    """
+    Update status column for domain or subdomain.
+    
+    Args:
+        asset_id: dom_id or sub_id
+        asset_type: 'domain' or 'subdomain'
+        status: 'up' or 'down'
+    
+    Returns:
+        True if successful
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    if asset_type == 'domain':
+        cursor.execute('''
+            UPDATE domain_asset SET status = ?, last_seen = ? WHERE dom_id = ?
+        ''', (status, now, asset_id))
+    else:
+        cursor.execute('''
+            UPDATE subdomain_asset SET status = ?, last_seen = ? WHERE sub_id = ?
+        ''', (status, now, asset_id))
+    
+    conn.commit()
+    conn.close()
+    
+    return cursor.rowcount > 0
+
+
+def get_all_monitored_domains() -> list:
+    """
+    Get all domains for CT logs monitoring.
+    
+    Returns:
+        List of domain names
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT domain_name FROM domain_asset')
+    domains = [row['domain_name'] for row in cursor.fetchall()]
+    
+    conn.close()
+    
+    return domains
+
+
+def get_known_subdomains() -> set:
+    """
+    Get all known subdomains from database.
+    
+    Returns:
+        Set of subdomain names
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT subdomain_name FROM subdomain_asset')
+    subdomains = {row['subdomain_name'] for row in cursor.fetchall()}
+    
+    conn.close()
+    
+    return subdomains
+
+
+def queue_subdomain_discovery(subdomain_name: str, domain_name: str):
+    """
+    Queue a newly discovered subdomain for Phase 0 processing.
+    
+    Args:
+        subdomain_name: New subdomain found via CT logs
+        domain_name: Parent domain
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Check if already exists in subdomain_asset
+    cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (subdomain_name,))
+    if cursor.fetchone():
+        conn.close()
+        return
+    
+    # Check if it's a root domain in domain_asset
+    cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (subdomain_name,))
+    if cursor.fetchone():
+        conn.close()
+        return
+    
+    # Add to scan_queue for Phase 0
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    cursor.execute('''
+        INSERT OR IGNORE INTO scan_queue (scan_type, target, target_type, status, cycle, queued_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+    ''', ('phase0_discovery', subdomain_name, 'subdomain', 'pending', 'continuous_monitoring', now))
+    
+    conn.commit()
+    conn.close()
 
 
 if __name__ == '__main__':

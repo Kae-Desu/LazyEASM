@@ -52,9 +52,8 @@
         html.light { background-color: var(--lazy-light) !important; }
         html:not(.dark):not(.light) { background-color: var(--lazy-light) !important; }
         .glass { backdrop-filter: blur(12px); }
-        /* Navbar Glass Effect - Menyesuaikan Signature Color */
-        .light .glass { background: rgba(63, 63, 63, 0.95); }
-        .dark .glass { background: rgba(47, 47, 47, 0.95); }
+        /* Navbar Glass Effect - Consistent dark color for both modes */
+        .glass { background: rgba(47, 47, 47, 0.95); }
         
         .card-glow:hover { box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
         body { transition: background-color 0.3s ease; }
@@ -220,7 +219,83 @@
                 </div>
             </div>
         </div>
+
+        <!-- Phase 3 Continuous Monitoring -->
         <div class="mt-10">
+            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
+                <i class="fas fa-heartbeat mr-2 text-accent"></i>Continuous Monitoring
+            </h3>
+            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <div class="flex items-center space-x-4">
+                        <label class="relative inline-flex items-center cursor-pointer">
+                            <input type="checkbox" id="phase3-toggle" class="sr-only peer" checked>
+                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500"></div>
+                        </label>
+                        <span id="phase3-status-label" class="text-sm font-medium text-slate-700 dark:text-slate-300">Enabled</span>
+                    </div>
+                    <div class="flex items-center space-x-2">
+                        <span id="phase3-running-badge" class="hidden px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                            <i class="fas fa-circle animate-pulse mr-1 text-[8px]"></i>Running
+                        </span>
+                    </div>
+                </div>
+                
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                    <!-- Assets Status -->
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl p-4 border border-border dark:border-white/10">
+                        <div class="flex items-center justify-between mb-2">
+                            <span class="text-slate-500 dark:text-slate-400 font-medium">Assets Status</span>
+                            <span id="assets-total" class="text-xs text-slate-400">0 total</span>
+                        </div>
+                        <div class="flex space-x-4">
+                            <div class="flex items-center">
+                                <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
+                                <span id="assets-up" class="font-mono text-emerald-500">0</span>
+                                <span class="text-xs text-slate-400 ml-1">up</span>
+                            </div>
+                            <div class="flex items-center">
+                                <span class="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
+                                <span id="assets-down" class="font-mono text-red-500">0</span>
+                                <span class="text-xs text-slate-400 ml-1">down</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Certificates -->
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl p-4 border border-border dark:border-white/10">
+                        <div class="text-slate-500 dark:text-slate-400 font-medium mb-2">Certificates</div>
+                        <div class="flex items-center space-x-4">
+                            <div>
+                                <span id="certs-total" class="font-mono text-lg dark:text-white">0</span>
+                                <span class="text-xs text-slate-400 ml-1">total</span>
+                            </div>
+                            <div id="certs-warning" class="hidden">
+                                <span class="text-amber-500 text-xs"><i class="fas fa-exclamation-triangle mr-1"></i></span>
+                                <span id="certs-expiring" class="text-amber-500 text-xs font-medium">0 expiring</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Last Checks -->
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl p-4 border border-border dark:border-white/10">
+                        <div class="text-slate-500 dark:text-slate-400 font-medium mb-2">Last Checks</div>
+                        <div class="space-y-1 text-xs">
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Liveness:</span>
+                                <span id="last-liveness" class="font-mono dark:text-white">-</span>
+                            </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">CT Logs:</span>
+                                <span id="last-ctlogs" class="font-mono dark:text-white">-</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="mt-6">
             <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
                 <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
             </h3>
@@ -806,7 +881,151 @@
             initTheme();
             initReload();
             restoreOpenedRows();
+            initPhase3();
         });
+
+        // --- 6. PHASE 3 MONITORING ---
+        
+        let phase3Interval = null;
+
+        function formatRelativeTime(timestamp) {
+            if (!timestamp || timestamp === '-') return '-';
+            
+            try {
+                const date = new Date(timestamp.replace(' ', 'T'));
+                const now = new Date();
+                const diffMs = now - date;
+                const diffMins = Math.floor(diffMs / 60000);
+                const diffHours = Math.floor(diffMins / 60);
+                const diffDays = Math.floor(diffHours / 24);
+                
+                // Format: DD-MM-YYYY HH:MM
+                const day = String(date.getDate()).padStart(2, '0');
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const year = date.getFullYear();
+                const hours = String(date.getHours()).padStart(2, '0');
+                const mins = String(date.getMinutes()).padStart(2, '0');
+                const formattedDate = `${day}-${month}-${year} ${hours}:${mins}`;
+                
+                // Relative time
+                let relative = '';
+                if (diffMins < 1) relative = 'just now';
+                else if (diffMins < 60) relative = `${diffMins}m ago`;
+                else if (diffHours < 24) relative = `${diffHours}h ago`;
+                else if (diffDays < 7) relative = `${diffDays}d ago`;
+                
+                return relative ? `${formattedDate} (${relative})` : formattedDate;
+            } catch (e) {
+                return timestamp;
+            }
+        }
+
+        function startPhase3AutoRefresh() {
+            // Clear existing interval if any
+            if (phase3Interval) clearInterval(phase3Interval);
+            
+            // Refresh every 60 seconds
+            phase3Interval = setInterval(fetchPhase3Status, 60000);
+        }
+
+        function stopPhase3AutoRefresh() {
+            if (phase3Interval) {
+                clearInterval(phase3Interval);
+                phase3Interval = null;
+            }
+        }
+
+        async function initPhase3() {
+            await fetchPhase3Status();
+            
+            // Setup toggle handler
+            const toggle = document.getElementById('phase3-toggle');
+            if (toggle) {
+                toggle.addEventListener('change', async (e) => {
+                    const enabled = e.target.checked;
+                    await togglePhase3(enabled);
+                });
+            }
+        }
+
+        async function fetchPhase3Status() {
+            try {
+                const response = await fetch('/api/phase3/status');
+                if (!response.ok) throw new Error('Failed to fetch Phase 3 status');
+                
+                const data = await response.json();
+                
+                // Update toggle
+                const toggle = document.getElementById('phase3-toggle');
+                if (toggle) toggle.checked = data.enabled;
+                
+                // Update status label
+                const statusLabel = document.getElementById('phase3-status-label');
+                if (statusLabel) statusLabel.textContent = data.enabled ? 'Enabled' : 'Disabled';
+                
+                // Update running badge
+                const runningBadge = document.getElementById('phase3-running-badge');
+                if (runningBadge) {
+                    if (data.running && data.enabled) {
+                        runningBadge.classList.remove('hidden');
+                    } else {
+                        runningBadge.classList.add('hidden');
+                    }
+                }
+                
+                // Update assets
+                document.getElementById('assets-total').textContent = `${data.assets.total} total`;
+                document.getElementById('assets-up').textContent = data.assets.up;
+                document.getElementById('assets-down').textContent = data.assets.down;
+                
+                // Update certificates
+                document.getElementById('certs-total').textContent = data.certificates.total;
+                const certWarning = document.getElementById('certs-warning');
+                if (data.certificates.expiring_3_days > 0) {
+                    if (certWarning) certWarning.classList.remove('hidden');
+                    document.getElementById('certs-expiring').textContent = `${data.certificates.expiring_3_days} expiring soon`;
+                } else if (certWarning) {
+                    certWarning.classList.add('hidden');
+                }
+                
+                // Update last checks with relative time
+                document.getElementById('last-liveness').textContent = formatRelativeTime(data.last_liveness_check);
+                document.getElementById('last-ctlogs').textContent = formatRelativeTime(data.last_ctlogs_check);
+                
+                // Start or stop auto-refresh based on enabled status
+                if (data.enabled) {
+                    startPhase3AutoRefresh();
+                } else {
+                    stopPhase3AutoRefresh();
+                }
+                
+            } catch (err) {
+                console.error('Error fetching Phase 3 status:', err);
+            }
+        }
+
+        async function togglePhase3(enabled) {
+            try {
+                const response = await fetch('/api/phase3/toggle', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled })
+                });
+                
+                if (!response.ok) throw new Error('Failed to toggle Phase 3');
+                
+                const data = await response.json();
+                
+                showToast(data.message, data.success ? 'success' : 'error');
+                
+                // Refresh status
+                await fetchPhase3Status();
+                
+            } catch (err) {
+                console.error('Error toggling Phase 3:', err);
+                showToast('Failed to update Phase 3 setting', 'error');
+            }
+        }
     </script>
 </body>
 </html>

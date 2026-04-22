@@ -95,6 +95,27 @@ class TaskQueue:
         with self._lock:
             return self.stats['active']
     
+    def get_workers_status(self) -> Dict:
+        """
+        Get status of Phase 1 worker threads.
+        
+        Returns:
+            {
+                'max_workers': int,
+                'active_workers': int,
+                'workers_alive': bool
+            }
+        """
+        self._cleanup_workers()
+        
+        active_workers = len([f for f in self.workers if f.running()])
+        
+        return {
+            'max_workers': self.executor._max_workers,
+            'active_workers': active_workers,
+            'workers_alive': active_workers > 0 or self.stats['pending'] == 0
+        }
+    
     def _worker(self):
         """Process tasks from queue."""
         worker_id = id(threading.current_thread())
@@ -150,6 +171,9 @@ class TaskQueue:
             
             logger.info(f"Completed: {target_name}")
             
+            # Check if all tasks complete
+            self._check_completion()
+            
         except Exception as e:
             # Update status: failed
             self._update_db_status(queue_id, 'failed', error_message=str(e))
@@ -158,6 +182,9 @@ class TaskQueue:
                 self.stats['failed'] += 1
             
             logger.error(f"Failed: {target_name} - {e}")
+            
+            # Check if all tasks complete
+            self._check_completion()
     
     def _insert_to_db(self, task: Dict) -> int:
         """Insert task to scan_queue table, return queue_id."""
@@ -167,7 +194,7 @@ class TaskQueue:
         cursor = conn.cursor()
         
         cursor.execute('''
-            INSERT INTO scan_queue (scan_type, cycle, target, target_id, target_type, status)
+            INSERT OR IGNORE INTO scan_queue (scan_type, cycle, target, target_id, target_type, status)
             VALUES (?, ?, ?, ?, ?, ?)
         ''', ('phase1', 'standard', task['target_name'], task['target_id'], 
               task['target_type'], 'pending'))
@@ -204,6 +231,50 @@ class TaskQueue:
         
         conn.commit()
         conn.close()
+    
+    def _check_completion(self):
+        """
+        Check if all Phase 1 tasks are complete.
+        If yes, send Discord notification and reset stats.
+        """
+        with self._lock:
+            # Only notify if all tasks done and we had tasks
+            if self.stats['pending'] == 0 and self.stats['running'] == 0:
+                if self.stats['completed'] > 0 or self.stats['failed'] > 0:
+                    self._send_completion_notification()
+                    # Reset stats for next batch
+                    self.stats['completed'] = 0
+                    self.stats['failed'] = 0
+                    self.stats['total'] = 0
+                    self.stats['active'] = False
+    
+    def _send_completion_notification(self):
+        """Send Discord notification when all Phase 1 tasks complete."""
+        try:
+            from modules.Notify import send_message
+            
+            completed = self.stats['completed']
+            failed = self.stats['failed']
+            total = completed + failed
+            
+            lines = [
+                "**Phase 1 Complete**",
+                "━━━━━━━━━━━━━━━━━━"
+            ]
+            
+            if failed == 0:
+                lines.append(f"✅ **Processed:** {completed}/{total}")
+            else:
+                lines.append(f"✅ **Completed:** {completed}/{total}")
+                lines.append(f"❌ **Failed:** {failed}/{total}")
+            
+            lines.append("All assets have been scanned.")
+            
+            send_message('\n'.join(lines))
+            logger.info(f"Phase 1 completion notification sent: {completed} completed, {failed} failed")
+            
+        except Exception as e:
+            logger.error(f"Failed to send completion notification: {e}")
 
 
 # Global singleton
