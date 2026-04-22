@@ -39,6 +39,32 @@
                 }[c];
             });
         }
+
+        // Token refresh: automatically refresh tokens before expiry
+        (function() {
+            function refreshToken() {
+                fetch('/refresh-token', { method: 'POST', credentials: 'same-origin' })
+                    .then(resp => {
+                        if (!resp.ok) {
+                            window.location.href = '/login';
+                        }
+                    })
+                    .catch(() => {
+                        window.location.href = '/login';
+                    });
+            }
+
+            // Refresh every 14 minutes (token expires at 15 min)
+            setInterval(refreshToken, 14 * 60 * 1000);
+
+            // Also refresh on page focus (returning to tab)
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) {
+                    fetch('/refresh-token', { method: 'POST', credentials: 'same-origin' })
+                        .catch(() => {});
+                }
+            });
+        })();
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">

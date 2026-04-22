@@ -309,6 +309,20 @@ def init_db():
     ''')
 
     # ============================================
+    # TOKEN BLACKLIST (Refresh token revocation)
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS token_blacklist (
+            jti TEXT PRIMARY KEY,
+            user TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
+
+    # ============================================
     # PHASE STATUS TRACKING
     # ============================================
     cursor.execute('''
@@ -351,6 +365,17 @@ def init_db():
         cursor.execute("ALTER TABLE scan_queue ADD COLUMN dirs_found INTEGER DEFAULT 0")
     if 'error_message' not in queue_columns:
         cursor.execute("ALTER TABLE scan_queue ADD COLUMN error_message TEXT")
+
+    # Create token_blacklist table if not exists (migration for existing DBs)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS token_blacklist (
+            jti TEXT PRIMARY KEY,
+            user TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
 
     conn.commit()
     conn.close()

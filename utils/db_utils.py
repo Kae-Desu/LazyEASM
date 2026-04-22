@@ -21,7 +21,10 @@ Functions:
 
 import sqlite3
 import os
-from datetime import datetime
+import logging
+from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(BASE_DIR, "db", "lazyeasm.db")
@@ -1923,6 +1926,123 @@ def queue_subdomain_discovery(subdomain_name: str, domain_name: str):
     
     conn.commit()
     conn.close()
+
+
+def blacklist_token(jti: str, user: str, expires_at: str) -> bool:
+    """
+    Add token JTI to blacklist and cleanup expired entries.
+    
+    Args:
+        jti: Unique token ID
+        user: Token owner
+        expires_at: When the token naturally expires
+    
+    Returns:
+        True if successfully blacklisted
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    try:
+        cursor.execute('''
+            INSERT OR IGNORE INTO token_blacklist (jti, user, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+        ''', (jti, user, expires_at, now))
+        
+        # Lazy cleanup: remove expired entries
+        cursor.execute("DELETE FROM token_blacklist WHERE expires_at < ?", (now,))
+        
+        conn.commit()
+        return True
+    except Exception as e:
+        logger.error(f"Failed to blacklist token: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def is_token_blacklisted(jti: str) -> bool:
+    """
+    Check if token JTI is in the blacklist.
+    
+    Args:
+        jti: Unique token ID
+    
+    Returns:
+        True if token is blacklisted
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('SELECT 1 FROM token_blacklist WHERE jti = ?', (jti,))
+    result = cursor.fetchone()
+    
+    conn.close()
+    return result is not None
+
+
+def blacklist_all_user_tokens(user: str) -> int:
+    """
+    Blacklist all active refresh tokens for a user.
+    Used when token reuse is detected (possible theft).
+    
+    Args:
+        user: Username
+    
+    Returns:
+        Number of tokens blacklisted
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    # Find all non-expired, non-blacklisted tokens for this user
+    # Since we only blacklist refresh tokens, all entries belong to refresh tokens
+    cursor.execute('''
+        SELECT jti, expires_at FROM token_blacklist 
+        WHERE user = ? AND expires_at > ?
+    ''', (user, now))
+    
+    # All user's tokens that aren't already blacklisted won't be in the table
+    # We need a different approach: add a catch-all blacklist entry
+    cursor.execute('''
+        INSERT OR IGNORE INTO token_blacklist (jti, user, expires_at, created_at)
+        VALUES (?, ?, ?, ?)
+    ''', (f'user_revoke:{user}:{now}', user, 
+          (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"), now))
+    
+    conn.commit()
+    conn.close()
+    
+    logger.warning(f"All refresh tokens revoked for user: {user}")
+    return 1
+
+
+def is_user_revoked(user: str) -> bool:
+    """
+    Check if all tokens for a user have been revoked.
+    Used after token reuse detection.
+    
+    Args:
+        user: Username
+    
+    Returns:
+        True if user's tokens are revoked
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    
+    cursor.execute('''
+        SELECT 1 FROM token_blacklist 
+        WHERE jti LIKE ? AND expires_at > ?
+        LIMIT 1
+    ''', (f'user_revoke:{user}:%', now))
+    
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
 
 
 if __name__ == '__main__':

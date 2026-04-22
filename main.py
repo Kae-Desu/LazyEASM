@@ -5,6 +5,7 @@ import secrets
 import time
 import logging
 import hashlib
+import uuid
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, make_response, jsonify
 import os
@@ -50,8 +51,16 @@ SECURITY_HEADERS = {
 def add_security_headers(response):
     for header, value in SECURITY_HEADERS.items():
         response.headers[header] = value
+    
+    # Prevent caching authenticated pages (but allow static assets)
+    if not request.path.startswith('/static') and request.path not in ['/login', '/health']:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    
     if get_env('FLASK_ENV', 'production') == 'production':
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    
     return response
 
 KEY_NAMES = {
@@ -61,6 +70,9 @@ KEY_NAMES = {
     'VULNERS_API_KEY': 'Vulners Key',
     'GEMINI_API_KEY': 'Gemini Key'
 }
+
+ACCESS_TOKEN_LIFETIME = datetime.timedelta(minutes=15)
+REFRESH_TOKEN_LIFETIME = datetime.timedelta(days=7)
 
 login_attempts = {}
 login_lock = threading.Lock()
@@ -107,9 +119,13 @@ def reset_failed_login(ip: str):
 
 
 def get_secure_cookie_kwargs():
+    # Check if running on localhost (dev mode)
+    # secure=True only works over HTTPS, so disable for localhost
+    is_localhost = request.remote_addr in ['127.0.0.1', '::1', 'localhost'] if request else True
+    
     return {
         'httponly': True,
-        'secure': get_env('FLASK_ENV', 'production') == 'production',
+        'secure': get_env('FLASK_ENV', 'production') == 'production' and not is_localhost,
         'samesite': 'Lax'
     }
 
@@ -130,7 +146,7 @@ def validate_csrf_token(session_token: str, provided_token: str) -> bool:
 def csrf_protected(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        session_token = request.cookies.get('session_token') or ''
+        session_token = request.cookies.get('access_token') or ''
         csrf_token = request.form.get('csrf_token') or (request.get_json() or {}).get('csrf_token')
         
         if not csrf_token:
@@ -193,16 +209,32 @@ assets_data = [
 def token_required(f):
     @wraps(f)
     def decorated(*args, **kwargs):
-        token = request.cookies.get('session_token')
+        token = request.cookies.get('access_token')
         
         if not token:
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': 'Authentication required'}), 401
             return redirect(url_for('login'))
         
         try:
-            jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
-        except:
-            return redirect(url_for('login'))
+            payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"])
             
+            if payload.get('type') != 'access':
+                if request.path.startswith('/api/'):
+                    return jsonify({'success': False, 'error': 'Invalid token type'}), 401
+                return redirect(url_for('login'))
+            
+        except jwt.ExpiredSignatureError:
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': 'Token expired'}), 401
+            flash("Session expired. Please login again.", "error")
+            return redirect(url_for('login'))
+        except jwt.InvalidTokenError:
+            if request.path.startswith('/api/'):
+                return jsonify({'success': False, 'error': 'Invalid token'}), 401
+            flash("Invalid session. Please login again.", "error")
+            return redirect(url_for('login'))
+        
         return f(*args, **kwargs)
     return decorated
 
@@ -223,14 +255,27 @@ def login():
         if username == get_env('ADMIN_USER', 'admin') and password == get_env('ADMIN_PASS', 'changeme'):
             reset_failed_login(client_ip)
             
-            payload = {
+            now = datetime.datetime.utcnow()
+            
+            access_payload = {
                 'user': username,
-                'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
+                'type': 'access',
+                'jti': str(uuid.uuid4()),
+                'exp': now + ACCESS_TOKEN_LIFETIME
             }
-            token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
+            access_token = jwt.encode(access_payload, JWT_SECRET, algorithm="HS256")
+            
+            refresh_payload = {
+                'user': username,
+                'type': 'refresh',
+                'jti': str(uuid.uuid4()),
+                'exp': now + REFRESH_TOKEN_LIFETIME
+            }
+            refresh_token = jwt.encode(refresh_payload, JWT_SECRET, algorithm="HS256")
             
             resp = make_response(redirect(url_for('dashboard')))
-            resp.set_cookie('session_token', token, **get_secure_cookie_kwargs())
+            resp.set_cookie('access_token', access_token, **get_secure_cookie_kwargs())
+            resp.set_cookie('refresh_token', refresh_token, **get_secure_cookie_kwargs())
             return resp
         
         record_failed_login(client_ip, username)
@@ -242,9 +287,104 @@ def login():
 
 @app.route('/logout')
 def logout():
+    from utils.db_utils import blacklist_token
+    
+    refresh_token = request.cookies.get('refresh_token')
+    
+    if refresh_token:
+        try:
+            payload = jwt.decode(refresh_token, JWT_SECRET, algorithms=["HS256"])
+            if payload.get('type') == 'refresh':
+                jti = payload.get('jti')
+                user = payload.get('user')
+                exp = payload.get('exp')
+                expires_at = datetime.datetime.fromtimestamp(exp).strftime('%Y-%m-%d %H:%M:%S')
+                blacklist_token(jti, user, expires_at)
+        except:
+            pass
+    
     resp = make_response(redirect(url_for('login')))
-    resp.set_cookie('session_token', '', expires=0, **get_secure_cookie_kwargs())
+    resp.set_cookie('access_token', '', expires=0, **get_secure_cookie_kwargs())
+    resp.set_cookie('refresh_token', '', expires=0, **get_secure_cookie_kwargs())
     flash("Berhasil logout.", "success")
+    return resp
+
+
+@app.route('/refresh-token', methods=['POST'])
+def refresh_token():
+    """
+    Exchange refresh token for new access + refresh tokens.
+    
+    Implements refresh token rotation:
+    - Validates current refresh token
+    - Checks blacklist (reuse detection)
+    - Issues new token pair
+    - Blacklists old refresh token
+    """
+    from utils.db_utils import blacklist_token, is_token_blacklisted, blacklist_all_user_tokens
+    
+    old_refresh = request.cookies.get('refresh_token')
+    
+    if not old_refresh:
+        return jsonify({'success': False, 'error': 'No refresh token'}), 401
+    
+    try:
+        payload = jwt.decode(old_refresh, JWT_SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        resp = jsonify({'success': False, 'error': 'Refresh token expired'})
+        resp = make_response(resp, 401)
+        resp.set_cookie('access_token', '', expires=0, **get_secure_cookie_kwargs())
+        resp.set_cookie('refresh_token', '', expires=0, **get_secure_cookie_kwargs())
+        return resp
+    except jwt.InvalidTokenError:
+        return jsonify({'success': False, 'error': 'Invalid refresh token'}), 401
+    
+    if payload.get('type') != 'refresh':
+        return jsonify({'success': False, 'error': 'Invalid token type'}), 401
+    
+    jti = payload.get('jti')
+    user = payload.get('user')
+    
+    # Check if token is blacklisted (REUSE DETECTION)
+    if is_token_blacklisted(jti):
+        # Token was already used - possible theft
+        # Revoke ALL tokens for this user
+        blacklist_all_user_tokens(user)
+        logger.warning(f"Refresh token reuse detected for user: {user}")
+        
+        resp = jsonify({'success': False, 'error': 'Token reuse detected. Please login again.'})
+        resp = make_response(resp, 401)
+        resp.set_cookie('access_token', '', expires=0, **get_secure_cookie_kwargs())
+        resp.set_cookie('refresh_token', '', expires=0, **get_secure_cookie_kwargs())
+        return resp
+    
+    # Blacklist old refresh token
+    exp = payload.get('exp')
+    expires_at = datetime.datetime.fromtimestamp(exp).strftime('%Y-%m-%d %H:%M:%S')
+    blacklist_token(jti, user, expires_at)
+    
+    # Generate new token pair
+    now = datetime.datetime.utcnow()
+    
+    access_payload = {
+        'user': user,
+        'type': 'access',
+        'jti': str(uuid.uuid4()),
+        'exp': now + ACCESS_TOKEN_LIFETIME
+    }
+    new_access = jwt.encode(access_payload, JWT_SECRET, algorithm="HS256")
+    
+    refresh_payload = {
+        'user': user,
+        'type': 'refresh',
+        'jti': str(uuid.uuid4()),
+        'exp': now + REFRESH_TOKEN_LIFETIME
+    }
+    new_refresh = jwt.encode(refresh_payload, JWT_SECRET, algorithm="HS256")
+    
+    resp = jsonify({'success': True})
+    resp.set_cookie('access_token', new_access, **get_secure_cookie_kwargs())
+    resp.set_cookie('refresh_token', new_refresh, **get_secure_cookie_kwargs())
     return resp
 
 
@@ -277,9 +417,9 @@ def health():
     client_ip = request.remote_addr
     is_localhost = client_ip in ['127.0.0.1', '::1', 'localhost']
     
-    # If not localhost, require auth
+    # If not localhost, require auth (cookie only)
     if not is_localhost:
-        token = request.cookies.get('session_token') or request.headers.get('Authorization', '').replace('Bearer ', '')
+        token = request.cookies.get('access_token')
         if not token:
             return jsonify({'status': 'unhealthy', 'error': 'Authentication required'}), 401
         
@@ -360,7 +500,7 @@ def health():
 
 @app.context_processor
 def inject_csrf_token():
-    session_token = request.cookies.get('session_token') or ''
+    session_token = request.cookies.get('access_token') or ''
     csrf_token = generate_csrf_token(session_token)
     return dict(csrf_token=csrf_token)
 
