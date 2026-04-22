@@ -14,6 +14,31 @@
             // Hapus class satunya untuk jaga-jaga
             document.documentElement.classList.remove(savedTheme === 'dark' ? 'light' : 'dark');
         })();
+        
+        // XSS Protection: Escape HTML entities
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // XSS Protection: Escape quotes for JS strings
+        function escapeJs(str) {
+            if (!str) return '';
+            return String(str).replace(/[\\'"<>&\r\n]/g, function(c) {
+                return {
+                    '\\': '\\\\',
+                    "'": "\\'",
+                    '"': '\\"',
+                    '<': '\\x3c',
+                    '>': '\\x3e',
+                    '&': '\\x26',
+                    '\r': '\\r',
+                    '\n': '\\n'
+                }[c];
+            });
+        }
     </script>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -128,6 +153,7 @@
                         </h2>
                     </div>
                     <form action="/save_config" method="POST" class="p-6 space-y-4 text-sm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <input type="hidden" name="CLEAR_DISCORD_WEBHOOK_URL" value="0" id="clear_DISCORD_WEBHOOK_URL">
                         <input type="hidden" name="CLEAR_DISCORD_USER_ID" value="0" id="clear_DISCORD_USER_ID">
                         <input type="hidden" name="CLEAR_SECURITYTRAILS_API_KEY" value="0" id="clear_SECURITYTRAILS_API_KEY">
@@ -199,6 +225,7 @@
                         </h2>
                     </div>
                     <form action="/process_assets" method="POST" class="p-6 flex-grow flex flex-col" onsubmit="showLoading()">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <div class="flex-grow space-y-1.5">
                             <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Asset Queue (Newline separated)</label>
                             <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-64 resize-none dark:text-white" placeholder="example.com"></textarea>
@@ -776,13 +803,15 @@
                 
                 const recoDiv = document.getElementById(`reco-${vulnId}`);
                 if (recoDiv) {
+                    const safeRecommendation = escapeHtml(data.recommendation);
+                    const safeCveId = escapeJs(cveId);
                     recoDiv.innerHTML = `
                         <div class="flex items-center space-x-2 mb-2">
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                             <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">AI Analysis</span>
                         </div>
-                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">${data.recommendation}</p>
-                        <button onclick="event.stopPropagation(); showRegenerateConfirm(${vulnId}, '${cveId}')" class="mt-3 text-[10px] text-accent hover:text-secondary font-bold transition-colors">
+                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">${safeRecommendation}</p>
+                        <button onclick="event.stopPropagation(); showRegenerateConfirm(${vulnId}, '${safeCveId}')" class="mt-3 text-[10px] text-accent hover:text-secondary font-bold transition-colors">
                             <i class="fas fa-sync-alt mr-1"></i>Regenerate Analysis
                         </button>
                     `;

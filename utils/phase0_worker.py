@@ -50,6 +50,46 @@ def get_pending_phase0_item():
     return None
 
 
+def reset_stuck_processing_items(timeout_minutes: int = 30):
+    """
+    Reset items stuck in 'processing' status for too long.
+    
+    Items that started processing but never completed (due to crash, timeout, etc.)
+    are reset to 'pending' so they can be retried.
+    
+    Args:
+        timeout_minutes: Minutes after which to consider item stuck (default: 30)
+    
+    Returns:
+        Number of items reset
+    """
+    from utils.db_utils import get_db_connection
+    from datetime import datetime, timedelta
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    # Calculate cutoff time in Python (handles timezone correctly)
+    cutoff = (datetime.now() - timedelta(minutes=timeout_minutes)).strftime('%Y-%m-%d %H:%M:%S')
+    
+    cursor.execute('''
+        UPDATE scan_queue 
+        SET status = 'pending', started_at = NULL
+        WHERE scan_type = 'phase0_discovery'
+          AND status = 'processing'
+          AND started_at < ?
+    ''', (cutoff,))
+    
+    reset_count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if reset_count > 0:
+        logger.info(f"[Phase0] Reset {reset_count} stuck processing items (cutoff: {cutoff})")
+    
+    return reset_count
+
+
 def mark_queue_item_processing(queue_id: int):
     """Mark queue item as processing."""
     from utils.db_utils import get_db_connection
@@ -207,6 +247,9 @@ def phase0_worker_loop(interval_sec: int = 5):
     
     while _phase0_running:
         try:
+            # Reset stuck processing items (crash recovery)
+            reset_stuck_processing_items(timeout_minutes=30)
+            
             # Get next pending item
             item = get_pending_phase0_item()
             

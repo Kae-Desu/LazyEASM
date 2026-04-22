@@ -94,7 +94,7 @@ def fetch_ctlogs(domain: str) -> tuple:
 
 def get_expiring_certs(days_threshold: int = 3) -> List[Dict]:
     """
-    Get certificates expiring within threshold.
+    Get certificates expiring within specified days.
     
     Args:
         days_threshold: Days until expiry (default: 3)
@@ -109,22 +109,27 @@ def get_expiring_certs(days_threshold: int = 3) -> List[Dict]:
     
     now = datetime.now()
     threshold = now + timedelta(days=days_threshold)
-    threshold_str = threshold.strftime('%Y-%m-%d %H:%M:%S')
     
     cursor.execute('''
         SELECT hostname, not_after
         FROM certificates
-        WHERE datetime(not_after) <= datetime(?)
         ORDER BY not_after ASC
-    ''', (threshold_str,))
+    ''')
     
     expiring = []
     for row in cursor.fetchall():
         try:
-            not_after = datetime.strptime(row['not_after'], '%Y-%m-%d %H:%M:%S')
+            not_after_str = row['not_after']
+            
+            # Handle both ISO format (T separator) and space format
+            if 'T' in not_after_str:
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S')
+            else:
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S')
+            
             days_remaining = (not_after - now).days
             
-            if days_remaining >= 0:
+            if days_remaining <= days_threshold and days_remaining >= 0:
                 expiring.append({
                     'hostname': row['hostname'],
                     'days_remaining': days_remaining
@@ -251,6 +256,28 @@ def poll_all_domains() -> Dict:
         
         time.sleep(1)  # Rate limiting
     
+    # Store certificates in database
+    from utils.db_utils import upsert_certificate
+    
+    certs_stored = 0
+    for cert in all_certificates:
+        try:
+            result = upsert_certificate(
+                hostname=cert.get('hostname', ''),
+                issuer=cert.get('issuer'),
+                not_before=cert.get('not_before'),
+                not_after=cert.get('not_after'),
+                serial_number=cert.get('serial_number'),
+                source='ctlogs'
+            )
+            if result.get('is_new'):
+                certs_stored += 1
+        except Exception as e:
+            logger.warning(f"Failed to store certificate for {cert.get('hostname')}: {e}")
+    
+    if certs_stored > 0:
+        logger.info(f"Stored {certs_stored} new certificates")
+    
     # Check certificate expiry
     expiring_certs = get_expiring_certs(days_threshold=3)
     
@@ -296,31 +323,44 @@ def get_cert_expiry_summary() -> Dict:
     cursor.execute('SELECT COUNT(*) as count FROM certificates')
     total = cursor.fetchone()['count']
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM certificates
-        WHERE datetime(not_after) <= datetime(?)
-    ''', ((now + timedelta(days=3)).strftime('%Y-%m-%d %H:%M:%S'),))
-    expiring_3_days = cursor.fetchone()['count']
+    cursor.execute('SELECT not_after FROM certificates')
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM certificates
-        WHERE datetime(not_after) <= datetime(?)
-    ''', ((now + timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S'),))
-    expiring_7_days = cursor.fetchone()['count']
+    expiring_3_days = 0
+    expiring_7_days = 0
+    expiring_30_days = 0
+    expired = 0
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM certificates
-        WHERE datetime(not_after) <= datetime(?)
-    ''', ((now + timedelta(days=30)).strftime('%Y-%m-%d %H:%M:%S'),))
-    expiring_30_days = cursor.fetchone()['count']
+    for row in cursor.fetchall():
+        try:
+            not_after_str = row['not_after']
+            
+            # Handle both ISO format (T separator) and space format
+            if 'T' in not_after_str:
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S')
+            else:
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S')
+            
+            days_remaining = (not_after - now).days
+            
+            if days_remaining < 0:
+                expired += 1
+            elif days_remaining <= 3:
+                expiring_3_days += 1
+            elif days_remaining <= 7:
+                expiring_7_days += 1
+            elif days_remaining <= 30:
+                expiring_30_days += 1
+        except Exception:
+            continue
     
     conn.close()
     
     return {
-        'total_certs': total,
         'expiring_3_days': expiring_3_days,
-        'expiring_7_days': expiring_7_days,
-        'expiring_30_days': expiring_30_days
+        'expiring_7_days': expiring_3_days + expiring_7_days,
+        'expiring_30_days': expiring_3_days + expiring_7_days + expiring_30_days,
+        'total_certs': total,
+        'expired': expired
     }
 
 

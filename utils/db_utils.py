@@ -1786,7 +1786,7 @@ def get_all_assets_for_liveness() -> list:
     Get all domains and subdomains with their current status.
     
     Returns:
-        List of dicts with asset_id, asset_type, name, status
+        List of dicts with asset_id, asset_type, name, status, last_liveness_check
     """
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1795,14 +1795,14 @@ def get_all_assets_for_liveness() -> list:
     
     # Get domains
     cursor.execute('''
-        SELECT dom_id as asset_id, 'domain' as asset_type, domain_name as name, status
+        SELECT dom_id as asset_id, 'domain' as asset_type, domain_name as name, status, last_liveness_check
         FROM domain_asset
     ''')
     assets.extend([dict(row) for row in cursor.fetchall()])
     
     # Get subdomains
     cursor.execute('''
-        SELECT sub_id as asset_id, 'subdomain' as asset_type, subdomain_name as name, status
+        SELECT sub_id as asset_id, 'subdomain' as asset_type, subdomain_name as name, status, last_liveness_check
         FROM subdomain_asset
     ''')
     assets.extend([dict(row) for row in cursor.fetchall()])
@@ -1866,6 +1866,10 @@ def get_known_subdomains() -> set:
     """
     Get all known subdomains from database.
     
+    Includes:
+    - Subdomains in subdomain_asset (already processed)
+    - Subdomains in scan_queue pending/processing (being discovered)
+    
     Returns:
         Set of subdomain names
     """
@@ -1874,6 +1878,13 @@ def get_known_subdomains() -> set:
     
     cursor.execute('SELECT subdomain_name FROM subdomain_asset')
     subdomains = {row['subdomain_name'] for row in cursor.fetchall()}
+    
+    cursor.execute('''
+        SELECT target FROM scan_queue 
+        WHERE scan_type = 'phase0_discovery' 
+          AND status IN ('pending', 'processing')
+    ''')
+    subdomains.update(row['target'] for row in cursor.fetchall())
     
     conn.close()
     

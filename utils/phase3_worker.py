@@ -50,6 +50,20 @@ def send_liveness_notification(result: dict):
             if len(result['recovered']) > 10:
                 lines.append(f"• ... and {len(result['recovered']) - 10} more")
         
+        if result.get('new_up'):
+            lines.append(f"✅ **New Assets Up ({len(result['new_up'])}):**")
+            for name in result['new_up'][:10]:
+                lines.append(f"• {name}")
+            if len(result['new_up']) > 10:
+                lines.append(f"• ... and {len(result['new_up']) - 10} more")
+        
+        if result.get('new_down'):
+            lines.append(f"⚠️ **New Assets Down ({len(result['new_down'])}):**")
+            for name in result['new_down'][:10]:
+                lines.append(f"• {name}")
+            if len(result['new_down']) > 10:
+                lines.append(f"• ... and {len(result['new_down']) - 10} more")
+        
         if result.get('still_down'):
             lines.append(f"⚫ **Still Down ({len(result['still_down'])}):**")
             for name in result['still_down'][:5]:
@@ -57,7 +71,10 @@ def send_liveness_notification(result: dict):
             if len(result['still_down']) > 5:
                 lines.append(f"• ... and {len(result['still_down']) - 5} more")
         
-        send_message('\n'.join(lines))
+        # Only send if there are actual changes
+        has_changes = result['down'] or result['recovered'] or result.get('new_up') or result.get('new_down')
+        if has_changes:
+            send_message('\n'.join(lines))
         
     except Exception as e:
         logger.error(f"Failed to send liveness notification: {e}")

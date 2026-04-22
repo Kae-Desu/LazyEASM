@@ -73,16 +73,21 @@ def check_all_liveness() -> dict:
     Returns:
         {
             'down': [asset_name, ...],       # Newly down (was up)
-            'recovered': [asset_name, ...],  # Now up (was down)
+            'recovered': [asset_name, ...],  # Now up (was down, confirmed)
             'still_down': [asset_name, ...], # Still down
-            'unchanged': int                 # No status change
+            'unchanged': int,                # No status change
+            'new_up': [asset_name, ...],     # First check, now up
+            'new_down': [asset_name, ...]    # First check, now down
         }
     """
+    from datetime import datetime
+    from utils.db_utils import get_db_connection
+    
     assets = get_all_assets_for_liveness()
     
     if not assets:
         logger.info("No assets to check for liveness")
-        return {'down': [], 'recovered': [], 'still_down': [], 'unchanged': 0}
+        return {'down': [], 'recovered': [], 'still_down': [], 'unchanged': 0, 'new_up': [], 'new_down': []}
     
     logger.info(f"Checking liveness for {len(assets)} assets")
     
@@ -90,26 +95,43 @@ def check_all_liveness() -> dict:
         'down': [],
         'recovered': [],
         'still_down': [],
-        'unchanged': 0
+        'unchanged': 0,
+        'new_up': [],
+        'new_down': []
     }
+    
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    updates_to_make = []  # (asset_id, asset_type, new_status)
     
     for asset in assets:
         asset_name = asset['name']
-        old_status = asset['status'] or 'up'
+        old_status = asset.get('status') or 'up'
+        last_check = asset.get('last_liveness_check')
+        is_first_check = last_check is None
         
         # Check current status
         new_status = check_single_asset(asset)
         
         if new_status != old_status:
-            # Status changed
-            update_asset_status(asset['asset_id'], asset['asset_type'], new_status)
+            # Status changed - queue update
+            updates_to_make.append((asset['asset_id'], asset['asset_type'], new_status))
             
-            if new_status == 'down':
-                result['down'].append(asset_name)
-                logger.info(f"{asset_name}: went DOWN (was {old_status})")
+            if is_first_check:
+                # First check - report as new asset, not recovered/down
+                if new_status == 'up':
+                    result['new_up'].append(asset_name)
+                    logger.info(f"{asset_name}: NEW asset, now UP")
+                else:
+                    result['new_down'].append(asset_name)
+                    logger.info(f"{asset_name}: NEW asset, now DOWN")
             else:
-                result['recovered'].append(asset_name)
-                logger.info(f"{asset_name}: RECOVERED (was {old_status})")
+                # Status change from confirmed state
+                if new_status == 'down':
+                    result['down'].append(asset_name)
+                    logger.info(f"{asset_name}: went DOWN (was {old_status})")
+                else:
+                    result['recovered'].append(asset_name)
+                    logger.info(f"{asset_name}: RECOVERED (was {old_status})")
         else:
             # No change
             if old_status == 'down':
@@ -117,16 +139,40 @@ def check_all_liveness() -> dict:
             else:
                 result['unchanged'] += 1
     
+    # Batch update statuses and last_liveness_check
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        for asset_id, asset_type, new_status in updates_to_make:
+            table = 'domain_asset' if asset_type == 'domain' else 'subdomain_asset'
+            id_col = 'dom_id' if asset_type == 'domain' else 'sub_id'
+            cursor.execute(f'''
+                UPDATE {table} SET status = ?, last_liveness_check = ? WHERE {id_col} = ?
+            ''', (new_status, now, asset_id))
+        
+        # Update last_liveness_check for all assets (even if status unchanged)
+        for asset in assets:
+            table = 'domain_asset' if asset['asset_type'] == 'domain' else 'subdomain_asset'
+            id_col = 'dom_id' if asset['asset_type'] == 'domain' else 'sub_id'
+            cursor.execute(f'''
+                UPDATE {table} SET last_liveness_check = ? WHERE {id_col} = ?
+            ''', (now, asset['asset_id']))
+        
+        conn.commit()
+    finally:
+        conn.close()
+    
     # Update last check timestamp
-    from datetime import datetime
-    set_setting('last_liveness_check', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    set_setting('last_liveness_check', now)
     
     logger.info(
         f"Liveness check complete: "
         f"{len(result['down'])} down, "
         f"{len(result['recovered'])} recovered, "
         f"{len(result['still_down'])} still down, "
-        f"{result['unchanged']} unchanged"
+        f"{result['unchanged']} unchanged, "
+        f"{len(result['new_up'])} new up, "
+        f"{len(result['new_down'])} new down"
     )
     
     return result

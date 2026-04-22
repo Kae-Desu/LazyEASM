@@ -2,6 +2,9 @@ import jwt
 import datetime
 import threading
 import secrets
+import time
+import logging
+import hashlib
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, make_response, jsonify
 import os
@@ -17,6 +20,8 @@ from utils.queue_manager import task_queue
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
 
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 flask_secret = get_env('FLASK_SECRET_KEY')
 jwt_secret = get_env('JWT_SECRET')
@@ -31,6 +36,24 @@ if not jwt_secret:
 app.secret_key = flask_secret
 JWT_SECRET = jwt_secret
 
+SECURITY_HEADERS = {
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'X-XSS-Protection': '1; mode=block',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+    'Permissions-Policy': 'geolocation=(), microphone=(), camera=()',
+    'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.tailwindcss.com https://cdnjs.cloudflare.com https://fonts.googleapis.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdnjs.cloudflare.com; font-src 'self' https://fonts.gstatic.com https://cdnjs.cloudflare.com; img-src 'self' data: https:; connect-src 'self'"
+}
+
+
+@app.after_request
+def add_security_headers(response):
+    for header, value in SECURITY_HEADERS.items():
+        response.headers[header] = value
+    if get_env('FLASK_ENV', 'production') == 'production':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
+
 KEY_NAMES = {
     'DISCORD_WEBHOOK_URL': 'Discord Webhook',
     'DISCORD_USER_ID': 'Discord User ID',
@@ -38,6 +61,86 @@ KEY_NAMES = {
     'VULNERS_API_KEY': 'Vulners Key',
     'GEMINI_API_KEY': 'Gemini Key'
 }
+
+login_attempts = {}
+login_lock = threading.Lock()
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_BLOCK_DURATION = 60
+
+
+def is_rate_limited(ip: str) -> tuple:
+    blocked, attempts, remaining = False, 0, 0
+    current_time = time.time()
+    
+    with login_lock:
+        if ip in login_attempts:
+            attempts = login_attempts[ip]['count']
+            first_attempt = login_attempts[ip]['first_attempt']
+            
+            if attempts >= MAX_LOGIN_ATTEMPTS:
+                elapsed = current_time - first_attempt
+                if elapsed < LOGIN_BLOCK_DURATION:
+                    blocked = True
+                    remaining = int(LOGIN_BLOCK_DURATION - elapsed)
+                else:
+                    del login_attempts[ip]
+    
+    return blocked, attempts, remaining
+
+
+def record_failed_login(ip: str, username: str):
+    current_time = time.time()
+    
+    with login_lock:
+        if ip not in login_attempts:
+            login_attempts[ip] = {'count': 1, 'first_attempt': current_time}
+        else:
+            login_attempts[ip]['count'] += 1
+    
+    logger.warning(f"Failed login attempt - IP: {ip}, Username: {username}, Attempts: {login_attempts[ip]['count']}")
+
+
+def reset_failed_login(ip: str):
+    with login_lock:
+        if ip in login_attempts:
+            del login_attempts[ip]
+
+
+def get_secure_cookie_kwargs():
+    return {
+        'httponly': True,
+        'secure': get_env('FLASK_ENV', 'production') == 'production',
+        'samesite': 'Lax'
+    }
+
+
+def generate_csrf_token(session_token: str) -> str:
+    if not session_token:
+        return secrets.token_hex(16)
+    return hashlib.sha256(f"{session_token}{flask_secret}".encode()).hexdigest()[:32]
+
+
+def validate_csrf_token(session_token: str, provided_token: str) -> bool:
+    if not session_token or not provided_token:
+        return False
+    expected_token = generate_csrf_token(session_token)
+    return secrets.compare_digest(expected_token, provided_token)
+
+
+def csrf_protected(f):
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        session_token = request.cookies.get('session_token') or ''
+        csrf_token = request.form.get('csrf_token') or (request.get_json() or {}).get('csrf_token')
+        
+        if not csrf_token:
+            return jsonify({'success': False, 'error': 'CSRF token required'}), 403
+        
+        if not validate_csrf_token(session_token, csrf_token):
+            return jsonify({'success': False, 'error': 'Invalid CSRF token'}), 403
+        
+        return f(*args, **kwargs)
+    return decorated
 
 assets_data = [
     {
@@ -106,11 +209,20 @@ def token_required(f):
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
+    client_ip = request.remote_addr or 'unknown'
+    
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
-
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        
+        blocked, attempts, remaining = is_rate_limited(client_ip)
+        if blocked:
+            flash(f"Terlalu banyak percobaan login. Coba lagi dalam {remaining} detik.", "error")
+            return redirect(url_for('login'))
+        
         if username == get_env('ADMIN_USER', 'admin') and password == get_env('ADMIN_PASS', 'changeme'):
+            reset_failed_login(client_ip)
+            
             payload = {
                 'user': username,
                 'exp': datetime.datetime.utcnow() + datetime.timedelta(hours=24)
@@ -118,9 +230,10 @@ def login():
             token = jwt.encode(payload, JWT_SECRET, algorithm="HS256")
             
             resp = make_response(redirect(url_for('dashboard')))
-            resp.set_cookie('session_token', token, httponly=True)
+            resp.set_cookie('session_token', token, **get_secure_cookie_kwargs())
             return resp
         
+        record_failed_login(client_ip, username)
         flash("Username atau Password salah!", "error")
         return redirect(url_for('login'))
     
@@ -130,7 +243,7 @@ def login():
 @app.route('/logout')
 def logout():
     resp = make_response(redirect(url_for('login')))
-    resp.set_cookie('session_token', '', expires=0)
+    resp.set_cookie('session_token', '', expires=0, **get_secure_cookie_kwargs())
     flash("Berhasil logout.", "success")
     return resp
 
@@ -245,6 +358,13 @@ def health():
     }), status_code
 
 
+@app.context_processor
+def inject_csrf_token():
+    session_token = request.cookies.get('session_token') or ''
+    csrf_token = generate_csrf_token(session_token)
+    return dict(csrf_token=csrf_token)
+
+
 @app.route('/')
 @token_required
 def dashboard():
@@ -300,6 +420,7 @@ def delete_asset(asset_type, asset_id):
 
 @app.route('/save_config', methods=['POST'])
 @token_required
+@csrf_protected
 def save_config():
     errors = []
     saved_keys = []
@@ -497,6 +618,7 @@ def generate_ai():
 
 @app.route('/process_assets', methods=['POST'])
 @token_required
+@csrf_protected
 def process_assets():
     """
     Process user input and run Phase 1 in background.
@@ -974,4 +1096,5 @@ if __name__ == '__main__':
     start_phase3_workers()
     print("[Phase3] Monitoring workers started")
     
-    app.run(debug=True, host='0.0.0.0', port=10001)
+    debug_mode = get_env('FLASK_ENV', 'development') == 'development'
+    app.run(debug=debug_mode, host='0.0.0.0', port=10001)
