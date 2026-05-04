@@ -1,0 +1,14 @@
+version: '3.8'
+
+services:
+  lazyeasm:
+    build: .
+    container_name: lazyeasm
+    ports:
+      - "10001:10001"
+    volumes:
+      - ./db:/app/db
+      - ./logs:/app/logs
+    environment:
+      - PYTHONUNBUFFERED=1
+    restart: unless-stopped

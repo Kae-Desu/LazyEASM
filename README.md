@@ -200,8 +200,8 @@ JWT_SECRET=your_jwt_secret
 FLASK_ENV=production             # Set to 'development' for debug mode
 
 # Admin credentials
-ADMIN_USER=admin
-ADMIN_PASS=changeme              # Change this!
+ADMIN_USER=lazymin
+ADMIN_PASS=randomly_generated       # Set by utils/installation/install.sh
 
 # API Keys (enhances discovery and CVE matching)
 SECURITYTRAILS_API_KEY=your_key    # Subdomain enumeration
@@ -354,7 +354,10 @@ LazyEASM/
 ├── logs/                      # Application logs (gitignored)
 ├── requirements.txt
 ├── .env.example               # Environment template
-├── install.sh                 # Installation script
+├── start.sh                    # Main entry point (Docker / Native)
+├── utils/installation/
+│   ├── install.sh               # Secret generation script
+│   └── entrypoint.sh            # Docker entry point
 └── README.md
 ```
 
@@ -383,7 +386,7 @@ phase_status ─── Current phase tracking
 
 ## Usage
 
-1. **Login** - Access dashboard at `http://localhost:10001` (default: admin/changeme)
+1. **Login** - Access dashboard at `http://localhost:10001` (credentials set via `./start.sh`)
 2. **Configure** - Add API keys via Settings panel
 3. **Add Assets** - Enter domains, IPs, or CIDRs (newline-separated)
 4. **Process** - Click "Process Queue" to start Phase 0 discovery

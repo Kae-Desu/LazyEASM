@@ -23,6 +23,7 @@ import sqlite3
 import os
 import logging
 from datetime import datetime, timedelta
+from typing import Optional
 
 logger = logging.getLogger(__name__)
 

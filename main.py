@@ -252,7 +252,7 @@ def login():
             flash(f"Terlalu banyak percobaan login. Coba lagi dalam {remaining} detik.", "error")
             return redirect(url_for('login'))
         
-        if username == get_env('ADMIN_USER', 'admin') and password == get_env('ADMIN_PASS', 'changeme'):
+        if username == get_env('ADMIN_USER', 'lazymin') and password == get_env('ADMIN_PASS', ''):
             reset_failed_login(client_ip)
             
             now = datetime.datetime.utcnow()
