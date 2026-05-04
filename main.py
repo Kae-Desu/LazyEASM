@@ -1232,6 +1232,9 @@ def phase3_ctlogs_check():
 
 
 if __name__ == '__main__':
+    from modules.InitDB import init_db
+    init_db()
+
     # Start Phase 2 worker in background thread
     from utils.phase2_worker import phase2_worker_loop, _phase2_thread as phase2_thread_ref
     import utils.phase2_worker
