@@ -14,7 +14,7 @@ RANDOM_FLASK=$(openssl rand -base64 96 | tr -d '/+=' | head -c 128)
 
 # --- SIMPAN KE .env ---
 cat << EOF > "$PROJECT_ROOT/.env"
-FLASK_SECRET=$RANDOM_FLASK
+FLASK_SECRET_KEY=$RANDOM_FLASK
 JWT_SECRET=$RANDOM_JWT
 ADMIN_USER=lazymin
 ADMIN_PASS=$RANDOM_PASS

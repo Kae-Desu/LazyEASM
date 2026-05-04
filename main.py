@@ -58,8 +58,8 @@ def add_security_headers(response):
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
     
-    if get_env('FLASK_ENV', 'production') == 'production':
-        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+if get_env('FLASK_ENV', 'development') == 'production':
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     
     return response
 
@@ -125,7 +125,7 @@ def get_secure_cookie_kwargs():
     
     return {
         'httponly': True,
-        'secure': get_env('FLASK_ENV', 'production') == 'production' and not is_localhost,
+        'secure': get_env('FLASK_ENV', 'development') == 'production' and not is_localhost,
         'samesite': 'Lax'
     }
 
