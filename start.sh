@@ -53,11 +53,20 @@ install_docker() {
                 exit 1
             fi
             apt-get update
+            apt-get install -y locales
+            sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen 2>/dev/null || true
+            locale-gen en_US.UTF-8 2>/dev/null || true
+            export LANG=en_US.UTF-8
             apt-get install -y docker.io docker-compose
             systemctl start docker
             systemctl enable docker
-            usermod -aG docker "$SUDO_USER"
-            echo -e "${GREEN}Docker installed. You may need to logout/login for group changes.${NC}"
+            DOCKER_USER="${SUDO_USER:-$USER}"
+            if [ -n "$DOCKER_USER" ] && [ "$DOCKER_USER" != "root" ]; then
+                usermod -aG docker "$DOCKER_USER"
+                echo -e "${GREEN}Docker installed. You may need to logout/login for group changes.${NC}"
+            else
+                echo -e "${GREEN}Docker installed.${NC}"
+            fi
             ;;
         macos)
             echo -e "${RED}Docker not installed.${NC}"
@@ -84,6 +93,10 @@ install_native_deps() {
                 exit 1
             fi
             apt-get update
+            apt-get install -y locales
+            sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen 2>/dev/null || true
+            locale-gen en_US.UTF-8 2>/dev/null || true
+            export LANG=en_US.UTF-8
             apt-get install -y python3 python3-pip python3-venv nmap openssl curl git
             ;;
         macos)
