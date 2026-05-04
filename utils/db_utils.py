@@ -2045,5 +2045,75 @@ def is_user_revoked(user: str) -> bool:
     return result is not None
 
 
+def mark_cert_notified(cert_id: int, hostname: str, threshold: int) -> bool:
+    """
+    Record that a certificate expiry notification was sent at this threshold.
+    
+    Args:
+        cert_id: Certificate ID from certificates table
+        hostname: Certificate hostname
+        threshold: Days threshold (7, 5, 3, or 1)
+    
+    Returns:
+        True if inserted successfully
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    try:
+        cursor.execute('''
+            INSERT OR IGNORE INTO cert_notifications (cert_id, hostname, days_threshold)
+            VALUES (?, ?, ?)
+        ''', (cert_id, hostname, threshold))
+        conn.commit()
+        return True
+    except Exception as e:
+        print(f"Error marking cert notification: {e}")
+        return False
+    finally:
+        conn.close()
+
+
+def is_cert_notified(cert_id: int, threshold: int) -> bool:
+    """
+    Check if notification already sent for this cert at this threshold.
+    
+    Args:
+        cert_id: Certificate ID
+        threshold: Days threshold
+    
+    Returns:
+        True if already notified
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        SELECT 1 FROM cert_notifications
+        WHERE cert_id = ? AND days_threshold = ?
+    ''', (cert_id, threshold))
+    
+    result = cursor.fetchone()
+    conn.close()
+    return result is not None
+
+
+def cleanup_cert_notifications():
+    """
+    Remove notification tracking entries for certificates
+    that no longer exist or have been renewed (new cert_id).
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    cursor.execute('''
+        DELETE FROM cert_notifications
+        WHERE cert_id NOT IN (SELECT cert_id FROM certificates)
+    ''')
+    
+    conn.commit()
+    conn.close()
+
+
 if __name__ == '__main__':
     print("Use InitDB.py to initialize database")

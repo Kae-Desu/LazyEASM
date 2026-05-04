@@ -199,13 +199,12 @@ def send_vulnerability_alert(assets_with_cves: dict, min_cvss: float = 5.0) -> t
         return False, f'Unexpected error: {str(e)}'
 
 
-def send_certificate_alert(expiring_certs: list) -> tuple:
+def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
     """
-    Send SSL certificate expiry alert to Discord.
-    Only shows certificates about to expire (not already expired).
+    Send SSL certificate expiry alerts grouped by threshold (7, 5, 3, 1 days).
     
     Args:
-        expiring_certs: List of certs expiring soon (from get_expiring_certificates)
+        threshold_certs: {7: [{cert_id, hostname}, ...], 5: [...], 3: [...], 1: [...]}
     
     Returns:
         Tuple of (success: bool, message: str)
@@ -218,38 +217,29 @@ def send_certificate_alert(expiring_certs: list) -> tuple:
     if not webhook_url:
         return False, 'Discord webhook URL not configured'
     
+    colors = {7: 16098851, 5: 16027660, 3: 15158332, 1: 15548997}
+    emojis = {7: "🟡", 5: "🟠", 3: "🔴", 1: "🔴"}
+    
     embeds = []
     
-    def extract_org(issuer: str) -> str:
-        if not issuer:
-            return 'Unknown'
-        import re
-        match = re.search(r'O=([^,]+)', issuer)
-        if match:
-            return match.group(1).strip()
-        return 'Unknown'
-    
-    # Expiring within 7 days (one per hostname, max 5)
-    if expiring_certs:
-        seen_hosts = set()
-        for cert in expiring_certs:
-            if len(seen_hosts) >= 5:
-                break
-            if cert['hostname'] in seen_hosts:
-                continue
-            seen_hosts.add(cert['hostname'])
-            
-            days = int(cert.get('days_until_expiry') or 0)
-            if days <= 7:
-                color = 15158332 if days <= 3 else 16027660
-                embeds.append({
-                    "title": f"⚠️ {cert['hostname']}",
-                    "color": color,
-                    "fields": [
-                        {"name": "Expires In", "value": f"**{days}** days", "inline": True},
-                        {"name": "Issuer", "value": extract_org(cert.get('issuer')), "inline": True}
-                    ]
-                })
+    for threshold in [1, 3, 5, 7]:
+        certs = threshold_certs.get(threshold, [])
+        if not certs:
+            continue
+        
+        emoji = emojis[threshold]
+        day_text = "1 day" if threshold == 1 else f"{threshold} days"
+        title = f"{emoji} {day_text} until expiry"
+        
+        cert_lines = [f"• {c['hostname']}" for c in certs[:10]]
+        if len(certs) > 10:
+            cert_lines.append(f"• ... and {len(certs) - 10} more")
+        
+        embeds.append({
+            "title": title,
+            "description": "\n".join(cert_lines),
+            "color": colors[threshold]
+        })
     
     if not embeds:
         return True, 'No certificate alerts to send'
@@ -257,14 +247,14 @@ def send_certificate_alert(expiring_certs: list) -> tuple:
     ping_user = get_env('DISCORD_USER_ID')
     
     data = {
-        "content": f"{'<@' + ping_user + '>' if ping_user else ''} **LazyEASM - SSL Certificate Alert**",
+        "content": f"{'<@' + ping_user + '>' if ping_user else ''} **LazyEASM - SSL Certificate Expiry Alert**",
         "embeds": embeds
     }
     
     try:
         response = requests.post(webhook_url, json=data, timeout=30)
         response.raise_for_status()
-        return True, f'Alert sent - {len(embeds)} certificate(s)'
+        return True, f'Alert sent - {sum(len(c) for c in threshold_certs.values())} certificate(s) across {len(embeds)} threshold(s)'
     except requests.exceptions.Timeout:
         return False, 'Request timed out'
     except requests.exceptions.ConnectionError:

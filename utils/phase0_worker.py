@@ -204,7 +204,7 @@ def process_phase0_item(item: dict):
     
     try:
         # Import Phase1Expander
-        phase1_module = importlib.import_module('modules.03-asset-expansion')
+        phase1_module = importlib.import_module('modules.ExpandAsset')
         expander = phase1_module.Phase1Expander()
         
         # Run Phase 0 discovery for subdomain

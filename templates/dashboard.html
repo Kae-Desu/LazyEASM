@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>sebuah skripsi</title>
+    <title>LazyEASM - Dashboard</title>
     
     <link rel="icon" href="/static/icons/light-icon.png" type="image/png">
     <script>
@@ -836,7 +836,7 @@
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                             <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">AI Analysis</span>
                         </div>
-                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">${safeRecommendation}</p>
+                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-line">${safeRecommendation}</p>
                         <button onclick="event.stopPropagation(); showRegenerateConfirm(${vulnId}, '${safeCveId}')" class="mt-3 text-[10px] text-accent hover:text-secondary font-bold transition-colors">
                             <i class="fas fa-sync-alt mr-1"></i>Regenerate Analysis
                         </button>
@@ -1036,9 +1036,9 @@
                 // Update certificates
                 document.getElementById('certs-total').textContent = data.certificates.total;
                 const certWarning = document.getElementById('certs-warning');
-                if (data.certificates.expiring_3_days > 0) {
+                if (data.certificates.expiring_7_days > 0) {
                     if (certWarning) certWarning.classList.remove('hidden');
-                    document.getElementById('certs-expiring').textContent = `${data.certificates.expiring_3_days} expiring soon`;
+                    document.getElementById('certs-expiring').textContent = `${data.certificates.expiring_7_days} expiring soon`;
                 } else if (certWarning) {
                     certWarning.classList.add('hidden');
                 }

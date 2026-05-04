@@ -88,7 +88,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
     # 1. Port scan on non-shared IPs
     if ips_to_scan:
         try:
-            port_scanner_module = importlib.import_module('modules.02-port-scanner')
+            port_scanner_module = importlib.import_module('modules.Nmap')
             scanner = port_scanner_module.PortScanner(cycle='initial', skip_down=False)
             
             port_nums_seen = set()

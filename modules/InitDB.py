@@ -323,6 +323,23 @@ def init_db():
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
 
     # ============================================
+    # CERTIFICATE NOTIFICATION TRACKING
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cert_notifications (
+            notif_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cert_id INTEGER NOT NULL,
+            hostname TEXT NOT NULL,
+            days_threshold INTEGER NOT NULL,
+            notified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(cert_id, days_threshold),
+            FOREIGN KEY(cert_id) REFERENCES certificates(cert_id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cert_notif_lookup ON cert_notifications(cert_id, days_threshold)')
+
+    # ============================================
     # PHASE STATUS TRACKING
     # ============================================
     cursor.execute('''
@@ -355,6 +372,18 @@ def init_db():
     # Add last_deep_scan column to subdomain_asset
     if 'last_deep_scan' not in subdomain_columns:
         cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_deep_scan TEXT")
+
+    # Add last_dirsearch column to domain_asset and subdomain_asset
+    if 'last_dirsearch' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_dirsearch TEXT")
+    if 'last_dirsearch' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_dirsearch TEXT")
+
+    # Add last_liveness_check column to domain_asset and subdomain_asset
+    if 'last_liveness_check' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_liveness_check TEXT")
+    if 'last_liveness_check' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_liveness_check TEXT")
     
     # Add ports_found and dirs_found to scan_queue if not exists
     cursor.execute("PRAGMA table_info(scan_queue)")

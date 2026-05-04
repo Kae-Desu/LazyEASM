@@ -34,7 +34,7 @@ def find_phase0_processes() -> List[Dict]:
                 continue
             
             # Phase 0 discovery scripts - check for actual module execution
-            if '03-asset-expansion' in cmdline or 'phase0_runner' in cmdline:
+            if 'ExpandAsset' in cmdline or 'phase0_runner' in cmdline:
                 processes.append({
                     'pid': proc.info['pid'],
                     'name': proc.info['name'],

@@ -13,6 +13,7 @@ import time
 import requests
 from datetime import datetime, timedelta
 from typing import List, Dict, Set
+from utils.db_utils import is_cert_notified
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ def fetch_ctlogs(domain: str) -> tuple:
     """
     Fetch CT logs from crt.sh for a domain.
     
-    Reuses logic from modules/03-asset-expansion.py.
+    Reuses logic from modules/ExpandAsset.py.
     
     Args:
         domain: Root domain (e.g., 'example.com')
@@ -92,15 +93,18 @@ def fetch_ctlogs(domain: str) -> tuple:
     return list(subdomains), certificates
 
 
-def get_expiring_certs(days_threshold: int = 3) -> List[Dict]:
+def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
     """
-    Get certificates expiring within specified days.
-    
-    Args:
-        days_threshold: Days until expiry (default: 3)
+    Check certs at 7, 5, 3, 1 day thresholds.
+    Excludes certs already notified at each threshold.
     
     Returns:
-        List of {'hostname': str, 'days_remaining': int}
+        {
+            7: [{'cert_id': int, 'hostname': str}, ...],
+            5: [...],
+            3: [...],
+            1: [...]
+        }
     """
     from utils.db_utils import get_db_connection
     
@@ -108,37 +112,40 @@ def get_expiring_certs(days_threshold: int = 3) -> List[Dict]:
     cursor = conn.cursor()
     
     now = datetime.now()
-    threshold = now + timedelta(days=days_threshold)
+    thresholds = [7, 5, 3, 1]
+    results = {t: [] for t in thresholds}
     
     cursor.execute('''
-        SELECT hostname, not_after
+        SELECT cert_id, hostname, not_after
         FROM certificates
         ORDER BY not_after ASC
     ''')
     
-    expiring = []
     for row in cursor.fetchall():
         try:
             not_after_str = row['not_after']
             
-            # Handle both ISO format (T separator) and space format
             if 'T' in not_after_str:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S')
             else:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S')
             
-            days_remaining = (not_after - now).days
+            days_remaining = round((not_after - now).total_seconds() / 86400)
             
-            if days_remaining <= days_threshold and days_remaining >= 0:
-                expiring.append({
-                    'hostname': row['hostname'],
-                    'days_remaining': days_remaining
-                })
+            if days_remaining < 0:
+                continue
+            
+            for threshold in thresholds:
+                if days_remaining == threshold and not is_cert_notified(row['cert_id'], threshold):
+                    results[threshold].append({
+                        'cert_id': row['cert_id'],
+                        'hostname': row['hostname']
+                    })
         except Exception:
             continue
     
     conn.close()
-    return expiring
+    return results
 
 
 def check_cert_signature_changes(certificates: List[Dict]) -> List[Dict]:
@@ -207,7 +214,7 @@ def poll_all_domains() -> Dict:
     Returns:
         {
             'new_subdomains': [(domain, subdomain), ...],
-            'cert_expiring': [(hostname, days_remaining), ...],
+            'expiry_alerts': {7: [{cert_id, hostname}, ...], 5: [...], 3: [...], 1: [...]},
             'signature_changes': [{'hostname', 'old_serial', 'new_serial'}, ...]
         }
     """
@@ -222,7 +229,7 @@ def poll_all_domains() -> Dict:
     
     if not domains:
         logger.info("No domains to monitor")
-        return {'new_subdomains': [], 'cert_expiring': [], 'signature_changes': []}
+        return {'new_subdomains': [], 'expiry_alerts': {}, 'signature_changes': []}
     
     logger.info(f"Polling CT logs for {len(domains)} domains")
     
@@ -279,7 +286,7 @@ def poll_all_domains() -> Dict:
         logger.info(f"Stored {certs_stored} new certificates")
     
     # Check certificate expiry
-    expiring_certs = get_expiring_certs(days_threshold=3)
+    expiry_alerts = check_certificate_expiry_thresholds()
     
     # Check certificate signature changes
     signature_changes = check_cert_signature_changes(all_certificates)
@@ -287,16 +294,17 @@ def poll_all_domains() -> Dict:
     # Update last check timestamp
     set_setting('last_ctlogs_check', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     
+    total_alerts = sum(len(certs) for certs in expiry_alerts.values())
     logger.info(
         f"CT logs poll complete: "
         f"{len(new_subdomains)} new subdomains, "
-        f"{len(expiring_certs)} certs expiring, "
+        f"{total_alerts} cert expiry alerts, "
         f"{len(signature_changes)} signature changes"
     )
     
     return {
         'new_subdomains': new_subdomains,
-        'cert_expiring': expiring_certs,
+        'expiry_alerts': expiry_alerts,
         'signature_changes': signature_changes
     }
 
@@ -340,7 +348,7 @@ def get_cert_expiry_summary() -> Dict:
             else:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S')
             
-            days_remaining = (not_after - now).days
+            days_remaining = round((not_after - now).total_seconds() / 86400)
             
             if days_remaining < 0:
                 expired += 1
@@ -370,7 +378,7 @@ if __name__ == '__main__':
     
     parser = argparse.ArgumentParser(description='CT Logs monitor')
     parser.add_argument('--poll', action='store_true', help='Poll all domains')
-    parser.add_argument('--check-expiry', action='store_true', help='Check certificate expiry')
+    parser.add_argument('--check-expiry', action='store_true', help='Check certificate expiry thresholds')
     parser.add_argument('--summary', action='store_true', help='Get cert expiry summary')
     
     args = parser.parse_args()
@@ -378,11 +386,15 @@ if __name__ == '__main__':
     if args.poll:
         result = poll_all_domains()
         print(f"New subdomains: {result['new_subdomains']}")
-        print(f"Certs expiring: {result['cert_expiring']}")
+        print(f"Expiry alerts: {result['expiry_alerts']}")
     elif args.check_expiry:
-        expiring = get_expiring_certs()
-        for cert in expiring:
-            print(f"{cert['hostname']}: {cert['days_remaining']} days remaining")
+        alerts = check_certificate_expiry_thresholds()
+        for threshold in [1, 3, 5, 7]:
+            certs = alerts.get(threshold, [])
+            if certs:
+                print(f"\n{threshold} day(s) until expiry:")
+                for cert in certs:
+                    print(f"  - {cert['hostname']}")
     elif args.summary:
         summary = get_cert_expiry_summary()
         print(f"Total certs: {summary['total_certs']}")

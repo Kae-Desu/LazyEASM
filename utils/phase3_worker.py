@@ -88,7 +88,8 @@ def send_ctlogs_notification(result: dict):
         result: Dict from poll_all_domains()
     """
     try:
-        from modules.Notify import send_message
+        from modules.Notify import send_message, send_cert_expiry_threshold_alert
+        from utils.db_utils import mark_cert_notified
         
         lines = ["**Phase 3: CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
         
@@ -110,21 +111,18 @@ def send_ctlogs_notification(result: dict):
             if len(result['signature_changes']) > 5:
                 lines.append(f"• ... and {len(result['signature_changes']) - 5} more")
         
-        if result['cert_expiring']:
-            lines.append(f"\n**Certificate Expiry Warning ({len(result['cert_expiring'])}):**")
-            for cert in result['cert_expiring'][:10]:
-                days = cert['days_remaining']
-                hostname = cert['hostname']
-                if days == 0:
-                    lines.append(f"⚠️ {hostname} (EXPIRED)")
-                elif days == 1:
-                    lines.append(f"⚠️ {hostname} (1 day remaining)")
-                else:
-                    lines.append(f"⚠️ {hostname} ({days} days remaining)")
-            if len(result['cert_expiring']) > 10:
-                lines.append(f"• ... and {len(result['cert_expiring']) - 10} more")
+        if len(lines) > 2:
+            send_message('\n'.join(lines))
         
-        send_message('\n'.join(lines))
+        # Send cert expiry threshold alerts separately
+        expiry_alerts = result.get('expiry_alerts', {})
+        if any(expiry_alerts.values()):
+            success, msg = send_cert_expiry_threshold_alert(expiry_alerts)
+            logger.info(f"Cert expiry alert: {msg}")
+            
+            for threshold, certs in expiry_alerts.items():
+                for cert in certs:
+                    mark_cert_notified(cert['cert_id'], cert['hostname'], threshold)
         
     except Exception as e:
         logger.error(f"Failed to send CT logs notification: {e}")
@@ -196,7 +194,8 @@ def ctlogs_loop(interval_hr: int = 1):
                 result = poll_all_domains()
                 
                 # Send notification if any discoveries
-                if result['new_subdomains'] or result['cert_expiring'] or result.get('signature_changes'):
+                has_alerts = result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()) or result.get('signature_changes')
+                if has_alerts:
                     send_ctlogs_notification(result)
             else:
                 logger.debug("Phase 3 disabled, skipping CT logs poll")

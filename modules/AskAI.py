@@ -5,6 +5,7 @@ Purpose: AI-powered recommendations using Google Gemini
 
 import os
 import sys
+import re
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,6 +19,35 @@ except ImportError:
 
 _api_key = get_env('GEMINI_API_KEY')
 _client = None
+GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"]
+
+
+def get_cvss_severity(score):
+    if score is None:
+        return "Tidak tersedia"
+    if score >= 9.0:
+        return "Critical"
+    elif score >= 7.0:
+        return "High"
+    elif score >= 4.0:
+        return "Medium"
+    elif score > 0:
+        return "Low"
+    return "None"
+
+
+def format_tech_stack(tech_stack, affected_tech_name):
+    others = [(name, ver) for name, ver in tech_stack if name != affected_tech_name]
+    if not others:
+        return None
+    return ", ".join([f"{name} {ver}" if ver else name for name, ver in others])
+
+
+def format_ai_response(text: str) -> str:
+    text = re.sub(r'(?<!\n\n)(\n)?(📋|🔴|🛠️)', r'\n\n\2', text)
+    text = re.sub(r'(?<=\S) (\d\.\s)', r'\n\1', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 def _get_client():
     """Get or create Gemini client."""
@@ -35,65 +65,109 @@ def _get_client():
     return _client
 
 
-def send_message(cve_id: str, tech_version: str, cve_description: str, asset_name: str):
+def send_message(cve_id: str, cve_score, cve_description: str,
+                 tech_name: str, tech_version: str, asset_name: str,
+                 port, is_https, tech_stack: list):
     """
     Generate AI-powered vulnerability recommendation.
     
     Args:
         cve_id: CVE identifier
-        tech_version: Technology version
+        cve_score: CVSS score (float or None)
+        cve_description: CVE description from NVD/Vulners
+        tech_name: Affected technology name (e.g., 'nginx')
+        tech_version: Affected technology version (e.g., '1.18.0')
+        asset_name: Host/asset name (e.g., 'example.com')
+        port: Port number (int or None)
+        is_https: Whether port is HTTPS (bool or int)
+        tech_stack: List of (name, version) tuples for other techs on same service
         cve_description: CVE description
-        asset_name: Asset name
     
     Returns:
-        Recommendation text or None if error
+        Tuple of (recommendation_text, error_message)
     """
     client = _get_client()
     
     if not client:
-        return None
+        return None, "Gemini client not available. Check GEMINI_API_KEY."
     
-    prompt = f"""
-    Acting as a Cyber Security Assistant.
+    severity = get_cvss_severity(cve_score)
+    score_display = f"{cve_score} ({severity})" if cve_score is not None else "Tidak tersedia"
+    tech_display = f"{tech_name} {tech_version}" if tech_version else tech_name
     
-    I will provide you with a TECHNICAL DESCRIPTION of a vulnerability (Source: NVD) and the USER'S CURRENT VERSION.
-    Your task is to REWRITE it for a non-technical user in Indonesian and suggest fixes.
-
-    --- SOURCE DATA ---
-    Asset Name: {asset_name}
-    User's Current Version: {tech_version}
-    CVE ID: {cve_id}
-    Raw Description: "{cve_description}"
-    -------------------
-
-    INSTRUCTIONS:
-    1. **Deskripsi Singkat**: Translate the "Raw Description" into simple Indonesian. Summarize it in 1-2 sentences. Focus on the impact (what can happen like data theft or crash).
+    port_display = str(port) if port else "tidak diketahui"
+    protocol = "HTTPS" if is_https else "HTTP"
+    port_info = f"{port_display} ({protocol})"
     
-    2. **Rekomendasi (Personalized)**: 
-       - **Step 1 is MANDATORY**: You MUST compare the user's version with a safe version. 
-       - **Format for Step 1**: "Saat ini sistem menggunakan versi {tech_version}, sangat disarankan untuk segera melakukan update ke versi [INSERT SAFE/LATEST VERSION HERE] atau yang lebih baru."
-       - Use your knowledge to suggest the next safe version (e.g., if user has Node 15, suggest Node 18 LTS or 20 LTS).
-       - **Step 2**: Provide one additional mitigation step (e.g., check config, firewall, or monitor logs).
-
-    STRICT OUTPUT FORMAT (Pure Text):
-    Pemberitahuan, Telah terdeteksi kerentanan pada aset {asset_name} berikut adalah detailnya.
-    CVE ID = {cve_id}
-    Deskripsi Singkat = [Gemini writes the summary here]
-
-    Rekomendasi langkah penanganan:
-    1. [Gemini: Insert the personalized update instruction mentioning version {tech_version}]
-    2. [Gemini: Insert additional mitigation step]
-    """
+    stack_info = format_tech_stack(tech_stack, tech_name)
+    if stack_info:
+        tech_stack_data = f"\nTech Stack (teknologi lain di port yang sama): {stack_info}\n"
+        tech_stack_note = f"\nTech stack: {stack_info}. Pastikan kompatibilitas saat patch diterapkan."
+    else:
+        tech_stack_data = ""
+        tech_stack_note = ""
     
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
-        return response.text
-    except Exception as e:
-        print(f"Gemini API error: {e}")
-        return None
+    prompt = f"""Anda adalah Asisten Keamanan Siber. Berikan analisis kerentanan dalam Bahasa Indonesia.
+
+--- DATA SUMBER ---
+Aset: {asset_name}
+Port: {port_info}
+Teknologi Terdampak: {tech_display}
+CVE ID: {cve_id}
+Skor CVSS: {score_display}
+Deskripsi: "{cve_description}"
+{tech_stack_data}-------------------
+
+STRICT OUTPUT FORMAT (IKUTI FORMAT INI PERSIS, GUNAKAN NEWLINE):
+
+📋 APA INI?
+[1 kalimat singkat, maksimal 30 kata]
+
+🔴 3 RISIKO UTAMA:
+1. [1 kalimat, maksimal 20 kata]
+2. [1 kalimat, maksimal 20 kata]
+3. [1 kalimat, maksimal 20 kata]
+
+🛠️ PANDUAN PATCH (3 LANGKAH):
+1. [WAJIB sebutkan versi aman: "Update {tech_name} dari versi {tech_version} ke versi X.X.X+", maksimal 25 kata]
+2. [Langkah mitigasi alternatif, maksimal 25 kata]
+3. [Langkah monitoring, sebutkan port {port_display} jika relevan, maksimal 25 kata]
+{tech_stack_note}
+
+CONTOH OUTPUT:
+
+📋 APA INI?
+Kerentanan XSS memungkinkan injeksi JavaScript berbahaya.
+
+🔴 3 RISIKO UTAMA:
+1. Pencurian cookie sesi pengguna.
+2. Redirect ke situs phishing.
+3. Defacement halaman website.
+
+🛠️ PANDUAN PATCH (3 LANGKAH):
+1. Update ke versi 2.1.0 atau lebih baru.
+2. Tambahkan Content-Security-Policy header.
+3. Monitor log di port 443 untuk pola XSS.
+
+Tech stack: Node.js. Pastikan kompatibilitas saat patch.
+
+PENTING: Setiap bagian harus di baris baru. Jangan gabungkan dalam satu baris. Ikuti contoh di atas persis."""
+    
+    last_error = None
+    for model in GEMINI_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt
+            )
+            formatted = format_ai_response(response.text)
+            return f"{formatted}\n\n_Generated by {model}_", None
+        except Exception as e:
+            last_error = str(e)
+            print(f"Gemini API error ({model}): {e}")
+            continue
+    
+    return None, "Gemini models unavailable or API key exhausted"
 
 
 def compare_cve_details(desc_nvd: str, desc_vulners: str):
@@ -110,7 +184,7 @@ def compare_cve_details(desc_nvd: str, desc_vulners: str):
     client = _get_client()
     
     if not client:
-        return False
+        return False, "Gemini client not available. Check GEMINI_API_KEY."
 
     prompt = f"""
     Role: Senior Security Auditor.
@@ -136,18 +210,23 @@ def compare_cve_details(desc_nvd: str, desc_vulners: str):
     OUTPUT: True or False only.
     """
 
-    try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt
-        )
-        
-        if response and "true" in response.text.lower():
-            return True
-        return False
-    except Exception as e:
-        print(f"Gemini API error: {e}")
-        return False
+    last_error = None
+    for model in GEMINI_MODELS:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt
+            )
+            
+            if response and "true" in response.text.lower():
+                return True, None
+            return False, None
+        except Exception as e:
+            last_error = str(e)
+            print(f"Gemini API error ({model}): {e}")
+            continue
+    
+    return False, "Gemini models unavailable or API key exhausted"
 
 
 if __name__ == '__main__':
@@ -157,14 +236,19 @@ if __name__ == '__main__':
     
     if _api_key and GEMINI_AVAILABLE:
         print("\nTesting send_message...")
-        result = send_message(
+        result, error = send_message(
             cve_id="CVE-2023-1234",
-            tech_version="nginx 1.18.0",
+            cve_score=7.5,
             cve_description="A vulnerability in nginx allows remote attackers to cause a denial of service.",
-            asset_name="test-server"
+            tech_name="nginx",
+            tech_version="1.18.0",
+            asset_name="test-server",
+            port=443,
+            is_https=True,
+            tech_stack=[("Node.js", "18.0"), ("Express", "4.18")]
         )
         if result:
             print("Response received:")
             print(result[:500])
         else:
-            print("No response received")
+            print(f"No response received. Error: {error}")

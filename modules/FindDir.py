@@ -1,4 +1,5 @@
 """
+Module: FindDir.py
 Dirsearch Module - Non-recursive directory enumeration.
 
 Requirements:

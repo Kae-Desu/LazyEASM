@@ -219,7 +219,7 @@
                             <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
                             <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">AI Analysis</span>
                         </div>
-                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed">
+                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-line">
                             {{ cve.recommendation }}
                         </p>
                         <button onclick="event.stopPropagation(); showRegenerateConfirm({{ cve.vuln_id }}, '{{ cve.cve_id }}')" class="mt-3 text-[10px] text-accent hover:text-secondary font-bold transition-colors">

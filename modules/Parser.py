@@ -1,5 +1,5 @@
 """
-Module: 01-parse-input.py
+Module: Parser.py
 Purpose: Parse and validate input targets for LazyEASM
 Functions:
     - InputParser: Main parser class

@@ -1,5 +1,5 @@
 """
-Module: 02-port-scanner.py
+Module: Nmap.py
 Purpose: Nmap-based port scanning for all cycles (initial, medium, long)
 
 Cycles:
@@ -575,11 +575,11 @@ if __name__ == '__main__':
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  python modules/02-port-scanner.py                      # Default: medium scan
-  python modules/02-port-scanner.py --cycle initial     # Fast scan (100 ports)
-  python modules/02-port-scanner.py --cycle long        # Full scan (all ports)
-  python modules/02-port-scanner.py --no-skip-shared     # Include shared hosting
-  python modules/02-port-scanner.py --skip-down          # Skip down IPs
+  python modules/Nmap.py                      # Default: medium scan
+  python modules/Nmap.py --cycle initial     # Fast scan (100 ports)
+  python modules/Nmap.py --cycle long        # Full scan (all ports)
+  python modules/Nmap.py --no-skip-shared     # Include shared hosting
+  python modules/Nmap.py --skip-down          # Skip down IPs
         """
     )
     

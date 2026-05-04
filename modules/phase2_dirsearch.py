@@ -146,7 +146,7 @@ def run_full_nmap(ip_id: int, ip_value: str) -> Dict:
         Dict with 'success', 'ports_found', 'services_found', 'error'
     """
     try:
-        port_scanner_module = importlib.import_module('modules.02-port-scanner')
+        port_scanner_module = importlib.import_module('modules.Nmap')
         scanner = port_scanner_module.PortScanner(cycle='long', skip_down=False)
         
         result = scanner.scan_full_ports(ip_id, ip_value)
@@ -218,7 +218,7 @@ def run_dirsearch_limited(asset_name: str, ports: Optional[List[int]] = None) ->
         ports = [80, 443]
     
     try:
-        dirsearch_module = importlib.import_module('modules.05-dirsearch')
+        dirsearch_module = importlib.import_module('modules.FindDir')
         
         # Pre-flight: check if port 80 redirects to HTTPS
         if 80 in ports and 443 in ports:

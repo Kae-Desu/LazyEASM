@@ -1,8 +1,8 @@
 """
 Shared parsing functions for LazyEASM.
 Used by:
-    - 01-parse-input.py (main entry)
-    - 03-asset-expansion.py (subdomain parsing)
+    - Parser.py (main entry)
+    - ExpandAsset.py (subdomain parsing)
     - main.py (unified phase1)
 """
 

@@ -705,7 +705,9 @@ def generate_ai():
     
     try:
         cursor.execute('''
-            SELECT v.vuln_id, v.cve_id, v.description, t.tech_name, t.tech_version, h.host
+            SELECT v.vuln_id, v.cve_id, v.cve_score, v.description,
+                   t.tech_name, t.tech_version, t.tech_id,
+                   h.host, h.port_num, h.is_https, h.http_id
             FROM vulnerabilities v
             INNER JOIN technologies t ON t.tech_id = v.tech_id
             INNER JOIN http_services h ON h.http_id = t.http_id
@@ -718,23 +720,42 @@ def generate_ai():
             return jsonify({'error': 'CVE not found'}), 404
         
         cve_id = row['cve_id']
+        cve_score = row['cve_score']
         description = row['description'] or ''
         tech_name = row['tech_name'] or 'Unknown'
-        tech_version = row['tech_version'] or 'Unknown'
+        tech_version = row['tech_version'] or ''
+        tech_id = row['tech_id']
         asset_name = row['host']
+        port = row['port_num']
+        is_https = row['is_https']
+        http_id = row['http_id']
+        
+        # Get other technologies on the same http_service
+        cursor.execute('''
+            SELECT tech_name, tech_version
+            FROM technologies
+            WHERE http_id = ? AND tech_id != ?
+        ''', (http_id, tech_id))
+        tech_stack = [(r['tech_name'], r['tech_version']) for r in cursor.fetchall()]
         
         if not description:
             return jsonify({'error': 'CVE lacks description'}), 400
         
-        recommendation = send_message(
+        recommendation, ai_error = send_message(
             cve_id=cve_id,
-            tech_version=f"{tech_name} {tech_version}" if tech_version else tech_name,
+            cve_score=cve_score,
             cve_description=description,
-            asset_name=asset_name
+            tech_name=tech_name,
+            tech_version=tech_version,
+            asset_name=asset_name,
+            port=port,
+            is_https=is_https,
+            tech_stack=tech_stack
         )
         
         if not recommendation:
-            return jsonify({'error': 'AI generation failed. Check GEMINI_API_KEY.'}), 500
+            error_text = f"AI generation failed: {ai_error}" if ai_error else "AI generation failed. Check GEMINI_API_KEY."
+            return jsonify({'error': error_text}), 500
         
         cursor.execute('''
             UPDATE vulnerabilities 
@@ -815,7 +836,7 @@ def run_phase1_background(targets: dict):
     
     try:
         # Import module (filename starts with number, use importlib)
-        phase1_module = importlib.import_module('modules.03-asset-expansion')
+        phase1_module = importlib.import_module('modules.ExpandAsset')
         
         # Initialize expander
         expander = phase1_module.Phase1Expander()
@@ -1201,7 +1222,7 @@ def phase3_ctlogs_check():
     result = poll_all_domains()
     
     # Send notification if any discoveries
-    if result['new_subdomains'] or result['cert_expiring']:
+    if result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()):
         send_ctlogs_notification(result)
     
     return jsonify({

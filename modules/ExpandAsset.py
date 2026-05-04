@@ -1,5 +1,5 @@
 """
-Module: 03-asset-expansion.py
+Module: ExpandAsset.py
 Purpose: Phase 1 - Asset Discovery and Initialization
 
 Flow:
