@@ -80,7 +80,7 @@ def check_all_liveness() -> dict:
             'new_down': [asset_name, ...]    # First check, now down
         }
     """
-    from datetime import datetime
+    from datetime import datetime, timezone
     from utils.db_utils import get_db_connection
     
     assets = get_all_assets_for_liveness()
@@ -100,7 +100,7 @@ def check_all_liveness() -> dict:
         'new_down': []
     }
     
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     updates_to_make = []  # (asset_id, asset_type, new_status)
     
     for asset in assets:

@@ -947,7 +947,7 @@
             if (!timestamp || timestamp === '-') return '-';
             
             try {
-                const date = new Date(timestamp.replace(' ', 'T'));
+                const date = new Date(timestamp.replace(' ', 'T') + 'Z');
                 const now = new Date();
                 const diffMs = now - date;
                 const diffMins = Math.floor(diffMs / 60000);

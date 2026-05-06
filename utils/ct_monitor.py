@@ -11,7 +11,7 @@ Exports:
 import logging
 import time
 import requests
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Set
 from utils.db_utils import is_cert_notified
 
@@ -111,7 +111,7 @@ def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     thresholds = [7, 5, 3, 1]
     results = {t: [] for t in thresholds}
     
@@ -292,7 +292,7 @@ def poll_all_domains() -> Dict:
     signature_changes = check_cert_signature_changes(all_certificates)
     
     # Update last check timestamp
-    set_setting('last_ctlogs_check', datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+    set_setting('last_ctlogs_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
     
     total_alerts = sum(len(certs) for certs in expiry_alerts.values())
     logger.info(
@@ -326,7 +326,7 @@ def get_cert_expiry_summary() -> Dict:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now()
+    now = datetime.now(timezone.utc)
     
     cursor.execute('SELECT COUNT(*) as count FROM certificates')
     total = cursor.fetchone()['count']
