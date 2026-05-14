@@ -22,6 +22,7 @@ logger = logging.getLogger(__name__)
 _phase3_running = False
 _liveness_thread = None
 _ctlogs_thread = None
+_wappalyzer_thread = None
 
 
 def send_liveness_notification(result: dict):
@@ -123,9 +124,52 @@ def send_ctlogs_notification(result: dict):
             for threshold, certs in expiry_alerts.items():
                 for cert in certs:
                     mark_cert_notified(cert['cert_id'], cert['hostname'], threshold)
-        
+    
     except Exception as e:
         logger.error(f"Failed to send CT logs notification: {e}")
+
+
+def send_wappalyzer_notification(result: dict):
+    """
+    Send Discord notification for Wappalyzer re-scan results.
+    
+    Only sends if new CVEs were detected.
+    
+    Args:
+        result: Dict from run_wappalyzer_scan()
+    """
+    try:
+        from modules.Notify import send_message
+        
+        lines = [
+            "**Phase 3: Wappalyzer Re-scan Complete**",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        ]
+        
+        lines.append(f"\n**Hosts Scanned:** {result['hosts_scanned']}")
+        lines.append(f"**Technologies Found:** {result['technologies_found']}")
+        lines.append(f"**Total CVEs:** {result['cves_found']}")
+        lines.append(f"**New CVEs:** {len(result['new_cves'])}")
+        
+        if result['new_cves']:
+            lines.append(f"\n🔴 **New CVEs Detected:**")
+            for cve in result['new_cves'][:10]:
+                cvss_str = f" (CVSS {cve['cvss']})" if cve.get('cvss') else ""
+                lines.append(f"• {cve['cve_id']}{cvss_str} on {cve['host']} ({cve['tech_name']})")
+            if len(result['new_cves']) > 10:
+                lines.append(f"• ... and {len(result['new_cves']) - 10} more")
+        
+        if result['errors']:
+            lines.append(f"\n⚠️ **Errors ({len(result['errors'])}):**")
+            for err in result['errors'][:3]:
+                lines.append(f"• {err}")
+            if len(result['errors']) > 3:
+                lines.append(f"• ... and {len(result['errors']) - 3} more")
+        
+        send_message('\n'.join(lines))
+    
+    except Exception as e:
+        logger.error(f"Failed to send Wappalyzer notification: {e}")
 
 
 def liveness_loop(interval_min: int = 5):
@@ -213,13 +257,54 @@ def ctlogs_loop(interval_hr: int = 1):
     logger.info("CT logs monitor thread stopped")
 
 
+def wappalyzer_loop(interval_hr: int = 24):
+    """
+    Wappalyzer re-scan loop.
+    
+    Runs every interval_hr hours if Phase 3 is enabled.
+    Scans hosts with HTTP services and status='up'.
+    
+    Args:
+        interval_hr: Interval in hours (default: 24)
+    """
+    global _phase3_running
+    
+    from utils.wappalyzer_monitor import run_wappalyzer_scan
+    from utils.db_utils import get_setting
+    
+    logger.info("Wappalyzer monitor thread started")
+    
+    while _phase3_running:
+        try:
+            if get_setting('phase3_enabled') == '1':
+                logger.info("Running Wappalyzer re-scan...")
+                result = run_wappalyzer_scan()
+                
+                if result.get('new_cves'):
+                    send_wappalyzer_notification(result)
+            else:
+                logger.debug("Phase 3 disabled, skipping Wappalyzer scan")
+        
+        except Exception as e:
+            logger.error(f"Wappalyzer scan error: {e}")
+        
+        # Sleep in small intervals to allow quick shutdown
+        sleep_seconds = interval_hr * 3600
+        elapsed = 0
+        while elapsed < sleep_seconds and _phase3_running:
+            time.sleep(5)
+            elapsed += 5
+    
+    logger.info("Wappalyzer monitor thread stopped")
+
+
 def start_phase3_workers():
     """
-    Start both Phase 3 monitoring threads.
+    Start all Phase 3 monitoring threads.
     
     Checks settings for enabled status and intervals.
     """
-    global _phase3_running, _liveness_thread, _ctlogs_thread
+    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread
     
     from utils.db_utils import get_setting
     
@@ -238,8 +323,9 @@ def start_phase3_workers():
     # Get intervals
     liveness_interval = int(get_setting('liveness_interval_min') or '5')
     ctlogs_interval = int(get_setting('ctlogs_interval_hr') or '1')
+    wappalyzer_interval = int(get_setting('wappalyzer_interval_hr') or '24')
     
-    logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr)")
+    logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr, wappalyzer: {wappalyzer_interval}hr)")
     
     # Start liveness thread
     _liveness_thread = threading.Thread(
@@ -259,12 +345,21 @@ def start_phase3_workers():
     )
     _ctlogs_thread.start()
     
+    # Start Wappalyzer monitor thread
+    _wappalyzer_thread = threading.Thread(
+        target=wappalyzer_loop,
+        args=(wappalyzer_interval,),
+        daemon=True,
+        name='Phase3-Wappalyzer'
+    )
+    _wappalyzer_thread.start()
+    
     logger.info("Phase 3 workers started")
 
 
 def stop_phase3_workers():
     """
-    Stop both Phase 3 monitoring threads.
+    Stop all Phase 3 monitoring threads.
     """
     global _phase3_running
     
@@ -277,6 +372,9 @@ def stop_phase3_workers():
     
     if _ctlogs_thread and _ctlogs_thread.is_alive():
         _ctlogs_thread.join(timeout=10)
+    
+    if _wappalyzer_thread and _wappalyzer_thread.is_alive():
+        _wappalyzer_thread.join(timeout=10)
     
     logger.info("Phase 3 workers stopped")
 
@@ -302,8 +400,10 @@ def get_phase3_status() -> dict:
         'enabled': get_setting('phase3_enabled') == '1',
         'last_liveness_check': get_setting('last_liveness_check') or '-',
         'last_ctlogs_check': get_setting('last_ctlogs_check') or '-',
+        'last_wappalyzer_check': get_setting('last_wappalyzer_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
-        'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1')
+        'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
+        'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24')
     }
 
 

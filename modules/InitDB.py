@@ -275,6 +275,8 @@ def init_db():
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('ctlogs_interval_hr', '1', 'CT logs polling interval in hours')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_liveness_check', NULL, 'Last liveness check timestamp')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_ctlogs_check', NULL, 'Last CT logs check timestamp')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('wappalyzer_interval_hr', '24', 'Wappalyzer re-scan interval in hours')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_wappalyzer_check', NULL, 'Last Wappalyzer scan timestamp')")
 
     # ============================================
     # INDEXES FOR PERFORMANCE

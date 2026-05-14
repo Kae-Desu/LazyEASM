@@ -58,8 +58,8 @@ def add_security_headers(response):
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
     
-if get_env('FLASK_ENV', 'development') == 'production':
-    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    if get_env('FLASK_ENV', 'development') == 'production':
+        response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     
     return response
 
@@ -1148,15 +1148,17 @@ def phase3_status():
         'enabled': status['enabled'],
         'last_liveness_check': status['last_liveness_check'],
         'last_ctlogs_check': status['last_ctlogs_check'],
+        'last_wappalyzer_check': status['last_wappalyzer_check'],
         'liveness_interval_min': status['liveness_interval_min'],
         'ctlogs_interval_hr': status['ctlogs_interval_hr'],
+        'wappalyzer_interval_hr': status['wappalyzer_interval_hr'],
         'assets': {
             'total': liveness['total'],
             'up': liveness['up'],
             'down': liveness['down']
         },
         'certificates': {
-            'total': certs['total_certs'],
+            'total_certs': certs['total_certs'],
             'expiring_3_days': certs['expiring_3_days'],
             'expiring_7_days': certs['expiring_7_days'],
             'expiring_30_days': certs['expiring_30_days']
@@ -1224,6 +1226,24 @@ def phase3_ctlogs_check():
     # Send notification if any discoveries
     if result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()):
         send_ctlogs_notification(result)
+    
+    return jsonify({
+        'success': True,
+        'result': result
+    })
+
+
+@app.route('/api/phase3/wappalyzer/check', methods=['POST'])
+@token_required
+def phase3_wappalyzer_check():
+    """Manually trigger a Wappalyzer re-scan."""
+    from utils.wappalyzer_monitor import run_wappalyzer_scan
+    from utils.phase3_worker import send_wappalyzer_notification
+    
+    result = run_wappalyzer_scan()
+    
+    if result.get('new_cves'):
+        send_wappalyzer_notification(result)
     
     return jsonify({
         'success': True,
