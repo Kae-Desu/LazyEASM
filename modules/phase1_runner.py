@@ -154,7 +154,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         # Build notification based on scan results
         if stats['skipped_ips'] > 0 and not ips_to_scan:
             # All IPs were shared/CDN - port scan skipped entirely
-            msg = (f"✅ **Phase 1 Complete**: {asset_name}\n"
+            msg = (f"**Initialization Complete**: {asset_name}\n"
                    f"━━━━━━━━━━━━━━━━━━\n"
                    f"**Port Scan:** Skipped\n"
                    f"**Technologies:** {stats['tech_found']}\n"
@@ -162,7 +162,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                    f"\n**Skipped IPs ({stats['skipped_ips']}):**")
         elif stats['skipped_ips'] > 0:
             # Some IPs skipped, some scanned
-            msg = (f"✅ **Phase 1 Complete**: {asset_name}\n"
+            msg = (f"**Initialization Complete**: {asset_name}\n"
                    f"━━━━━━━━━━━━━━━━━━\n"
                    f"**Ports:** {stats['ports_found']}\n"
                    f"**Technologies:** {stats['tech_found']}\n"
@@ -170,7 +170,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                    f"\n**Skipped IPs ({stats['skipped_ips']}):**")
         else:
             # Normal scan, no skipped IPs
-            msg = (f"✅ **Phase 1 Complete**: {asset_name}\n"
+            msg = (f"**Initialization Complete**: {asset_name}\n"
                    f"━━━━━━━━━━━━━━━━━━\n"
                    f"**Ports:** {stats['ports_found']}\n"
                    f"**Technologies:** {stats['tech_found']}\n"

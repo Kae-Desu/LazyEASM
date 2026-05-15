@@ -793,8 +793,8 @@ def process_assets():
     if is_phase2_running():
         progress = get_phase2_progress()
         flash(
-            f"Phase 2 is currently running ({progress['processed']}/{progress['total']} assets). "
-            f"Please wait for it to complete. New assets will be scanned in the next Phase 2 cycle.",
+            f"Deep Scan is currently running ({progress['processed']}/{progress['total']} assets). "
+            f"Please wait for it to complete. New assets will be scanned in the next Deep Scan cycle.",
             'warning'
         )
         return redirect(url_for('dashboard'))
@@ -821,7 +821,7 @@ def process_assets():
     thread.daemon = True
     thread.start()
     
-    flash(f'Asset accepted. Processing may take up to 10 minutes. Phase 1 will start automatically after discovery.', 'success')
+    flash(f'Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.', 'success')
     return redirect(url_for('dashboard'))
 
 
@@ -846,7 +846,7 @@ def run_phase1_background(targets: dict):
         
         # Send success notification for Phase 0
         message = (
-            f"✅ **Phase 0 Complete**\n"
+            f"**Parsing Complete**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"**Domains added:** {stats['domains_added']}\n"
             f"**Subdomains discovered:** {stats['subdomains_discovered']}\n"
@@ -864,12 +864,12 @@ def run_phase1_background(targets: dict):
         # After Phase 0, enqueue assets for Phase 1
         if stats['domains_added'] > 0 or stats['subdomains_new'] > 0 or stats['ips_resolved'] > 0:
             enqueue_assets_for_phase1()
-            discord_send_message(f"📋 **Phase 1 Queued**: Processing assets...")
+            discord_send_message(f"**Initialization Queued**: Processing assets...")
         
     except Exception as e:
         # Send error notification
         import traceback
-        error_msg = f"❌ **Phase 0 Failed**\nError: {str(e)}"
+        error_msg = f"**Parsing Failed**\nError: {str(e)}"
         discord_send_message(error_msg)
         print(f"[Phase 0] Error: {e}")
         traceback.print_exc()
@@ -1029,7 +1029,7 @@ def queue_phase2_scan():
     try:
         from modules.Notify import send_message
         send_message(
-            f"**Phase 2 Deep Scan Queued**\n"
+            f"**Deep Scan Queued**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"Asset: {asset_name}\n"
             f"Type: {asset_type}\n"
@@ -1088,7 +1088,7 @@ def cancel_phase2_scan():
     try:
         from modules.Notify import send_message
         send_message(
-            f"**Phase 2 Scan Cancelled**\n"
+            f"**Deep Scan Cancelled**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"Asset: {asset_name}"
         )

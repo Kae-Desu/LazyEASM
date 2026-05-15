@@ -156,7 +156,7 @@ def send_vulnerability_alert(assets_with_cves: dict, min_cvss: float = 5.0) -> t
     ping_user = get_env('DISCORD_USER_ID')
     
     data = {
-        "content": f"{'<@' + ping_user + '>' if ping_user else ''} **LazyEASM - Vulnerability Alert**",
+        "content": f"{'<@' + ping_user + '>' if ping_user else ''} **Vulnerability Alert**",
         "embeds": embeds[:10]
     }
     
@@ -247,7 +247,7 @@ def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
     ping_user = get_env('DISCORD_USER_ID')
     
     data = {
-        "content": f"{'<@' + ping_user + '>' if ping_user else ''} **LazyEASM - SSL Certificate Expiry Alert**",
+        "content": f"{'<@' + ping_user + '>' if ping_user else ''} **SSL Certificate Expiry Alert**",
         "embeds": embeds
     }
     
@@ -277,7 +277,7 @@ def test_webhook() -> tuple:
     if not webhook_url:
         return False, 'Webhook URL not configured'
     
-    test_message = '🔌 **LazyEASM Webhook Test**\nConnection successful - notifications will work!'
+    test_message = '**Webhook Test**\nConnection successful - notifications will work!'
     
     return send_message(test_message)
 

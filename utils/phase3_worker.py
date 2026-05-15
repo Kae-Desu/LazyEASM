@@ -35,38 +35,38 @@ def send_liveness_notification(result: dict):
     try:
         from modules.Notify import send_message
         
-        lines = ["**Phase 3: Liveness Status Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
+        lines = ["**Liveness Status Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
         
         if result['down']:
-            lines.append(f"🔴 **Down ({len(result['down'])}):**")
+            lines.append(f"**Down ({len(result['down'])}):**")
             for name in result['down'][:10]:  # Limit to 10
                 lines.append(f"• {name}")
             if len(result['down']) > 10:
                 lines.append(f"• ... and {len(result['down']) - 10} more")
         
         if result['recovered']:
-            lines.append(f"🟢 **Recovered ({len(result['recovered'])}):**")
+            lines.append(f"**Recovered ({len(result['recovered'])}):**")
             for name in result['recovered'][:10]:
                 lines.append(f"• {name}")
             if len(result['recovered']) > 10:
                 lines.append(f"• ... and {len(result['recovered']) - 10} more")
         
         if result.get('new_up'):
-            lines.append(f"✅ **New Assets Up ({len(result['new_up'])}):**")
+            lines.append(f"**New Assets Up ({len(result['new_up'])}):**")
             for name in result['new_up'][:10]:
                 lines.append(f"• {name}")
             if len(result['new_up']) > 10:
                 lines.append(f"• ... and {len(result['new_up']) - 10} more")
         
         if result.get('new_down'):
-            lines.append(f"⚠️ **New Assets Down ({len(result['new_down'])}):**")
+            lines.append(f"**New Assets Down ({len(result['new_down'])}):**")
             for name in result['new_down'][:10]:
                 lines.append(f"• {name}")
             if len(result['new_down']) > 10:
                 lines.append(f"• ... and {len(result['new_down']) - 10} more")
         
         if result.get('still_down'):
-            lines.append(f"⚫ **Still Down ({len(result['still_down'])}):**")
+            lines.append(f"**Still Down ({len(result['still_down'])}):**")
             for name in result['still_down'][:5]:
                 lines.append(f"• {name}")
             if len(result['still_down']) > 5:
@@ -92,12 +92,12 @@ def send_ctlogs_notification(result: dict):
         from modules.Notify import send_message, send_cert_expiry_threshold_alert
         from utils.db_utils import mark_cert_notified
         
-        lines = ["**Phase 3: CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
+        lines = ["**CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
         
         if result['new_subdomains']:
             lines.append(f"\n**New Subdomains ({len(result['new_subdomains'])}):**")
             for domain, subdomain in result['new_subdomains'][:10]:
-                lines.append(f"• {subdomain} (Phase 0 queued)")
+                lines.append(f"• {subdomain} (queued)")
             if len(result['new_subdomains']) > 10:
                 lines.append(f"• ... and {len(result['new_subdomains']) - 10} more")
         
@@ -142,7 +142,7 @@ def send_wappalyzer_notification(result: dict):
         from modules.Notify import send_message
         
         lines = [
-            "**Phase 3: Wappalyzer Re-scan Complete**",
+            "**Wappalyzer Re-scan Complete**",
             "━━━━━━━━━━━━━━━━━━━━━━━━━━"
         ]
         
@@ -152,7 +152,7 @@ def send_wappalyzer_notification(result: dict):
         lines.append(f"**New CVEs:** {len(result['new_cves'])}")
         
         if result['new_cves']:
-            lines.append(f"\n🔴 **New CVEs Detected:**")
+            lines.append(f"\n**New CVEs Detected:**")
             for cve in result['new_cves'][:10]:
                 cvss_str = f" (CVSS {cve['cvss']})" if cve.get('cvss') else ""
                 lines.append(f"• {cve['cve_id']}{cvss_str} on {cve['host']} ({cve['tech_name']})")
@@ -160,7 +160,7 @@ def send_wappalyzer_notification(result: dict):
                 lines.append(f"• ... and {len(result['new_cves']) - 10} more")
         
         if result['errors']:
-            lines.append(f"\n⚠️ **Errors ({len(result['errors'])}):**")
+            lines.append(f"\n**Errors ({len(result['errors'])}):**")
             for err in result['errors'][:3]:
                 lines.append(f"• {err}")
             if len(result['errors']) > 3:

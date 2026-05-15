@@ -300,7 +300,7 @@ def send_asset_notification(asset: Dict, nmap_result: Dict, dirsearch_result: Di
         name = asset.get('name', 'Unknown')
         
         # Build message
-        msg = f"**Phase 2 Complete**: {name}\n"
+        msg = f"**Deep Scan Complete**: {name}\n"
         msg += "━━━━━━━━━━━━━━━━━━\n"
         
         # Nmap results
@@ -446,7 +446,7 @@ def run_phase2_daily():
     # Send Discord: Phase 2 started
     try:
         from modules.Notify import send_message
-        send_message(f"**Phase 2 Started**\nScanning {len(assets)} assets with full port enumeration and directory discovery.")
+        send_message(f"**Deep Scan Started**\nScanning {len(assets)} assets with full port enumeration and directory discovery.")
     except Exception as e:
         logger.error(f"Discord notification failed: {e}")
     
@@ -457,7 +457,7 @@ def run_phase2_daily():
             logger.info(f"Phase 0 running ({len(phase0_procs)} processes), waiting...")
             try:
                 from modules.Notify import send_message
-                send_message(f"Phase 0 running ({len(phase0_procs)} processes), waiting for completion...")
+                send_message(f"Parsing running ({len(phase0_procs)} processes), waiting for completion...")
             except:
                 pass
             wait_for_phase0_completion()  # Wait forever
@@ -468,7 +468,7 @@ def run_phase2_daily():
             logger.info(f"Killed {len(killed)} Phase 1 processes")
             try:
                 from modules.Notify import send_message
-                send_message(f"Killed {len(killed)} Phase 1 processes to start Phase 2.")
+                send_message(f"Killed {len(killed)} initialization processes to start Deep Scan.")
             except:
                 pass
             clear_phase1_queue()
@@ -493,7 +493,7 @@ def run_phase2_daily():
                     try:
                         from modules.Notify import send_message
                         percent = int((i + 1) / len(assets) * 100)
-                        send_message(f"Phase 2 progress: {i+1}/{len(assets)} assets ({percent}%)")
+                        send_message(f"Deep Scan progress: {i+1}/{len(assets)} assets ({percent}%)")
                     except:
                         pass
                         
@@ -507,7 +507,7 @@ def run_phase2_daily():
         try:
             from modules.Notify import send_message
             send_message(
-                f"**Phase 2 Complete**\n"
+                f"**Deep Scan Complete**\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"Assets scanned: {len(results)}\n"
                 f"Total ports: {total_ports}\n"

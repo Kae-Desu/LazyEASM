@@ -258,15 +258,15 @@ class TaskQueue:
             total = completed + failed
             
             lines = [
-                "**Phase 1 Complete**",
+                "**Initialization Complete**",
                 "━━━━━━━━━━━━━━━━━━"
             ]
             
             if failed == 0:
-                lines.append(f"✅ **Processed:** {completed}/{total}")
+                lines.append(f"**Processed:** {completed}/{total}")
             else:
-                lines.append(f"✅ **Completed:** {completed}/{total}")
-                lines.append(f"❌ **Failed:** {failed}/{total}")
+                lines.append(f"**Completed:** {completed}/{total}")
+                lines.append(f"**Failed:** {failed}/{total}")
             
             lines.append("All assets have been scanned.")
             
