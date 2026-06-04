@@ -1162,6 +1162,7 @@ def phase3_status():
         },
         'certificates': {
             'total_certs': certs['total_certs'],
+            'expired': certs['expired'],
             'expiring_3_days': certs['expiring_3_days'],
             'expiring_7_days': certs['expiring_7_days'],
             'expiring_30_days': certs['expiring_30_days']

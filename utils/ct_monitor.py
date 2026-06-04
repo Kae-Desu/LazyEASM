@@ -357,6 +357,7 @@ def get_cert_expiry_summary() -> Dict:
     
     Returns:
         {
+            'expired': int,
             'expiring_3_days': int,
             'expiring_7_days': int,
             'expiring_30_days': int,
@@ -372,6 +373,7 @@ def get_cert_expiry_summary() -> Dict:
     
     cursor.execute('SELECT not_after FROM certificates WHERE julianday(not_after) > julianday("now")')
     
+    expired = 0
     expiring_3_days = 0
     expiring_7_days = 0
     expiring_30_days = 0
@@ -388,7 +390,9 @@ def get_cert_expiry_summary() -> Dict:
             
             days_remaining = int((not_after - now).total_seconds() / 86400)
             
-            if days_remaining <= 3:
+            if days_remaining <= 0:
+                expired += 1
+            elif days_remaining <= 3:
                 expiring_3_days += 1
             elif days_remaining <= 7:
                 expiring_7_days += 1
@@ -407,6 +411,7 @@ def get_cert_expiry_summary() -> Dict:
     conn.close()
     
     return {
+        'expired': expired,
         'expiring_3_days': expiring_3_days,
         'expiring_7_days': expiring_3_days + expiring_7_days,
         'expiring_30_days': expiring_3_days + expiring_7_days + expiring_30_days,

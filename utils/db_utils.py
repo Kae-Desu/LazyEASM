@@ -880,6 +880,7 @@ def _get_cert_expiry(cursor, hostname: str) -> dict:
         SELECT not_after, issuer
         FROM certificates
         WHERE hostname = ?
+            AND julianday(not_after) > julianday('now')
         ORDER BY not_after ASC
         LIMIT 1
     ''', (hostname,))
@@ -893,7 +894,7 @@ def _get_cert_expiry(cursor, hostname: str) -> dict:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
             else:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-            days_remaining = round((not_after - datetime.now(timezone.utc)).total_seconds() / 86400)
+            days_remaining = int((not_after - datetime.now(timezone.utc)).total_seconds() / 86400)
             result['days_until_expiry'] = days_remaining
         except (ValueError, TypeError):
             result['days_until_expiry'] = None

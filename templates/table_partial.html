@@ -31,7 +31,7 @@
     <td class="px-6 py-5">
         {% if asset.cert %}
             {% set days = asset.cert.days_until_expiry %}
-            {% if days < 0 %}
+            {% if days <= 0 %}
                 <span class="text-red-500 text-xs font-bold"><i class="fas fa-times-circle mr-1"></i>Expired</span>
             {% elif days <= 7 %}
                 <span class="text-red-500 text-xs font-bold"><i class="fas fa-exclamation-triangle mr-1"></i>{{ days|int }}d</span>
