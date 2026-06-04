@@ -9,6 +9,7 @@ services:
     volumes:
       - ./db:/app/db
       - ./logs:/app/logs
+      - ./.env:/app/.env
     environment:
       - PYTHONUNBUFFERED=1
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
