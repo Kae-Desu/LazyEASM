@@ -325,11 +325,11 @@
                             </div>
                             <div id="certs-expired" class="hidden">
                                 <span class="text-red-500 text-xs"><i class="fas fa-times-circle mr-1"></i></span>
-                                <span id="certs-expired-count" class="text-red-500 text-xs font-medium">0 expired</span>
+                                <span id="certs-expired-count" class="text-red-500 text-xs font-medium">0 hosts expired</span>
                             </div>
                             <div id="certs-warning" class="hidden">
                                 <span class="text-amber-500 text-xs"><i class="fas fa-exclamation-triangle mr-1"></i></span>
-                                <span id="certs-expiring" class="text-amber-500 text-xs font-medium">0 expiring ≤7d</span>
+                                <span id="certs-expiring" class="text-amber-500 text-xs font-medium">0 hosts expiring ≤7d</span>
                             </div>
                         </div>
                     </div>
@@ -1046,14 +1046,14 @@
                 const certExpired = document.getElementById('certs-expired');
                 if (data.certificates.expired > 0) {
                     if (certExpired) certExpired.classList.remove('hidden');
-                    document.getElementById('certs-expired-count').textContent = `${data.certificates.expired} expired`;
+                    document.getElementById('certs-expired-count').textContent = `${data.certificates.expired} hosts expired`;
                 } else if (certExpired) {
                     certExpired.classList.add('hidden');
                 }
                 const certWarning = document.getElementById('certs-warning');
                 if (data.certificates.expiring_7_days > 0) {
                     if (certWarning) certWarning.classList.remove('hidden');
-                    document.getElementById('certs-expiring').textContent = `${data.certificates.expiring_7_days} expiring ≤7d`;
+                    document.getElementById('certs-expiring').textContent = `${data.certificates.expiring_7_days} hosts expiring ≤7d`;
                 } else if (certWarning) {
                     certWarning.classList.add('hidden');
                 }

@@ -353,7 +353,9 @@ def poll_all_domains() -> Dict:
 
 def get_cert_expiry_summary() -> Dict:
     """
-    Get summary of certificate expiry status.
+    Get summary of certificate expiry status (per unique hostname).
+    
+    For each hostname, uses the soonest-expiring active cert to determine bucket.
     
     Returns:
         {
@@ -371,7 +373,12 @@ def get_cert_expiry_summary() -> Dict:
     
     now = datetime.now(timezone.utc)
     
-    cursor.execute('SELECT not_after FROM certificates WHERE julianday(not_after) > julianday("now")')
+    cursor.execute('''
+        SELECT hostname, MIN(not_after) as soonest
+        FROM certificates
+        WHERE julianday(not_after) > julianday('now')
+        GROUP BY hostname
+    ''')
     
     expired = 0
     expiring_3_days = 0
@@ -380,9 +387,8 @@ def get_cert_expiry_summary() -> Dict:
     
     for row in cursor.fetchall():
         try:
-            not_after_str = row['not_after']
+            not_after_str = row['soonest']
             
-            # Handle both ISO format (T separator) and space format
             if 'T' in not_after_str:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
             else:
@@ -401,10 +407,18 @@ def get_cert_expiry_summary() -> Dict:
         except Exception:
             continue
     
-    active_total = expiring_3_days + expiring_7_days + expiring_30_days
+    active_total = expired + expiring_3_days + expiring_7_days + expiring_30_days
     
-    # Count remaining active certs beyond 30 days
-    cursor.execute('SELECT COUNT(*) as count FROM certificates WHERE julianday(not_after) - julianday("now") > 30')
+    # Count hostnames whose soonest cert is beyond 30 days
+    cursor.execute('''
+        SELECT COUNT(*) as count FROM (
+            SELECT hostname
+            FROM certificates
+            WHERE julianday(not_after) > julianday('now')
+            GROUP BY hostname
+            HAVING MIN(CAST(julianday(not_after) - julianday('now') AS INTEGER)) > 30
+        )
+    ''')
     beyond_30 = cursor.fetchone()['count']
     active_total += beyond_30
     
