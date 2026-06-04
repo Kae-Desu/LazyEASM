@@ -12,6 +12,7 @@ Note: Dirsearch moved to Phase 2 (see modules/phase2_dirsearch.py)
 
 import logging
 import importlib
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from utils.db_utils import get_db_connection
 
@@ -143,6 +144,25 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         stats['tech_found'] = tech_found
         stats['cve_found'] = len(unique_cves)
         logger.info(f"Wappalyzer complete for {asset_name}: {stats['tech_found']} techs, {stats['cve_found']} CVEs")
+        
+        # Update last_wappalyzer_scan timestamp
+        try:
+            conn_w = get_db_connection()
+            cursor_w = conn_w.cursor()
+            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            cursor_w.execute(
+                'UPDATE domain_asset SET last_wappalyzer_scan = ? WHERE domain_name = ?',
+                (now_str, asset_name)
+            )
+            if cursor_w.rowcount == 0:
+                cursor_w.execute(
+                    'UPDATE subdomain_asset SET last_wappalyzer_scan = ? WHERE subdomain_name = ?',
+                    (now_str, asset_name)
+                )
+            conn_w.commit()
+            conn_w.close()
+        except Exception as e:
+            logger.error(f"Failed to update last_wappalyzer_scan for {asset_name}: {e}")
             
     except Exception as e:
         logger.error(f"Wappalyzer failed for {asset_name}: {e}")

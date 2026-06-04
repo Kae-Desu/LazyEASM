@@ -126,9 +126,9 @@ def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
             not_after_str = row['not_after']
             
             if 'T' in not_after_str:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S')
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
             else:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S')
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
             
             days_remaining = round((not_after - now).total_seconds() / 86400)
             
@@ -344,9 +344,9 @@ def get_cert_expiry_summary() -> Dict:
             
             # Handle both ISO format (T separator) and space format
             if 'T' in not_after_str:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S')
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
             else:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S')
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
             
             days_remaining = round((not_after - now).total_seconds() / 86400)
             

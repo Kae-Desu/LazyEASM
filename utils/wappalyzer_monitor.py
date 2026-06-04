@@ -20,6 +20,26 @@ from utils.db_utils import get_db_connection, set_setting
 logger = logging.getLogger(__name__)
 
 
+def _update_wappalyzer_timestamp(host: str, timestamp: str) -> None:
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'UPDATE domain_asset SET last_wappalyzer_scan = ? WHERE domain_name = ?',
+            (timestamp, host)
+        )
+        if cursor.rowcount == 0:
+            cursor.execute(
+                'UPDATE subdomain_asset SET last_wappalyzer_scan = ? WHERE subdomain_name = ?',
+                (timestamp, host)
+            )
+        conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to update last_wappalyzer_scan for {host}: {e}")
+    finally:
+        conn.close()
+
+
 def get_hosts_for_wappalyzer() -> list:
     """
     Get distinct hostnames that have HTTP services and status='up'.
@@ -118,9 +138,12 @@ def run_wappalyzer_scan() -> dict:
         'errors': []
     }
 
+    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
     for host_info in hosts:
         host = host_info['host']
         ports = host_info['ports']
+        host_scan_success = False
 
         if not ports:
             ports = [
@@ -141,6 +164,7 @@ def run_wappalyzer_scan() -> dict:
                 )
 
                 if scan_result.get('success', False):
+                    host_scan_success = True
                     result['hosts_scanned'] += 1
                     result['technologies_found'] += len(scan_result.get('technologies', []))
 
@@ -164,8 +188,10 @@ def run_wappalyzer_scan() -> dict:
                 logger.error(f"Wappalyzer scan failed for {host}:{port} - {e}")
                 result['errors'].append(f"{host}:{port} (exception: {str(e)[:80]})")
 
-    set_setting('last_wappalyzer_check',
-                 datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        if host_scan_success:
+            _update_wappalyzer_timestamp(host, now_str)
+
+    set_setting('last_wappalyzer_check', now_str)
 
     logger.info(
         f"Wappalyzer re-scan complete: "

@@ -50,6 +50,7 @@ def init_db():
         first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
         last_seen TEXT,
         last_scanned TEXT,
+        last_wappalyzer_scan TEXT,
         status TEXT DEFAULT 'up',
         is_wildcard INTEGER DEFAULT 0,
         wildcard_ip TEXT,
@@ -65,6 +66,7 @@ def init_db():
         first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
         last_seen TEXT,
         last_scanned TEXT,
+        last_wappalyzer_scan TEXT,
         status TEXT DEFAULT 'up',
         FOREIGN KEY(dom_id) REFERENCES domain_asset(dom_id) ON DELETE SET NULL
     )
@@ -386,6 +388,12 @@ def init_db():
         cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_liveness_check TEXT")
     if 'last_liveness_check' not in subdomain_columns:
         cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_liveness_check TEXT")
+
+    # Add last_wappalyzer_scan column to domain_asset and subdomain_asset
+    if 'last_wappalyzer_scan' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_wappalyzer_scan TEXT")
+    if 'last_wappalyzer_scan' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_wappalyzer_scan TEXT")
     
     # Add ports_found and dirs_found to scan_queue if not exists
     cursor.execute("PRAGMA table_info(scan_queue)")

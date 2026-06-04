@@ -8,3 +8,4 @@ python-Wappalyzer
 dirsearch
 psutil>=5.9.0
 setuptools<70
+google-genai

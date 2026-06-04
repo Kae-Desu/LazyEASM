@@ -134,7 +134,7 @@ def send_vulnerability_alert(assets_with_cves: dict, min_cvss: float = 5.0) -> t
             cve_list.append(f"... and {len(filtered_cves) - 10} more")
         
         embed = {
-            "title": f"🔍 {host}",
+            "title": f"{host}",
             "color": color,
             "fields": [
                 {
@@ -218,7 +218,7 @@ def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
         return False, 'Discord webhook URL not configured'
     
     colors = {7: 16098851, 5: 16027660, 3: 15158332, 1: 15548997}
-    emojis = {7: "🟡", 5: "🟠", 3: "🔴", 1: "🔴"}
+    severity = {7: "Warning", 5: "Warning", 3: "Critical", 1: "Critical"}
     
     embeds = []
     
@@ -227,9 +227,9 @@ def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
         if not certs:
             continue
         
-        emoji = emojis[threshold]
+        level = severity[threshold]
         day_text = "1 day" if threshold == 1 else f"{threshold} days"
-        title = f"{emoji} {day_text} until expiry"
+        title = f"{level}: {day_text} until expiry"
         
         cert_lines = [f"• {c['hostname']}" for c in certs[:10]]
         if len(certs) > 10:

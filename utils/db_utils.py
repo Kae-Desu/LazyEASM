@@ -865,6 +865,8 @@ def _get_cert_expiry(cursor, hostname: str) -> dict:
     """
     Get certificate expiry for a hostname.
     
+    Shows the soonest-expiring certificate (most urgent for security).
+    
     Args:
         cursor: Database cursor
         hostname: Hostname to check
@@ -872,18 +874,30 @@ def _get_cert_expiry(cursor, hostname: str) -> dict:
     Returns:
         Dict with 'not_after', 'issuer', 'days_until_expiry' or None
     """
+    from datetime import datetime, timezone
+    
     cursor.execute('''
-        SELECT not_after, issuer, 
-               julianday(not_after) - julianday('now') as days_until_expiry
+        SELECT not_after, issuer
         FROM certificates
         WHERE hostname = ?
-        ORDER BY not_after DESC
+        ORDER BY not_after ASC
         LIMIT 1
     ''', (hostname,))
     
     row = cursor.fetchone()
     if row:
-        return dict(row)
+        result = dict(row)
+        not_after_str = result['not_after']
+        try:
+            if 'T' in not_after_str:
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
+            else:
+                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+            days_remaining = round((not_after - datetime.now(timezone.utc)).total_seconds() / 86400)
+            result['days_until_expiry'] = days_remaining
+        except (ValueError, TypeError):
+            result['days_until_expiry'] = None
+        return result
     return None
 
 
@@ -922,6 +936,7 @@ def get_all_assets_for_display() -> list:
                 d.status,
                 d.last_scanned,
                 d.last_deep_scan,
+                d.last_wappalyzer_scan,
                 CASE WHEN 
                     COUNT(p.port_id) > 0 
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = d.domain_name)
@@ -956,6 +971,7 @@ def get_all_assets_for_display() -> list:
                 s.status,
                 s.last_scanned,
                 s.last_deep_scan,
+                s.last_wappalyzer_scan,
                 CASE WHEN 
                     COUNT(p.port_id) > 0 
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = s.subdomain_name)

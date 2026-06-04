@@ -771,7 +771,7 @@ def generate_ai():
             'recommendation': recommendation
         })
     except Exception as e:
-        print(f"Error in /generate_ai: {e}")
+        logger.error(f"Error in /generate_ai: {e}", exc_info=True)
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
@@ -1054,7 +1054,10 @@ def cancel_phase2_scan():
     Request body:
         asset_name: str
     """
-    asset_name = request.form.get('asset_name') or request.json.get('asset_name') if request.is_json else None
+    if request.is_json:
+        asset_name = request.json.get('asset_name')
+    else:
+        asset_name = request.form.get('asset_name')
     
     if not asset_name:
         return jsonify({'success': False, 'error': 'Missing asset_name'}), 400

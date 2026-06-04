@@ -249,6 +249,11 @@
                 <i class="fas fa-clock mr-1"></i>Last scanned: {{ asset.last_scanned }}
             </div>
             {% endif %}
+            {% if asset.last_wappalyzer_scan %}
+            <div class="text-[10px] text-slate-400 flex items-center mt-1">
+                <i class="fas fa-fingerprint mr-1"></i>Last tech scan: {{ asset.last_wappalyzer_scan }}
+            </div>
+            {% endif %}
             
             <!-- Phase 2 Deep Scan Section -->
             <div class="mt-4 pt-4 border-t border-border dark:border-white/5">

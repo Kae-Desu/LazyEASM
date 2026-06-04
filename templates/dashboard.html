@@ -342,6 +342,10 @@
                                 <span class="text-slate-400">CT Logs:</span>
                                 <span id="last-ctlogs" class="font-mono dark:text-white">-</span>
                             </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Tech Scan:</span>
+                                <span id="last-wappalyzer" class="font-mono dark:text-white">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1034,7 +1038,7 @@
                 document.getElementById('assets-down').textContent = data.assets.down;
                 
                 // Update certificates
-                document.getElementById('certs-total').textContent = data.certificates.total;
+                document.getElementById('certs-total').textContent = data.certificates.total_certs;
                 const certWarning = document.getElementById('certs-warning');
                 if (data.certificates.expiring_7_days > 0) {
                     if (certWarning) certWarning.classList.remove('hidden');
@@ -1046,6 +1050,7 @@
                 // Update last checks with relative time
                 document.getElementById('last-liveness').textContent = formatRelativeTime(data.last_liveness_check);
                 document.getElementById('last-ctlogs').textContent = formatRelativeTime(data.last_ctlogs_check);
+                document.getElementById('last-wappalyzer').textContent = formatRelativeTime(data.last_wappalyzer_check);
                 
                 // Start or stop auto-refresh based on enabled status
                 if (data.enabled) {
