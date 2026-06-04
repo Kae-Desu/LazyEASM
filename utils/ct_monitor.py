@@ -377,6 +377,11 @@ def get_cert_expiry_summary() -> Dict:
         SELECT hostname, MIN(not_after) as soonest
         FROM certificates
         WHERE julianday(not_after) > julianday('now')
+          AND hostname IN (
+            SELECT domain_name FROM domain_asset
+            UNION
+            SELECT subdomain_name FROM subdomain_asset
+          )
         GROUP BY hostname
     ''')
     
@@ -415,6 +420,11 @@ def get_cert_expiry_summary() -> Dict:
             SELECT hostname
             FROM certificates
             WHERE julianday(not_after) > julianday('now')
+              AND hostname IN (
+                SELECT domain_name FROM domain_asset
+                UNION
+                SELECT subdomain_name FROM subdomain_asset
+              )
             GROUP BY hostname
             HAVING MIN(CAST(julianday(not_after) - julianday('now') AS INTEGER)) > 30
         )
