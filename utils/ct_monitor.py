@@ -13,11 +13,50 @@ import time
 import requests
 from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Set
-from utils.db_utils import is_cert_notified
+from utils.db_utils import is_cert_notified, get_db_connection
 
 logger = logging.getLogger(__name__)
 
 CTLOGS_URL = "https://crt.sh/json?q={domain}"
+
+
+def _cleanup_expired_certs(days_expired: int = 90) -> int:
+    """
+    Delete certificates that expired more than days_expired days ago.
+    Also removes associated cert_notifications entries.
+    
+    Args:
+        days_expired: Delete certs expired more than this many days (default 90)
+    
+    Returns:
+        Number of certificates deleted
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute('''
+            DELETE FROM certificates
+            WHERE julianday('now') - julianday(not_after) > ?
+        ''', (days_expired,))
+        deleted = cursor.rowcount
+        
+        if deleted > 0:
+            cursor.execute('''
+                DELETE FROM cert_notifications
+                WHERE cert_id NOT IN (SELECT cert_id FROM certificates)
+            ''')
+            conn.commit()
+            logger.info(f"Cleaned up {deleted} certificates expired more than {days_expired} days ago")
+        else:
+            conn.commit()
+        
+        return deleted
+    except Exception as e:
+        logger.error(f"Failed to cleanup expired certs: {e}")
+        conn.rollback()
+        return 0
+    finally:
+        conn.close()
 
 
 def fetch_ctlogs(domain: str) -> tuple:
@@ -130,7 +169,7 @@ def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
             else:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
             
-            days_remaining = round((not_after - now).total_seconds() / 86400)
+            days_remaining = int((not_after - now).total_seconds() / 86400)
             
             if days_remaining < 0:
                 continue
@@ -285,6 +324,9 @@ def poll_all_domains() -> Dict:
     if certs_stored > 0:
         logger.info(f"Stored {certs_stored} new certificates")
     
+    # Clean up long-expired certificates (expired > 90 days)
+    _cleanup_expired_certs()
+    
     # Check certificate expiry
     expiry_alerts = check_certificate_expiry_thresholds()
     
@@ -328,15 +370,11 @@ def get_cert_expiry_summary() -> Dict:
     
     now = datetime.now(timezone.utc)
     
-    cursor.execute('SELECT COUNT(*) as count FROM certificates')
-    total = cursor.fetchone()['count']
-    
-    cursor.execute('SELECT not_after FROM certificates')
+    cursor.execute('SELECT not_after FROM certificates WHERE julianday(not_after) > julianday("now")')
     
     expiring_3_days = 0
     expiring_7_days = 0
     expiring_30_days = 0
-    expired = 0
     
     for row in cursor.fetchall():
         try:
@@ -348,11 +386,9 @@ def get_cert_expiry_summary() -> Dict:
             else:
                 not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
             
-            days_remaining = round((not_after - now).total_seconds() / 86400)
+            days_remaining = int((not_after - now).total_seconds() / 86400)
             
-            if days_remaining < 0:
-                expired += 1
-            elif days_remaining <= 3:
+            if days_remaining <= 3:
                 expiring_3_days += 1
             elif days_remaining <= 7:
                 expiring_7_days += 1
@@ -361,14 +397,20 @@ def get_cert_expiry_summary() -> Dict:
         except Exception:
             continue
     
+    active_total = expiring_3_days + expiring_7_days + expiring_30_days
+    
+    # Count remaining active certs beyond 30 days
+    cursor.execute('SELECT COUNT(*) as count FROM certificates WHERE julianday(not_after) - julianday("now") > 30')
+    beyond_30 = cursor.fetchone()['count']
+    active_total += beyond_30
+    
     conn.close()
     
     return {
         'expiring_3_days': expiring_3_days,
         'expiring_7_days': expiring_3_days + expiring_7_days,
         'expiring_30_days': expiring_3_days + expiring_7_days + expiring_30_days,
-        'total_certs': total,
-        'expired': expired
+        'total_certs': active_total
     }
 
 
