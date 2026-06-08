@@ -480,6 +480,10 @@ def upsert_http_service(host: str, port_num: int,
             update_fields = ['last_seen = ?']
             update_values = [now]
             
+            if ip_id is not None:
+                update_fields.append('ip_id = ?')
+                update_values.append(ip_id)
+            
             if title:
                 update_fields.append('title = ?')
                 update_values.append(title)
