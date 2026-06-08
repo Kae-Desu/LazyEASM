@@ -89,6 +89,50 @@ def get_assets_for_phase2() -> List[Dict]:
     return all_assets
 
 
+def get_http_ports_for_asset(asset_id: int, asset_type: str, asset_name: str) -> List[int]:
+    """
+    Get HTTP ports for an asset from http_services and ports tables.
+    
+    Args:
+        asset_id: Database ID
+        asset_type: 'domain', 'subdomain', or 'ip'
+        asset_name: Hostname or IP value
+    
+    Returns:
+        List of port numbers with HTTP services
+    """
+    from utils.db_utils import get_db_connection
+    
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    
+    if asset_type == 'ip':
+        cursor.execute('''
+            SELECT DISTINCT hs.port_num
+            FROM http_services hs
+            WHERE hs.ip_id = ? OR hs.host = ?
+            UNION
+            SELECT DISTINCT p.port_num
+            FROM ports p
+            WHERE p.ip_id = ? AND p.service_name IN ('http', 'https', 'http-alt', 'http-proxy', 'jetty', 'nginx', 'apache', 'tomcat')
+        ''', (asset_id, asset_name, asset_id))
+    else:
+        cursor.execute('''
+            SELECT DISTINCT hs.port_num
+            FROM http_services hs
+            WHERE hs.host = ?
+        ''', (asset_name,))
+    
+    ports = [row[0] for row in cursor.fetchall()]
+    conn.close()
+    
+    if not ports:
+        ports = [80, 443]
+    
+    logger.info(f"Dirsearch ports for {asset_name}: {ports}")
+    return ports
+
+
 def get_asset_ips(asset_id: int, asset_type: str) -> List[Dict]:
     """
     Get IPs for an asset.
@@ -239,8 +283,8 @@ def run_dirsearch_limited(asset_name: str, ports: Optional[List[int]] = None) ->
     try:
         dirsearch_module = importlib.import_module('modules.FindDir')
         
-        # Pre-flight: check if port 80 redirects to HTTPS
-        if 80 in ports and 443 in ports:
+        # Pre-flight: only check redirect when scanning default ports 80+443
+        if 80 in ports and 443 in ports and len(ports) == 2:
             redirect_check = detect_http_port(asset_name, port=80)
             if redirect_check.get('use_https'):
                 logger.info(f"{asset_name}:80 redirects to HTTPS, using port 443 only")
@@ -408,12 +452,15 @@ def run_phase2_asset(asset: Dict) -> Dict:
     nmap_result = {'success': False, 'ports_found': 0, 'services_found': [], 'skipped': skip_nmap, 'reason': skip_reason}
     dirsearch_result = {'success': False, 'directories_found': 0, 'error': None}
     
+    # Get HTTP ports for dirsearch (all ports with HTTP services or known HTTP port numbers)
+    http_ports = get_http_ports_for_asset(asset['asset_id'], asset['asset_type'], name)
+    
     # Run parallel
     with ThreadPoolExecutor(max_workers=2) as executor:
         if skip_nmap:
             # Only run dirsearch
             logger.info(f"Skipping nmap for {name}: {skip_reason}")
-            dirsearch_future = executor.submit(run_dirsearch_limited, name)
+            dirsearch_future = executor.submit(run_dirsearch_limited, name, ports=http_ports)
             
             dirsearch_result = dirsearch_future.result()
         else:
@@ -421,7 +468,7 @@ def run_phase2_asset(asset: Dict) -> Dict:
             # Find first non-shared IP for nmap
             nmap_ip = next((ip for ip in ips if not should_skip_nmap(ip['ip_value'], ip.get('is_shared', 0) or 0, ip.get('shared_provider', '') or '')[0]), ips[0])
             nmap_future = executor.submit(run_full_nmap, nmap_ip['ip_id'], nmap_ip['ip_value'])
-            dirsearch_future = executor.submit(run_dirsearch_limited, name)
+            dirsearch_future = executor.submit(run_dirsearch_limited, name, ports=http_ports)
             
             nmap_result = nmap_future.result()
             dirsearch_result = dirsearch_future.result()
