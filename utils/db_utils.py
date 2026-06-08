@@ -1024,8 +1024,8 @@ def get_all_assets_for_display() -> list:
             asset = dict(row)
             asset['is_scanned'] = bool(asset.get('is_scanned', 0))
             asset['ips'] = [asset['name']]
-            asset['technologies'] = []
-            asset['cves'] = []
+            asset['technologies'] = _get_technologies_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
+            asset['cves'] = _get_cves_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             asset['findings'] = _get_ports_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             assets.append(asset)
         
@@ -1104,6 +1104,89 @@ def _get_cves_for_host(cursor, host: str) -> list:
         GROUP BY v.cve_id
         ORDER BY MAX(v.cve_score) DESC
     ''', (host,))
+    
+    cves = []
+    for row in cursor.fetchall():
+        cve = dict(row)
+        cve['cve_score'] = float(cve['cve_score']) if cve['cve_score'] else 0.0
+        cve['description'] = cve['description'] or ''
+        cve['recommendation'] = cve['recommendation'] or None
+        cve['tech_name'] = cve['tech_name'] or ''
+        cve['ports'] = cve['ports'] or ''
+        cves.append(cve)
+    
+    return cves
+
+
+def _get_technologies_for_ip(cursor, ip_id: int) -> list:
+    """
+    Get technologies for a standalone IP asset.
+    
+    Args:
+        cursor: Database cursor
+        ip_id: IP ID
+    
+    Returns:
+        List of {'name': str, 'version': str or None, 'port': int}
+    """
+    cursor.execute('''
+        SELECT 
+            t.tech_name as name,
+            t.tech_version as version,
+            h.port_num as port
+        FROM technologies t
+        INNER JOIN http_services h ON h.http_id = t.http_id
+        WHERE h.ip_id = ?
+        ORDER BY h.port_num, t.tech_name
+    ''', (ip_id,))
+    
+    techs = []
+    for row in cursor.fetchall():
+        tech = dict(row)
+        tech['name'] = tech['name'] or ''
+        tech['version'] = tech['version'] or None
+        techs.append(tech)
+    
+    return techs
+
+
+def _get_cves_for_ip(cursor, ip_id: int) -> list:
+    """
+    Get CVEs for a standalone IP asset, grouped by cve_id with aggregated ports.
+    
+    Args:
+        cursor: Database cursor
+        ip_id: IP ID
+    
+    Returns:
+        List of {'vuln_id': int, 'cve_id': str, 'cve_score': float, 'description': str, 'recommendation': str, 'tech_name': str, 'ports': str}
+    """
+    cursor.execute('''
+        SELECT 
+            MIN(v.vuln_id) as vuln_id,
+            v.cve_id,
+            MAX(v.cve_score) as cve_score,
+            v.description,
+            CASE 
+                WHEN SUM(CASE WHEN v.recommendation IS NOT NULL THEN 1 ELSE 0 END) > 0 
+                THEN (
+                    SELECT recommendation 
+                    FROM vulnerabilities v2 
+                    WHERE v2.cve_id = v.cve_id 
+                    AND v2.recommendation IS NOT NULL 
+                    LIMIT 1
+                )
+                ELSE NULL 
+            END as recommendation,
+            GROUP_CONCAT(DISTINCT t.tech_name) as tech_name,
+            GROUP_CONCAT(DISTINCT h.port_num) as ports
+        FROM vulnerabilities v
+        INNER JOIN technologies t ON t.tech_id = v.tech_id
+        INNER JOIN http_services h ON h.http_id = t.http_id
+        WHERE h.ip_id = ?
+        GROUP BY v.cve_id
+        ORDER BY MAX(v.cve_score) DESC
+    ''', (ip_id,))
     
     cves = []
     for row in cursor.fetchall():
