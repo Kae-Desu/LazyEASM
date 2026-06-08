@@ -298,8 +298,8 @@ class WappalyzerScanner:
             
             self.stats['technologies_found'] += 1
             
-            if self.enable_cve and tech_version:
-                tech_string = f"{tech_name} {tech_version}"
+            if self.enable_cve:
+                tech_string = f"{tech_name} {tech_version}" if tech_version else tech_name
                 
                 time.sleep(self.cve_delay)
                 
