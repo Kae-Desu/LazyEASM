@@ -403,7 +403,9 @@ def run_phase2_asset(asset: Dict) -> Dict:
             dirsearch_result = dirsearch_future.result()
         else:
             # Run both in parallel
-            nmap_future = executor.submit(run_full_nmap, ips[0]['ip_id'], ips[0]['ip_value'])
+            # Find first non-shared IP for nmap
+            nmap_ip = next((ip for ip in ips if not should_skip_nmap(ip['ip_value'], ip.get('is_shared', 0) or 0, ip.get('shared_provider', '') or '')[0]), ips[0])
+            nmap_future = executor.submit(run_full_nmap, nmap_ip['ip_id'], nmap_ip['ip_value'])
             dirsearch_future = executor.submit(run_dirsearch_limited, name)
             
             nmap_result = nmap_future.result()
