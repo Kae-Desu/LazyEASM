@@ -48,7 +48,6 @@ def get_assets_for_phase2() -> List[Dict]:
             sa.subdomain_name as name
         FROM subdomain_asset sa
         INNER JOIN http_services hs ON hs.host = sa.subdomain_name
-        WHERE hs.status_code = 200
         ORDER BY sa.sub_id
     ''')
     
@@ -62,15 +61,29 @@ def get_assets_for_phase2() -> List[Dict]:
             da.domain_name as name
         FROM domain_asset da
         INNER JOIN http_services hs ON hs.host = da.domain_name
-        WHERE hs.status_code = 200
         ORDER BY da.dom_id
     ''')
     
     domains = [dict(row) for row in cursor.fetchall()]
     
+    # Get standalone IP assets (not linked to any domain/subdomain)
+    cursor.execute('''
+        SELECT DISTINCT
+            i.ip_id as asset_id,
+            'ip' as asset_type,
+            i.ip_value as name
+        FROM ip_asset i
+        LEFT JOIN domain_ip di ON di.ip_id = i.ip_id
+        LEFT JOIN subdomain_ip si ON si.ip_id = i.ip_id
+        WHERE di.ip_id IS NULL AND si.ip_id IS NULL
+        ORDER BY i.ip_id
+    ''')
+    
+    ips = [dict(row) for row in cursor.fetchall()]
+    
     conn.close()
     
-    all_assets = subdomains + domains
+    all_assets = subdomains + domains + ips
     logger.info(f"Found {len(all_assets)} assets for Phase 2 scan")
     
     return all_assets
@@ -284,8 +297,10 @@ def update_last_dirsearch(asset_id: int, asset_type: str):
     
     if asset_type == 'domain':
         cursor.execute('UPDATE domain_asset SET last_dirsearch = ? WHERE dom_id = ?', (timestamp, asset_id))
-    else:
+    elif asset_type == 'subdomain':
         cursor.execute('UPDATE subdomain_asset SET last_dirsearch = ? WHERE sub_id = ?', (timestamp, asset_id))
+    elif asset_type == 'ip':
+        cursor.execute('UPDATE ip_asset SET last_scanned = ? WHERE ip_id = ?', (timestamp, asset_id))
     
     conn.commit()
     conn.close()

@@ -1010,11 +1010,17 @@ def get_all_assets_for_display() -> list:
                 'ip' as type,
                 i.status,
                 i.last_scanned,
+                i.last_scanned as last_deep_scan,
+                i.last_scanned as last_wappalyzer_scan,
                 CASE WHEN 
                     COUNT(p.port_id) > 0 
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.ip_id = i.ip_id)
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = i.ip_value)
-                THEN 1 ELSE 0 END as is_scanned
+                THEN 1 ELSE 0 END as is_scanned,
+                (SELECT sq.status FROM scan_queue sq 
+                 WHERE sq.target = i.ip_value 
+                   AND sq.scan_type = 'phase2_deep_scan' 
+                 ORDER BY sq.queued_at DESC LIMIT 1) as phase2_status
             FROM ip_asset i
             LEFT JOIN ports p ON p.ip_id = i.ip_id
             WHERE i.ip_id NOT IN (
