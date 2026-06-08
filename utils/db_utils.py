@@ -1013,6 +1013,7 @@ def get_all_assets_for_display() -> list:
                 CASE WHEN 
                     COUNT(p.port_id) > 0 
                     OR EXISTS(SELECT 1 FROM http_services h WHERE h.ip_id = i.ip_id)
+                    OR EXISTS(SELECT 1 FROM http_services h WHERE h.host = i.ip_value)
                 THEN 1 ELSE 0 END as is_scanned
             FROM ip_asset i
             LEFT JOIN ports p ON p.ip_id = i.ip_id
@@ -1031,6 +1032,7 @@ def get_all_assets_for_display() -> list:
             asset['technologies'] = _get_technologies_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             asset['cves'] = _get_cves_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             asset['findings'] = _get_ports_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
+            asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             assets.append(asset)
         
         return assets
@@ -1140,9 +1142,10 @@ def _get_technologies_for_ip(cursor, ip_id: int) -> list:
             h.port_num as port
         FROM technologies t
         INNER JOIN http_services h ON h.http_id = t.http_id
-        WHERE h.ip_id = ?
+        INNER JOIN ip_asset i ON i.ip_id = ?
+        WHERE h.ip_id = ? OR h.host = i.ip_value
         ORDER BY h.port_num, t.tech_name
-    ''', (ip_id,))
+    ''', (ip_id, ip_id))
     
     techs = []
     for row in cursor.fetchall():
@@ -1187,10 +1190,11 @@ def _get_cves_for_ip(cursor, ip_id: int) -> list:
         FROM vulnerabilities v
         INNER JOIN technologies t ON t.tech_id = v.tech_id
         INNER JOIN http_services h ON h.http_id = t.http_id
-        WHERE h.ip_id = ?
+        INNER JOIN ip_asset i ON i.ip_id = ?
+        WHERE h.ip_id = ? OR h.host = i.ip_value
         GROUP BY v.cve_id
         ORDER BY MAX(v.cve_score) DESC
-    ''', (ip_id,))
+    ''', (ip_id, ip_id))
     
     cves = []
     for row in cursor.fetchall():

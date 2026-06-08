@@ -16,7 +16,6 @@ Flow:
 
 import os
 import sys
-import time
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
@@ -26,9 +25,9 @@ try:
     from Wappalyzer import Wappalyzer, WebPage
     WAPPALYZER_AVAILABLE = True
 except ImportError:
-    WAPPALYZER_AVAILABLE = False
     Wappalyzer = None
     WebPage = None
+    WAPPALYZER_AVAILABLE = False
 
 try:
     import requests
@@ -39,6 +38,7 @@ except ImportError:
 import logging
 import socket
 import ssl
+import time
 from datetime import datetime
 from typing import List, Dict, Optional, Tuple
 

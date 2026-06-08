@@ -125,6 +125,9 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         unique_cves = set()
         
         # Always scan hostname on ports 80 and 443 (works through Cloudflare)
+        # For IP assets, pass the actual ip_id so http_services get linked
+        wappalyzer_ip_id = asset_id if asset_type == 'ip' else None
+        
         for port in [80, 443]:
             is_https = 1 if port == 443 else 0
             
@@ -132,7 +135,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                 result = wappalyzer.scan_target(
                     host=asset_name,
                     port=port,
-                    ip_id=None,  # No IP association for Cloudflare/CDN sites
+                    ip_id=wappalyzer_ip_id,
                     is_https=is_https
                 )
                 tech_found += len(result.get('technologies', []))
@@ -291,9 +294,9 @@ def get_http_services_for_asset(asset_id: int, asset_type: str) -> List[Dict]:
         cursor.execute('''
             SELECT DISTINCT host, port_num 
             FROM http_services 
-            WHERE ip_id = ?
+            WHERE (ip_id = ? OR host IN (SELECT ip_value FROM ip_asset WHERE ip_id = ?))
               AND port_num IN (80, 443)
-        ''', (asset_id,))
+        ''', (asset_id, asset_id))
     
     results = [dict(row) for row in cursor.fetchall()]
     conn.close()
