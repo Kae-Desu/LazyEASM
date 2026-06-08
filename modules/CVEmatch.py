@@ -225,6 +225,11 @@ def find_cve(technology: str, min_cvss: float = 0.0) -> dict:
     if not cves:
         cves = find_vulners(technology)
     
+    if not cves and ' ' in technology:
+        cves = find_nvd(tech_name)
+        if not cves:
+            cves = find_vulners(tech_name)
+    
     valid_cves = []
     seen_ids = set()
     
