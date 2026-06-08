@@ -155,7 +155,7 @@ def run_full_nmap(ip_id: int, ip_value: str) -> Dict:
         port_scanner_module = importlib.import_module('modules.Nmap')
         scanner = port_scanner_module.PortScanner(cycle='long', skip_down=False)
         
-        result = scanner.scan_full_ports(ip_id, ip_value)
+        result = scanner.scan_single_ip(ip_id, ip_value)
         
         return {
             'success': result.get('success', False),
