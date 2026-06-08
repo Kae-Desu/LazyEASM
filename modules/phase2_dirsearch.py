@@ -99,12 +99,18 @@ def get_asset_ips(asset_id: int, asset_type: str) -> List[Dict]:
             INNER JOIN domain_ip di ON di.ip_id = i.ip_id
             WHERE di.dom_id = ?
         ''', (asset_id,))
-    else:
+    elif asset_type == 'subdomain':
         cursor.execute('''
             SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
             FROM ip_asset i
             INNER JOIN subdomain_ip si ON si.ip_id = i.ip_id
             WHERE si.sub_id = ?
+        ''', (asset_id,))
+    else:
+        cursor.execute('''
+            SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
+            FROM ip_asset i
+            WHERE i.ip_id = ?
         ''', (asset_id,))
     
     ips = [dict(row) for row in cursor.fetchall()]
