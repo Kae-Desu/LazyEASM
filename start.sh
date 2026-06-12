@@ -155,8 +155,19 @@ start_docker() {
         install_docker
     fi
 
-    echo -e "${GREEN}Starting LazyEASM in Docker mode...${NC}"
     cd "$SCRIPT_DIR"
+
+    if [ -d ".env" ]; then
+        echo -e "${YELLOW}.env is a directory (Docker auto-created). Removing and regenerating...${NC}"
+        rm -rf .env
+    fi
+
+    if [ ! -f ".env" ]; then
+        echo -e "${YELLOW}No .env found. Running install script...${NC}"
+        bash "$INSTALL_DIR/install.sh"
+    fi
+
+    echo -e "${GREEN}Starting LazyEASM in Docker mode...${NC}"
     docker-compose up -d
 
     echo ""
