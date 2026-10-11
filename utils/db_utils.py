@@ -930,6 +930,93 @@ def get_hostnames_for_takeover_check() -> list:
         conn.close()
 
 
+def get_all_vulnerability_cve_ids() -> list:
+    """Distinct CVE IDs across all findings."""
+    conn = get_db_connection()
+    try:
+        return [row['cve_id'] for row in conn.execute('SELECT DISTINCT cve_id FROM vulnerabilities')]
+    finally:
+        conn.close()
+
+
+def get_cve_intel(cve_ids) -> dict:
+    """Stored exploit intel keyed by CVE ID."""
+    ids = list(cve_ids)
+    if not ids:
+        return {}
+    conn = get_db_connection()
+    try:
+        result = {}
+        for i in range(0, len(ids), 500):
+            batch = ids[i:i + 500]
+            rows = conn.execute(
+                f"SELECT * FROM cve_intel WHERE cve_id IN ({','.join('?' * len(batch))})", batch
+            ).fetchall()
+            result.update({row['cve_id']: dict(row) for row in rows})
+        return result
+    finally:
+        conn.close()
+
+
+def upsert_cve_intel(cve_id: str, epss: dict = None, kev: dict = None,
+                     update_epss: bool = True, update_kev: bool = True) -> None:
+    """
+    Store exploit intel for one CVE.
+
+    Args:
+        epss: {'epss', 'percentile', 'date'} or None (no score)
+        kev: {'date_added', 'due_date', 'required_action', 'ransomware'} or None (not in KEV)
+        update_epss / update_kev: False keeps the stored values (source unavailable)
+    """
+    conn = get_db_connection()
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute('INSERT OR IGNORE INTO cve_intel (cve_id) VALUES (?)', (cve_id,))
+        if update_epss:
+            conn.execute('''
+                UPDATE cve_intel SET epss = ?, epss_percentile = ?, epss_date = ?, updated_at = ?
+                WHERE cve_id = ?
+            ''', (epss['epss'] if epss else None, epss['percentile'] if epss else None,
+                  epss.get('date') if epss else None, now, cve_id))
+        if update_kev:
+            conn.execute('''
+                UPDATE cve_intel SET in_kev = ?, kev_date_added = ?, kev_due_date = ?,
+                                     kev_required_action = ?, kev_ransomware = ?, updated_at = ?
+                WHERE cve_id = ?
+            ''', (1 if kev else 0, kev and kev.get('date_added'), kev and kev.get('due_date'),
+                  kev and kev.get('required_action'), 1 if kev and kev.get('ransomware') else 0,
+                  now, cve_id))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_open_hosts_for_cve(cve_id: str) -> list:
+    """Hosts with an open finding for this CVE."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT DISTINCT h.host
+            FROM vulnerabilities v
+            INNER JOIN technologies t ON t.tech_id = v.tech_id
+            INNER JOIN http_services h ON h.http_id = t.http_id
+            WHERE v.cve_id = ? AND v.status = 'open'
+            ORDER BY h.host
+        ''', (cve_id,)).fetchall()
+        return [row['host'] for row in rows]
+    finally:
+        conn.close()
+
+
+def _add_priority(cve: dict) -> dict:
+    """Attach exploit intel fields and the P1-P4 priority to a CVE row."""
+    from utils.threat_intel import compute_priority
+    cve['in_kev'] = bool(cve.get('in_kev'))
+    cve['kev_ransomware'] = bool(cve.get('kev_ransomware'))
+    cve.update(compute_priority(cve.get('cve_score'), cve.get('epss'), cve['in_kev']))
+    return cve
+
+
 def _get_findings_for_host(cursor, host: str) -> list:
     """Security findings for a hostname, open first then by severity."""
     try:
@@ -1413,13 +1500,21 @@ def _get_cves_for_host(cursor, host: str) -> list:
             GROUP_CONCAT(DISTINCT t.tech_name) as tech_name,
             GROUP_CONCAT(DISTINCT h.port_num) as ports,
             CASE WHEN SUM(v.status = 'open') > 0 THEN 'open' ELSE MAX(v.status) END as status,
-            MAX(v.status_note) as status_note
+            MAX(v.status_note) as status_note,
+            MAX(ci.epss) as epss,
+            MAX(ci.epss_percentile) as epss_percentile,
+            MAX(COALESCE(ci.in_kev, 0)) as in_kev,
+            MAX(ci.kev_due_date) as kev_due_date,
+            MAX(ci.kev_required_action) as kev_required_action,
+            MAX(COALESCE(ci.kev_ransomware, 0)) as kev_ransomware
         FROM vulnerabilities v
         INNER JOIN technologies t ON t.tech_id = v.tech_id
         INNER JOIN http_services h ON h.http_id = t.http_id
+        LEFT JOIN cve_intel ci ON ci.cve_id = v.cve_id
         WHERE h.host = ?
         GROUP BY v.cve_id
-        ORDER BY SUM(v.status = 'open') > 0 DESC, MAX(v.cve_score) DESC
+        ORDER BY SUM(v.status = 'open') > 0 DESC, MAX(COALESCE(ci.in_kev, 0)) DESC,
+                 COALESCE(MAX(ci.epss), 0) >= 0.1 DESC, MAX(v.cve_score) DESC, COALESCE(MAX(ci.epss), 0) DESC
     ''', (host,))
     
     cves = []
@@ -1431,7 +1526,7 @@ def _get_cves_for_host(cursor, host: str) -> list:
         cve['tech_name'] = cve['tech_name'] or ''
         cve['ports'] = cve['ports'] or ''
         cve['status'] = cve['status'] or 'open'
-        cves.append(cve)
+        cves.append(_add_priority(cve))
     
     return cves
 
@@ -1500,14 +1595,22 @@ def _get_cves_for_ip(cursor, ip_id: int) -> list:
             GROUP_CONCAT(DISTINCT t.tech_name) as tech_name,
             GROUP_CONCAT(DISTINCT h.port_num) as ports,
             CASE WHEN SUM(v.status = 'open') > 0 THEN 'open' ELSE MAX(v.status) END as status,
-            MAX(v.status_note) as status_note
+            MAX(v.status_note) as status_note,
+            MAX(ci.epss) as epss,
+            MAX(ci.epss_percentile) as epss_percentile,
+            MAX(COALESCE(ci.in_kev, 0)) as in_kev,
+            MAX(ci.kev_due_date) as kev_due_date,
+            MAX(ci.kev_required_action) as kev_required_action,
+            MAX(COALESCE(ci.kev_ransomware, 0)) as kev_ransomware
         FROM vulnerabilities v
         INNER JOIN technologies t ON t.tech_id = v.tech_id
         INNER JOIN http_services h ON h.http_id = t.http_id
         INNER JOIN ip_asset i ON i.ip_id = ?
+        LEFT JOIN cve_intel ci ON ci.cve_id = v.cve_id
         WHERE h.ip_id = ? OR h.host = i.ip_value
         GROUP BY v.cve_id
-        ORDER BY SUM(v.status = 'open') > 0 DESC, MAX(v.cve_score) DESC
+        ORDER BY SUM(v.status = 'open') > 0 DESC, MAX(COALESCE(ci.in_kev, 0)) DESC,
+                 COALESCE(MAX(ci.epss), 0) >= 0.1 DESC, MAX(v.cve_score) DESC, COALESCE(MAX(ci.epss), 0) DESC
     ''', (ip_id, ip_id))
     
     cves = []
@@ -1519,7 +1622,7 @@ def _get_cves_for_ip(cursor, ip_id: int) -> list:
         cve['tech_name'] = cve['tech_name'] or ''
         cve['ports'] = cve['ports'] or ''
         cve['status'] = cve['status'] or 'open'
-        cves.append(cve)
+        cves.append(_add_priority(cve))
     
     return cves
 

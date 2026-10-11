@@ -147,6 +147,9 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         stats['tech_found'] = tech_found
         stats['cve_found'] = len(unique_cves)
         logger.info(f"Wappalyzer complete for {asset_name}: {stats['tech_found']} techs, {stats['cve_found']} CVEs")
+
+        from utils.threat_intel import refresh_quietly
+        refresh_quietly(sorted(unique_cves))
         
         # Update last_wappalyzer_scan timestamp
         try:

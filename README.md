@@ -101,6 +101,11 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Technology Fingerprinting** - Wappalyzer integration (100+ technologies)
 - **CVE Matching** - NVD CPE + version-range matching with CVSS filtering (min 5.0)
 - **Finding Lifecycle** - Open / fixed / accepted / false positive; findings no longer seen on rescan are closed automatically and reopened if they return
+- **Exploit-Based Prioritization** - Each CVE is ranked by real-world exploitation, not just CVSS, using the CISA Known Exploited Vulnerabilities catalog and FIRST EPSS:
+  - **P1** - in CISA KEV (exploited in the wild); shows CISA's required action and due date
+  - **P2** - EPSS >= 10% (likely to be exploited in the next 30 days)
+  - **P3** - CVSS >= 7.0 with no exploitation signal
+  - **P4** - everything else
 - **AI Recommendations** - Vulnerability analysis with Google Gemini, Anthropic Claude, OpenAI, or any OpenAI-compatible endpoint (e.g. a local Ollama model)
 - **Discord Notifications** - Real-time alerts for completed scans and CVEs
 
@@ -117,6 +122,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **CT Logs Monitoring** - Poll for new subdomains every hour
 - **Wappalyzer Re-scanning** - Periodic technology re-fingerprinting (default: every 24 hours)
 - **Subdomain Takeover Detection** - Follows CNAME chains for every domain/subdomain (default: every 24 hours); flags services known to allow takeover (NXDOMAIN or unclaimed-page fingerprint) and dangling CNAMEs. Findings use the open / fixed / accepted / false positive lifecycle. Manual trigger: `/api/phase3/takeover/check`
+- **Exploit Intel Refresh** - Updates CISA KEV and EPSS data for all CVEs (default: every 24 hours) and right after scans that find new CVEs. Sends a Discord alert when a CVE with an open finding is (or becomes) known exploited. Manual trigger: `/api/phase3/intel/check`
 - **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
   - Each threshold notified exactly once per certificate
   - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)
@@ -385,9 +391,10 @@ to any application replica.
 | `technology` | text | Partial, case-insensitive technology match |
 | `port` | `1`-`65535` | Match discovered ports or HTTP service ports |
 | `min_cvss` | number | Minimum highest CVSS score on the asset |
+| `kev` | `1` / `true` | Only assets with an open CVE in the CISA KEV catalog |
 | `cert_state` | `none`, `expired`, `expiring`, `valid` | Certificate state; expiring means active and due within 30 days |
 | `scan_state` | `scanned`, `unscanned`, `pending`, `processing` | Initial scan state or latest Phase 2 queue state |
-| `sort` | `name`, `type`, `status`, `first_seen`, `last_seen`, `last_scanned`, `max_cvss` | Sort field |
+| `sort` | `name`, `type`, `status`, `first_seen`, `last_seen`, `last_scanned`, `max_cvss`, `max_epss`, `kev_count` | Sort field |
 | `order` | `asc`, `desc` | Sort direction |
 | `page` | positive integer | One-based page number |
 | `page_size` | positive integer | Page size, capped by `ASSET_API_MAX_PAGE_SIZE` |
@@ -488,6 +495,7 @@ LazyEASM/
 │   ├── liveness_checker.py    # ICMP/TCP liveness checks
 │   ├── wappalyzer_monitor.py  # Periodic Wappalyzer re-scanning (Phase 3)
 │   ├── takeover_checker.py    # Subdomain takeover / dangling CNAME checks (Phase 3)
+│   ├── threat_intel.py        # CISA KEV + EPSS prioritization (Phase 3)
 │   ├── process_utils.py       # Process detection utilities
 │   └── ct_monitor.py         # CT logs polling + cert tracking
 ├── templates/
@@ -597,4 +605,6 @@ Releases published before this change remain available under the MIT License.
 - crt.sh (Certificate Transparency Logs) for certificate discovery
 - NVD (National Vulnerability Database) for CVE information
 - Wappalyzer for technology fingerprinting patterns
+- [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) for exploited-in-the-wild CVEs
+- [FIRST EPSS](https://www.first.org/epss/) for exploit prediction scores
 - [can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz) by EdOverflow and contributors for subdomain takeover fingerprints (CC BY 4.0, see [data/README.md](data/README.md))

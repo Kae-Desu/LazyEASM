@@ -38,6 +38,8 @@ SORT_COLUMNS = {
     "last_seen": "last_seen",
     "last_scanned": "last_scanned",
     "max_cvss": "max_cvss",
+    "max_epss": "max_epss",
+    "kev_count": "kev_count",
 }
 
 
@@ -138,10 +140,13 @@ tech_rollup AS (
 vuln_rollup AS (
     SELECT services.type, services.asset_id,
            COUNT(DISTINCT v.vuln_id) AS vulnerability_count,
-           MAX(v.cve_score) AS max_cvss
+           MAX(v.cve_score) AS max_cvss,
+           MAX(ci.epss) AS max_epss,
+           COUNT(DISTINCT CASE WHEN ci.in_kev = 1 THEN v.cve_id END) AS kev_count
     FROM asset_services services
     JOIN technologies t ON t.http_id = services.http_id
     JOIN vulnerabilities v ON v.tech_id = t.tech_id
+    LEFT JOIN cve_intel ci ON ci.cve_id = v.cve_id
     WHERE v.status = 'open'
     GROUP BY services.type, services.asset_id
 ),
@@ -171,6 +176,8 @@ enriched AS (
            COALESCE(tr.technology_count, 0) AS technology_count,
            COALESCE(vr.vulnerability_count, 0) AS vulnerability_count,
            COALESCE(vr.max_cvss, 0) AS max_cvss,
+           vr.max_epss AS max_epss,
+           COALESCE(vr.kev_count, 0) AS kev_count,
            cr.active_not_after AS certificate_not_after,
            CASE
              WHEN cr.active_not_after IS NOT NULL
@@ -208,6 +215,7 @@ def list_assets(
     technology: Optional[str] = None,
     port=None,
     min_cvss=None,
+    kev_only=False,
     cert_state: Optional[str] = None,
     scan_state: Optional[str] = None,
     sort: str = "name",
@@ -263,6 +271,8 @@ def list_assets(
     if min_cvss is not None:
         where.append("max_cvss >= ?")
         params.append(min_cvss)
+    if str(kev_only).lower() in ("1", "true", "yes"):
+        where.append("kev_count > 0")
     if cert_state:
         where.append("certificate_state = ?")
         params.append(cert_state)

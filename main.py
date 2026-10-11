@@ -555,6 +555,7 @@ def api_assets():
             technology=request.args.get('technology'),
             port=request.args.get('port'),
             min_cvss=request.args.get('min_cvss'),
+            kev_only=request.args.get('kev', ''),
             cert_state=request.args.get('cert_state'),
             scan_state=request.args.get('scan_state'),
             sort=request.args.get('sort', 'name'),
@@ -1255,10 +1256,12 @@ def phase3_status():
         'last_ctlogs_check': status['last_ctlogs_check'],
         'last_wappalyzer_check': status['last_wappalyzer_check'],
         'last_takeover_check': status['last_takeover_check'],
+        'last_intel_check': status['last_intel_check'],
         'liveness_interval_min': status['liveness_interval_min'],
         'ctlogs_interval_hr': status['ctlogs_interval_hr'],
         'wappalyzer_interval_hr': status['wappalyzer_interval_hr'],
         'takeover_interval_hr': status['takeover_interval_hr'],
+        'intel_interval_hr': status['intel_interval_hr'],
         'assets': {
             'total': liveness['total'],
             'up': liveness['up'],
@@ -1370,6 +1373,24 @@ def phase3_takeover_check():
 
     if result.get('new_findings'):
         send_takeover_notification(result)
+
+    return jsonify({
+        'success': True,
+        'result': result
+    })
+
+
+@app.route('/api/phase3/intel/check', methods=['POST'])
+@token_required
+def phase3_intel_check():
+    """Manually refresh exploit intel (CISA KEV + EPSS)."""
+    from utils.threat_intel import refresh_threat_intel
+    from utils.phase3_worker import send_kev_notification
+
+    result = refresh_threat_intel()
+
+    if result.get('newly_kev'):
+        send_kev_notification(result)
 
     return jsonify({
         'success': True,

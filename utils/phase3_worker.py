@@ -6,6 +6,7 @@ Orchestrates:
     - CT logs monitor (every 1 hour)
     - Wappalyzer re-scan (every 24 hours)
     - Subdomain takeover check (every 24 hours)
+    - Exploit intel refresh: CISA KEV + EPSS (every 24 hours)
 
 Exports:
     - start_phase3_workers()
@@ -26,6 +27,7 @@ _liveness_thread = None
 _ctlogs_thread = None
 _wappalyzer_thread = None
 _takeover_thread = None
+_intel_thread = None
 
 
 def send_liveness_notification(result: dict):
@@ -203,6 +205,36 @@ def send_takeover_notification(result: dict):
         logger.error(f"Failed to send takeover notification: {e}")
 
 
+def send_kev_notification(result: dict):
+    """
+    Send Discord notification when CVEs with open findings are added to CISA KEV.
+
+    Args:
+        result: Dict from refresh_threat_intel()
+    """
+    try:
+        from modules.Notify import send_message
+
+        lines = [
+            "**Actively Exploited CVEs on Your Assets (CISA KEV)**",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+        ]
+        for item in result['newly_kev'][:10]:
+            hosts = ', '.join(item['hosts'][:5]) + (f" (+{len(item['hosts']) - 5} more)" if len(item['hosts']) > 5 else '')
+            ransomware = " · used in ransomware" if item.get('ransomware') else ""
+            lines.append(f"\n• **{item['cve_id']}**{ransomware} · CISA due date {item.get('due_date') or '-'}")
+            lines.append(f"  Hosts: {hosts}")
+            if item.get('required_action'):
+                lines.append(f"  Action: {item['required_action'][:200]}")
+        if len(result['newly_kev']) > 10:
+            lines.append(f"\n• ... and {len(result['newly_kev']) - 10} more")
+
+        send_message('\n'.join(lines))
+
+    except Exception as e:
+        logger.error(f"Failed to send KEV notification: {e}")
+
+
 def liveness_loop(interval_min: int = 5):
     """
     Liveness checker loop.
@@ -370,13 +402,53 @@ def takeover_loop(interval_hr: int = 24):
     logger.info("Takeover monitor thread stopped")
 
 
+def intel_loop(interval_hr: int = 24):
+    """
+    Exploit intel refresh loop (CISA KEV + EPSS).
+
+    Runs every interval_hr hours if Phase 3 is enabled.
+
+    Args:
+        interval_hr: Interval in hours (default: 24)
+    """
+    global _phase3_running
+
+    from utils.threat_intel import refresh_threat_intel
+    from utils.db_utils import get_setting
+
+    logger.info("Threat intel thread started")
+
+    while _phase3_running:
+        try:
+            if get_setting('phase3_enabled') == '1':
+                logger.info("Refreshing exploit intel (KEV/EPSS)...")
+                result = refresh_threat_intel()
+
+                if result.get('newly_kev'):
+                    send_kev_notification(result)
+            else:
+                logger.debug("Phase 3 disabled, skipping intel refresh")
+
+        except Exception as e:
+            logger.error(f"Threat intel refresh error: {e}")
+
+        # Sleep in small intervals to allow quick shutdown
+        sleep_seconds = interval_hr * 3600
+        elapsed = 0
+        while elapsed < sleep_seconds and _phase3_running:
+            time.sleep(5)
+            elapsed += 5
+
+    logger.info("Threat intel thread stopped")
+
+
 def start_phase3_workers():
     """
     Start all Phase 3 monitoring threads.
     
     Checks settings for enabled status and intervals.
     """
-    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread, _takeover_thread
+    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread, _takeover_thread, _intel_thread
     
     from utils.db_utils import get_setting
     
@@ -397,6 +469,7 @@ def start_phase3_workers():
     ctlogs_interval = int(get_setting('ctlogs_interval_hr') or '1')
     wappalyzer_interval = int(get_setting('wappalyzer_interval_hr') or '24')
     takeover_interval = int(get_setting('takeover_interval_hr') or '24')
+    intel_interval = int(get_setting('intel_interval_hr') or '24')
     
     logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr, wappalyzer: {wappalyzer_interval}hr, takeover: {takeover_interval}hr)")
     
@@ -435,6 +508,15 @@ def start_phase3_workers():
         name='Phase3-Takeover'
     )
     _takeover_thread.start()
+
+    # Start exploit intel thread
+    _intel_thread = threading.Thread(
+        target=intel_loop,
+        args=(intel_interval,),
+        daemon=True,
+        name='Phase3-Intel'
+    )
+    _intel_thread.start()
     
     logger.info("Phase 3 workers started")
 
@@ -460,6 +542,9 @@ def stop_phase3_workers():
 
     if _takeover_thread and _takeover_thread.is_alive():
         _takeover_thread.join(timeout=10)
+
+    if _intel_thread and _intel_thread.is_alive():
+        _intel_thread.join(timeout=10)
     
     logger.info("Phase 3 workers stopped")
 
@@ -487,10 +572,12 @@ def get_phase3_status() -> dict:
         'last_ctlogs_check': get_setting('last_ctlogs_check') or '-',
         'last_wappalyzer_check': get_setting('last_wappalyzer_check') or '-',
         'last_takeover_check': get_setting('last_takeover_check') or '-',
+        'last_intel_check': get_setting('last_intel_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
         'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
         'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
-        'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24')
+        'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24'),
+        'intel_interval_hr': int(get_setting('intel_interval_hr') or '24')
     }
 
 

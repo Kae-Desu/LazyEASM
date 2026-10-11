@@ -193,6 +193,9 @@ def run_wappalyzer_scan() -> dict:
 
     set_setting('last_wappalyzer_check', now_str)
 
+    from utils.threat_intel import refresh_quietly
+    refresh_quietly([cve['cve_id'] for cve in result['new_cves']])
+
     logger.info(
         f"Wappalyzer re-scan complete: "
         f"{result['hosts_scanned']} hosts, "

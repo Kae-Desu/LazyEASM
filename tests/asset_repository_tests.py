@@ -41,6 +41,11 @@ CREATE TABLE vulnerabilities (
     status TEXT DEFAULT 'open', status_note TEXT, status_updated_at TEXT,
     match_method TEXT DEFAULT 'cpe'
 );
+CREATE TABLE cve_intel (
+    cve_id TEXT PRIMARY KEY, epss REAL, epss_percentile REAL, epss_date TEXT,
+    in_kev INTEGER DEFAULT 0, kev_date_added TEXT, kev_due_date TEXT,
+    kev_required_action TEXT, kev_ransomware INTEGER DEFAULT 0, updated_at TEXT
+);
 CREATE TABLE certificates (
     cert_id INTEGER PRIMARY KEY, hostname TEXT, issuer TEXT, not_after TEXT
 );
@@ -82,6 +87,8 @@ class AssetRepositoryTests(unittest.TestCase):
                 (2, 2, 'Flask', '3.0');
             INSERT INTO vulnerabilities (vuln_id, tech_id, cve_id, cve_score, description, recommendation) VALUES
                 (1, 1, 'CVE-2026-0001', 9.8, 'Example issue', NULL);
+            INSERT INTO cve_intel (cve_id, epss, epss_percentile, in_kev, kev_required_action)
+                VALUES ('CVE-2026-0001', 0.42, 0.97, 1, 'Apply updates');
             INSERT INTO certificates
                 VALUES (1, 'api.example.com', 'Example CA', datetime('now', '+10 days'));
             INSERT INTO directories VALUES (1, 1, '/admin', 403, 0);
@@ -129,7 +136,16 @@ class AssetRepositoryTests(unittest.TestCase):
         self.assertEqual(asset["name"], "api.example.com")
         self.assertEqual(asset["technology_count"], 1)
         self.assertEqual(asset["vulnerability_count"], 1)
+        self.assertEqual(asset["kev_count"], 1)
+        self.assertEqual(asset["max_epss"], 0.42)
         self.assertEqual(asset["certificate"]["state"], "expiring")
+
+    def test_kev_filter_and_epss_sort(self):
+        result = asset_repository.list_assets(kev_only="true")
+        self.assertEqual([item["name"] for item in result["items"]], ["api.example.com"])
+
+        ranked = asset_repository.list_assets(sort="max_epss", order="desc")
+        self.assertEqual(ranked["items"][0]["name"], "api.example.com")
 
     def test_ip_port_filter_includes_standalone_ip(self):
         result = asset_repository.list_assets(port=8080, asset_types=["ip"])
@@ -145,6 +161,8 @@ class AssetRepositoryTests(unittest.TestCase):
         self.assertEqual(detail["ips"], ["203.0.113.10"])
         self.assertEqual(detail["technologies"][0]["name"], "nginx")
         self.assertEqual(detail["vulnerabilities"][0]["cve_id"], "CVE-2026-0001")
+        self.assertEqual(detail["vulnerabilities"][0]["priority"], "P1")
+        self.assertTrue(detail["vulnerabilities"][0]["in_kev"])
         self.assertEqual(detail["directories"][0]["path"], "/admin")
 
     def test_invalid_query_values_are_rejected(self):

@@ -455,6 +455,22 @@ def init_db():
         )
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_host ON findings(host)')
+
+    # Exploit intelligence per CVE (CISA KEV + FIRST EPSS), shared by all hosts
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cve_intel (
+            cve_id TEXT PRIMARY KEY,
+            epss REAL,
+            epss_percentile REAL,
+            epss_date TEXT,
+            in_kev INTEGER DEFAULT 0,
+            kev_date_added TEXT,
+            kev_due_date TEXT,
+            kev_required_action TEXT,
+            kev_ransomware INTEGER DEFAULT 0,
+            updated_at TEXT
+        )
+    ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status)')
 
     # Create token_blacklist table if not exists (migration for existing DBs)

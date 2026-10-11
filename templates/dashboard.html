@@ -408,6 +408,10 @@
                                 <span class="text-slate-400">Takeover:</span>
                                 <span id="last-takeover" class="font-mono dark:text-white">-</span>
                             </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Exploit Intel:</span>
+                                <span id="last-intel" class="font-mono dark:text-white">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1146,6 +1150,7 @@
                 document.getElementById('last-ctlogs').textContent = formatRelativeTime(data.last_ctlogs_check);
                 document.getElementById('last-wappalyzer').textContent = formatRelativeTime(data.last_wappalyzer_check);
                 document.getElementById('last-takeover').textContent = formatRelativeTime(data.last_takeover_check);
+                document.getElementById('last-intel').textContent = formatRelativeTime(data.last_intel_check);
                 
                 // Start or stop auto-refresh based on enabled status
                 if (data.enabled) {

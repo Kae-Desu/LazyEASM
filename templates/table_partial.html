@@ -4,7 +4,12 @@
         <span id="icon-{{ asset.type }}-{{ asset.id }}" class="text-accent font-bold transition-transform">▸</span>
     </td>
     <td class="px-6 py-5">
-        <div class="font-mono text-xs dark:text-white">{{ asset.name }}</div>
+        <div class="font-mono text-xs dark:text-white">{{ asset.name }}
+            {% set open_kev = (asset.cves or [])|selectattr('in_kev')|selectattr('status', 'equalto', 'open')|list %}
+            {% if open_kev %}
+            <span class="ml-2 px-1.5 py-0.5 rounded text-[9px] font-bold uppercase bg-red-600 text-white" title="{{ open_kev|length }} open CVE(s) known to be exploited in the wild (CISA KEV)">KEV {{ open_kev|length }}</span>
+            {% endif %}
+        </div>
         {% if asset.ips and asset.ips|length > 0 %}
         <div class="text-[10px] text-slate-400 mt-1">{{ asset.ips|join(', ') }}</div>
         {% endif %}
@@ -251,6 +256,18 @@
                             </select>
                         </div>
                     </div>
+                    <div class="flex flex-wrap items-center gap-1.5 mb-2">
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded border {% if cve.priority == 'P1' %}bg-red-600 text-white border-red-600{% elif cve.priority == 'P2' %}bg-orange-500/10 text-orange-500 border-orange-500/30{% elif cve.priority == 'P3' %}bg-amber-500/10 text-amber-500 border-amber-500/30{% else %}bg-slate-500/10 text-slate-400 border-slate-500/20{% endif %}" title="{{ cve.reason }}">{{ cve.priority }}</span>
+                        {% if cve.in_kev %}
+                        <span class="text-[9px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-500/30" title="Listed in the CISA Known Exploited Vulnerabilities catalog">KNOWN EXPLOITED{% if cve.kev_ransomware %} · RANSOMWARE{% endif %}</span>
+                        {% endif %}
+                        {% if cve.epss is not none %}
+                        <span class="text-[9px] font-mono px-1.5 py-0.5 rounded bg-slate-500/10 text-slate-500 dark:text-slate-300 border border-slate-500/20" title="EPSS: probability of exploitation in the next 30 days (percentile {{ '%.0f'|format((cve.epss_percentile or 0) * 100) }})">EPSS {{ '%.1f'|format(cve.epss * 100) }}%</span>
+                        {% endif %}
+                    </div>
+                    {% if cve.in_kev and cve.kev_required_action %}
+                    <p class="text-[10px] text-red-500 mb-2"><span class="font-bold">CISA action{% if cve.kev_due_date %} (due {{ cve.kev_due_date }}){% endif %}:</span> {{ cve.kev_required_action }}</p>
+                    {% endif %}
                     {% if cve.status_note %}
                     <p class="text-[9px] text-slate-400 italic mb-2">{{ cve.status_note }}</p>
                     {% endif %}
