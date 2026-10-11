@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
 from utils.env_manager import set_env_key, delete_env_key, get_config_for_ui, EDITABLE_KEYS
-from utils.db_utils import get_all_assets_for_display, get_db_connection
+from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
 from utils.asset_repository import AssetQueryError, get_asset_detail, list_assets
@@ -68,7 +68,7 @@ KEY_NAMES = {
     'DISCORD_WEBHOOK_URL': 'Discord Webhook',
     'DISCORD_USER_ID': 'Discord User ID',
     'SECURITYTRAILS_API_KEY': 'SecurityTrails Key',
-    'VULNERS_API_KEY': 'Vulners Key',
+    'NVD_API_KEY': 'NVD API Key',
     'GEMINI_API_KEY': 'Gemini Key'
 }
 
@@ -805,9 +805,9 @@ def generate_ai():
         
         cursor.execute('''
             UPDATE vulnerabilities 
-            SET recommendation = ?, last_seen = ?
+            SET recommendation = ?
             WHERE vuln_id = ?
-        ''', (recommendation, datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), vuln_id))
+        ''', (recommendation, vuln_id))
         
         conn.commit()
         
@@ -821,6 +821,29 @@ def generate_ai():
         return jsonify({'error': str(e)}), 500
     finally:
         conn.close()
+
+
+@app.route('/api/vulnerabilities/<int:vuln_id>/status', methods=['POST'])
+@token_required
+@csrf_protected
+def update_vulnerability_status(vuln_id):
+    data = request.get_json(silent=True) or {}
+    status = data.get('status')
+    note = (data.get('note') or '').strip()[:500] or None
+    
+    if status not in VULN_STATUSES:
+        return jsonify({'success': False, 'error': f"status must be one of: {', '.join(VULN_STATUSES)}"}), 400
+    
+    try:
+        updated = set_vulnerability_status(vuln_id, status, note)
+    except Exception as e:
+        logger.error(f"Error updating vulnerability {vuln_id} status: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Failed to update status'}), 500
+    
+    if not updated:
+        return jsonify({'success': False, 'error': 'Vulnerability not found'}), 404
+    
+    return jsonify({'success': True, 'vuln_id': vuln_id, 'status': status, 'updated': updated})
 
 
 @app.route('/process_assets', methods=['POST'])

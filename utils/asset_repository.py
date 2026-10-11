@@ -142,6 +142,7 @@ vuln_rollup AS (
     FROM asset_services services
     JOIN technologies t ON t.http_id = services.http_id
     JOIN vulnerabilities v ON v.tech_id = t.tech_id
+    WHERE v.status = 'open'
     GROUP BY services.type, services.asset_id
 ),
 cert_rollup AS (

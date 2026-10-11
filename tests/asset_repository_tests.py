@@ -37,7 +37,9 @@ CREATE TABLE technologies (
 );
 CREATE TABLE vulnerabilities (
     vuln_id INTEGER PRIMARY KEY, tech_id INTEGER, cve_id TEXT,
-    cve_score REAL, description TEXT, recommendation TEXT
+    cve_score REAL, description TEXT, recommendation TEXT,
+    status TEXT DEFAULT 'open', status_note TEXT, status_updated_at TEXT,
+    match_method TEXT DEFAULT 'cpe'
 );
 CREATE TABLE certificates (
     cert_id INTEGER PRIMARY KEY, hostname TEXT, issuer TEXT, not_after TEXT
@@ -78,7 +80,7 @@ class AssetRepositoryTests(unittest.TestCase):
             INSERT INTO technologies VALUES
                 (1, 1, 'nginx', '1.24'),
                 (2, 2, 'Flask', '3.0');
-            INSERT INTO vulnerabilities VALUES
+            INSERT INTO vulnerabilities (vuln_id, tech_id, cve_id, cve_score, description, recommendation) VALUES
                 (1, 1, 'CVE-2026-0001', 9.8, 'Example issue', NULL);
             INSERT INTO certificates
                 VALUES (1, 'api.example.com', 'Example CA', datetime('now', '+10 days'));

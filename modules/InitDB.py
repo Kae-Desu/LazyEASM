@@ -165,7 +165,18 @@ def init_db():
         status TEXT DEFAULT 'open',
         first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
         last_seen TEXT,
+        status_note TEXT,
+        status_updated_at TEXT,
+        match_method TEXT DEFAULT 'cpe',
         FOREIGN KEY(tech_id) REFERENCES technologies(tech_id) ON DELETE SET NULL
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS cve_cache (
+        cpe TEXT PRIMARY KEY,
+        result_json TEXT NOT NULL,
+        fetched_at TEXT NOT NULL
     )
     ''')
 
@@ -404,6 +415,26 @@ def init_db():
         cursor.execute("ALTER TABLE scan_queue ADD COLUMN dirs_found INTEGER DEFAULT 0")
     if 'error_message' not in queue_columns:
         cursor.execute("ALTER TABLE scan_queue ADD COLUMN error_message TEXT")
+
+    # Finding lifecycle columns. Rows that predate CPE matching came from
+    # keyword search, so they are tagged 'keyword' to be re-verified on rescan.
+    cursor.execute("PRAGMA table_info(vulnerabilities)")
+    vuln_columns = [col[1] for col in cursor.fetchall()]
+    if 'status_note' not in vuln_columns:
+        cursor.execute("ALTER TABLE vulnerabilities ADD COLUMN status_note TEXT")
+    if 'status_updated_at' not in vuln_columns:
+        cursor.execute("ALTER TABLE vulnerabilities ADD COLUMN status_updated_at TEXT")
+    if 'match_method' not in vuln_columns:
+        cursor.execute("ALTER TABLE vulnerabilities ADD COLUMN match_method TEXT DEFAULT 'cpe'")
+        cursor.execute("UPDATE vulnerabilities SET match_method = 'keyword'")
+
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cve_cache (
+            cpe TEXT PRIMARY KEY,
+            result_json TEXT NOT NULL,
+            fetched_at TEXT NOT NULL
+        )
+    ''')
 
     # Create token_blacklist table if not exists (migration for existing DBs)
     cursor.execute('''

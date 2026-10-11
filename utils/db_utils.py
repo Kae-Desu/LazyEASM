@@ -21,6 +21,7 @@ Functions:
 
 import sqlite3
 import os
+import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
@@ -607,53 +608,203 @@ def get_all_technologies() -> list:
         conn.close()
 
 
+VULN_STATUSES = ('open', 'fixed', 'accepted', 'false_positive')
+
+
 def upsert_vulnerability(tech_id: int, cve_id: str, cve_score: float = None,
-                        description: str = None, recommendation: str = None) -> int:
+                        description: str = None, recommendation: str = None,
+                        match_method: str = 'cpe') -> int:
     """
     Create or update vulnerability entry.
-    
+
+    A finding that was auto-closed as 'fixed' is reopened when it is detected
+    again. Findings a user marked 'accepted' or 'false_positive' keep their status.
+
     Args:
         tech_id: Technology ID
         cve_id: CVE identifier (e.g., 'CVE-2021-44228')
         cve_score: CVSS score (0.0 - 10.0)
         description: CVE description
-        recommendation: Remediation recommendation
-    
+        recommendation: Remediation recommendation (kept if None)
+        match_method: How the CVE was matched ('cpe')
+
     Returns:
         vuln_id (int)
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    
+
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        
+
         cursor.execute('''
-            SELECT vuln_id FROM vulnerabilities 
+            SELECT vuln_id, status FROM vulnerabilities
             WHERE tech_id = ? AND cve_id = ?
         ''', (tech_id, cve_id))
-        
+
         existing = cursor.fetchone()
-        
+
         if existing:
             vuln_id = existing['vuln_id']
-            
+
             cursor.execute('''
-                UPDATE vulnerabilities 
-                SET last_seen = ?, cve_score = ?, description = ?, recommendation = ?
+                UPDATE vulnerabilities
+                SET last_seen = ?, cve_score = ?, description = ?,
+                    recommendation = COALESCE(?, recommendation), match_method = ?
                 WHERE vuln_id = ?
-            ''', (now, cve_score, description, recommendation, vuln_id))
-            
+            ''', (now, cve_score, description, recommendation, match_method, vuln_id))
+
+            if existing['status'] == 'fixed':
+                cursor.execute('''
+                    UPDATE vulnerabilities
+                    SET status = 'open', status_note = 'Detected again on rescan', status_updated_at = ?
+                    WHERE vuln_id = ?
+                ''', (now, vuln_id))
+
             conn.commit()
             return vuln_id
         else:
             cursor.execute('''
-                INSERT INTO vulnerabilities (tech_id, cve_id, cve_score, description, recommendation, first_seen, last_seen, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 'open')
-            ''', (tech_id, cve_id, cve_score, description, recommendation, now, now))
-            
+                INSERT INTO vulnerabilities (tech_id, cve_id, cve_score, description, recommendation,
+                                             first_seen, last_seen, status, status_updated_at, match_method)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
+            ''', (tech_id, cve_id, cve_score, description, recommendation, now, now, now, match_method))
+
             conn.commit()
             return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def reconcile_vulnerabilities(http_id: int, seen_vuln_ids, min_cvss: float = 0.0) -> dict:
+    """
+    Close open findings on an HTTP service that a complete rescan no longer reports.
+
+    Only call this when every CVE lookup for the service succeeded, otherwise
+    a lookup failure would look like a fix.
+
+    - CPE-matched findings that disappear become 'fixed'.
+    - Legacy keyword-matched findings that CPE matching does not confirm
+      become 'false_positive'.
+
+    Args:
+        http_id: HTTP service that was just rescanned
+        seen_vuln_ids: vuln_ids reported by this rescan
+        min_cvss: CVSS filter the rescan used; findings below it were not
+                  looked for, so they are left alone
+
+    Returns:
+        {'fixed': int, 'false_positive': int}
+    """
+    seen = set(seen_vuln_ids)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            SELECT v.vuln_id, v.match_method
+            FROM vulnerabilities v
+            INNER JOIN technologies t ON t.tech_id = v.tech_id
+            WHERE t.http_id = ? AND v.status = 'open' AND COALESCE(v.cve_score, 0) >= ?
+        ''', (http_id, min_cvss))
+
+        counts = {'fixed': 0, 'false_positive': 0}
+        for row in cursor.fetchall():
+            if row['vuln_id'] in seen:
+                continue
+            if row['match_method'] == 'keyword':
+                status, note = 'false_positive', 'Legacy keyword match not confirmed by CPE matching'
+            else:
+                status, note = 'fixed', 'No longer detected on rescan'
+            cursor.execute('''
+                UPDATE vulnerabilities
+                SET status = ?, status_note = ?, status_updated_at = ?
+                WHERE vuln_id = ?
+            ''', (status, note, now, row['vuln_id']))
+            counts[status] += 1
+
+        conn.commit()
+        return counts
+    finally:
+        conn.close()
+
+
+def set_vulnerability_status(vuln_id: int, status: str, note: str = None) -> int:
+    """
+    Set the status of a finding from the dashboard.
+
+    The dashboard groups findings by CVE per host, so the status is applied to
+    every row with the same CVE on the same host.
+
+    Returns:
+        Number of rows updated (0 if vuln_id does not exist)
+    """
+    if status not in VULN_STATUSES:
+        raise ValueError(f"invalid status: {status}")
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            SELECT v.cve_id, h.host
+            FROM vulnerabilities v
+            INNER JOIN technologies t ON t.tech_id = v.tech_id
+            INNER JOIN http_services h ON h.http_id = t.http_id
+            WHERE v.vuln_id = ?
+        ''', (vuln_id,))
+        row = cursor.fetchone()
+        if not row:
+            return 0
+
+        cursor.execute('''
+            UPDATE vulnerabilities
+            SET status = ?, status_note = ?, status_updated_at = ?
+            WHERE cve_id = ? AND tech_id IN (
+                SELECT t.tech_id FROM technologies t
+                INNER JOIN http_services h ON h.http_id = t.http_id
+                WHERE h.host = ?
+            )
+        ''', (status, note, now, row['cve_id'], row['host']))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def get_cached_cves(cpe: str, max_age_hours: int = 24) -> Optional[list]:
+    """Return cached CVE matches for a CPE match string, or None if missing/stale."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute(
+            'SELECT result_json, fetched_at FROM cve_cache WHERE cpe = ?', (cpe,)
+        ).fetchone()
+        if not row:
+            return None
+        fetched = datetime.strptime(row['fetched_at'], "%Y-%m-%d %H:%M:%S")
+        if datetime.now() - fetched > timedelta(hours=max_age_hours):
+            return None
+        return json.loads(row['result_json'])
+    except sqlite3.OperationalError:
+        # cve_cache table missing (DB not migrated yet)
+        return None
+    finally:
+        conn.close()
+
+
+def set_cached_cves(cpe: str, cves: list) -> None:
+    """Store CVE matches for a CPE match string."""
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            'INSERT OR REPLACE INTO cve_cache (cpe, result_json, fetched_at) VALUES (?, ?, ?)',
+            (cpe, json.dumps(cves), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+        )
+        conn.commit()
+    except sqlite3.OperationalError:
+        pass
     finally:
         conn.close()
 
@@ -724,7 +875,7 @@ def get_new_cves_for_alert(min_cvss: float = 5.0) -> dict:
         FROM vulnerabilities v
         INNER JOIN technologies t ON t.tech_id = v.tech_id
         INNER JOIN http_services h ON h.http_id = t.http_id
-        WHERE v.cve_score >= ?
+        WHERE v.cve_score >= ? AND v.status = 'open'
         ORDER BY h.host, v.cve_score DESC
         """
         
@@ -1108,13 +1259,15 @@ def _get_cves_for_host(cursor, host: str) -> list:
                 ELSE NULL 
             END as recommendation,
             GROUP_CONCAT(DISTINCT t.tech_name) as tech_name,
-            GROUP_CONCAT(DISTINCT h.port_num) as ports
+            GROUP_CONCAT(DISTINCT h.port_num) as ports,
+            CASE WHEN SUM(v.status = 'open') > 0 THEN 'open' ELSE MAX(v.status) END as status,
+            MAX(v.status_note) as status_note
         FROM vulnerabilities v
         INNER JOIN technologies t ON t.tech_id = v.tech_id
         INNER JOIN http_services h ON h.http_id = t.http_id
         WHERE h.host = ?
         GROUP BY v.cve_id
-        ORDER BY MAX(v.cve_score) DESC
+        ORDER BY SUM(v.status = 'open') > 0 DESC, MAX(v.cve_score) DESC
     ''', (host,))
     
     cves = []
@@ -1125,6 +1278,7 @@ def _get_cves_for_host(cursor, host: str) -> list:
         cve['recommendation'] = cve['recommendation'] or None
         cve['tech_name'] = cve['tech_name'] or ''
         cve['ports'] = cve['ports'] or ''
+        cve['status'] = cve['status'] or 'open'
         cves.append(cve)
     
     return cves
@@ -1192,14 +1346,16 @@ def _get_cves_for_ip(cursor, ip_id: int) -> list:
                 ELSE NULL 
             END as recommendation,
             GROUP_CONCAT(DISTINCT t.tech_name) as tech_name,
-            GROUP_CONCAT(DISTINCT h.port_num) as ports
+            GROUP_CONCAT(DISTINCT h.port_num) as ports,
+            CASE WHEN SUM(v.status = 'open') > 0 THEN 'open' ELSE MAX(v.status) END as status,
+            MAX(v.status_note) as status_note
         FROM vulnerabilities v
         INNER JOIN technologies t ON t.tech_id = v.tech_id
         INNER JOIN http_services h ON h.http_id = t.http_id
         INNER JOIN ip_asset i ON i.ip_id = ?
         WHERE h.ip_id = ? OR h.host = i.ip_value
         GROUP BY v.cve_id
-        ORDER BY MAX(v.cve_score) DESC
+        ORDER BY SUM(v.status = 'open') > 0 DESC, MAX(v.cve_score) DESC
     ''', (ip_id, ip_id))
     
     cves = []
@@ -1210,6 +1366,7 @@ def _get_cves_for_ip(cursor, ip_id: int) -> list:
         cve['recommendation'] = cve['recommendation'] or None
         cve['tech_name'] = cve['tech_name'] or ''
         cve['ports'] = cve['ports'] or ''
+        cve['status'] = cve['status'] or 'open'
         cves.append(cve)
     
     return cves

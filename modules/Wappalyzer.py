@@ -48,6 +48,7 @@ from utils.db_utils import (
     upsert_http_service,
     upsert_technology,
     upsert_vulnerability,
+    reconcile_vulnerabilities,
     log_scan
 )
 
@@ -279,6 +280,9 @@ class WappalyzerScanner:
         
         self.stats['http_services_created'] += 1
         
+        seen_vuln_ids = []
+        all_lookups_ok = True
+        
         for tech_name, tech_data in technologies.items():
             versions = tech_data.get('versions', [])
             tech_version = versions[0] if versions else None
@@ -299,19 +303,21 @@ class WappalyzerScanner:
             self.stats['technologies_found'] += 1
             
             if self.enable_cve and tech_version:
-                tech_string = f"{tech_name} {tech_version}"
-                
                 time.sleep(self.cve_delay)
                 
-                cve_result = find_cve(tech_string, min_cvss=self.cvss_min)
+                cve_result = find_cve(tech_name, tech_version, min_cvss=self.cvss_min)
+                if not cve_result['ok']:
+                    all_lookups_ok = False
                 
                 for cve in cve_result.get('cves', []):
                     vuln_id = upsert_vulnerability(
                         tech_id=tech_id,
                         cve_id=cve['cve_id'],
                         cve_score=cve['cvss'],
-                        description=cve['description']
+                        description=cve['description'],
+                        match_method='cpe'
                     )
+                    seen_vuln_ids.append(vuln_id)
                     
                     result['cves'].append({
                         'cve_id': cve['cve_id'],
@@ -322,6 +328,14 @@ class WappalyzerScanner:
                     })
                     
                     self.stats['cves_found'] += 1
+        
+        # Close findings this rescan no longer reports. Skipped when any CVE
+        # lookup failed, so an NVD outage is never mistaken for a fix.
+        if self.enable_cve and all_lookups_ok:
+            closed = reconcile_vulnerabilities(http_id, seen_vuln_ids, min_cvss=self.cvss_min)
+            result['closed'] = closed
+            if any(closed.values()):
+                logger.info(f"Closed findings for {url}: {closed}")
         
         result['success'] = True
         self.stats['scanned'] += 1

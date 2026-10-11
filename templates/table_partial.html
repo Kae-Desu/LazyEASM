@@ -193,12 +193,12 @@
 
             <div class="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                 <h4 class="text-accent font-bold uppercase text-[10px] tracking-widest mb-4 flex items-center sticky top-0 bg-slate-50/50 dark:bg-lazy-dark/40 py-2">
-                    <i class="fas fa-shield-virus mr-2"></i>Vulnerability & AI Insights ({{ asset.cves|length if asset.cves else 0 }})
+                    <i class="fas fa-shield-virus mr-2"></i>Vulnerability & AI Insights ({{ asset.cves|selectattr('status', 'equalto', 'open')|list|length if asset.cves else 0 }} open{% if asset.cves %} / {{ asset.cves|length }} total{% endif %})
                 </h4>
                 
                 {% if asset.cves and asset.cves|length > 0 %}
                 {% for cve in asset.cves %}
-                <div class="bg-white dark:bg-lazy-dark p-5 rounded-2xl border border-border dark:border-white/5 shadow-sm mb-4 last:mb-0" data-vuln-id="{{ cve.vuln_id }}">
+                <div class="bg-white dark:bg-lazy-dark p-5 rounded-2xl border border-border dark:border-white/5 shadow-sm mb-4 last:mb-0{% if cve.status != 'open' %} opacity-60{% endif %}" data-vuln-id="{{ cve.vuln_id }}">
                     <div class="flex justify-between items-start mb-3">
                         <div class="flex flex-col">
                             <div class="flex items-center space-x-2">
@@ -209,8 +209,18 @@
                             <span class="text-[8px] text-slate-500 mt-1">Ports: {{ cve.ports }}</span>
                             {% endif %}
                         </div>
-                        <span class="text-[10px] font-bold text-slate-400 italic">CVSS: {{ cve.cve_score }}</span>
+                        <div class="flex flex-col items-end space-y-1">
+                            <span class="text-[10px] font-bold text-slate-400 italic">CVSS: {{ cve.cve_score }}</span>
+                            <select onclick="event.stopPropagation()" onchange="updateVulnStatus({{ cve.vuln_id }}, this)" data-csrf="{{ csrf_token }}" data-previous="{{ cve.status }}" aria-label="Finding status for {{ cve.cve_id }}" class="text-[10px] font-bold rounded-md px-1.5 py-0.5 bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 dark:text-white">
+                                {% for value, label in [('open', 'Open'), ('fixed', 'Fixed'), ('accepted', 'Accepted risk'), ('false_positive', 'False positive')] %}
+                                <option value="{{ value }}" {% if cve.status == value %}selected{% endif %}>{{ label }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
                     </div>
+                    {% if cve.status_note %}
+                    <p class="text-[9px] text-slate-400 italic mb-2">{{ cve.status_note }}</p>
+                    {% endif %}
                     <p class="text-xs text-slate-700 dark:text-slate-200 font-semibold mb-3 tracking-tight">{{ (cve.description or '')[:150] }}{% if (cve.description or '')|length > 150 %}...{% endif %}</p>
                     
                     <div class="mt-4 p-4 bg-accent/5 dark:bg-accent/10 rounded-xl border-l-2 border-accent" id="reco-{{ cve.vuln_id }}">

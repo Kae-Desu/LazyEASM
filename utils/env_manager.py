@@ -14,13 +14,13 @@ EDITABLE_KEYS = [
     'DISCORD_WEBHOOK_URL',
     'DISCORD_USER_ID',
     'SECURITYTRAILS_API_KEY',
-    'VULNERS_API_KEY',
+    'NVD_API_KEY',
     'GEMINI_API_KEY'
 ]
 
 SENSITIVE_KEYS = [
     'SECURITYTRAILS_API_KEY',
-    'VULNERS_API_KEY',
+    'NVD_API_KEY',
     'GEMINI_API_KEY'
 ]
 
@@ -28,7 +28,7 @@ KEY_DISPLAY_NAMES = {
     'DISCORD_WEBHOOK_URL': 'Discord Webhook URL',
     'DISCORD_USER_ID': 'Discord User ID',
     'SECURITYTRAILS_API_KEY': 'SecurityTrails API Key',
-    'VULNERS_API_KEY': 'Vulners API Key',
+    'NVD_API_KEY': 'NVD API Key',
     'GEMINI_API_KEY': 'Gemini API Key'
 }
 
@@ -317,7 +317,7 @@ if __name__ == '__main__':
         ('DISCORD_WEBHOOK_URL', 'https://invalid.com/webhook'),
         ('DISCORD_USER_ID', '123456789012345678'),
         ('DISCORD_USER_ID', 'abc123'),
-        ('VULNERS_API_KEY', 'any-value-here'),
+        ('NVD_API_KEY', 'any-value-here'),
     ]
     for key, val in test_cases:
         valid, err = validate_config(key, val)

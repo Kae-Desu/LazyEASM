@@ -99,7 +99,8 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 ### Phase 1: Active Scanning
 - **Port Scanning** - Nmap top 100 ports with service detection
 - **Technology Fingerprinting** - Wappalyzer integration (100+ technologies)
-- **CVE Matching** - Vulners API with CVSS filtering (min 5.0)
+- **CVE Matching** - NVD CPE + version-range matching with CVSS filtering (min 5.0)
+- **Finding Lifecycle** - Open / fixed / accepted / false positive; findings no longer seen on rescan are closed automatically and reopened if they return
 - **AI Recommendations** - Google Gemini-powered vulnerability analysis
 - **Discord Notifications** - Real-time alerts for completed scans and CVEs
 
@@ -285,7 +286,7 @@ ADMIN_PASS=randomly_generated       # Set by utils/installation/install.sh
 
 # API Keys (enhances discovery and CVE matching)
 SECURITYTRAILS_API_KEY=your_key    # Subdomain enumeration
-VULNERS_API_KEY=your_key           # CVE lookup
+NVD_API_KEY=your_key               # Optional, raises NVD rate limit
 GEMINI_API_KEY=your_key            # AI recommendations
 
 # Notifications
@@ -308,7 +309,7 @@ DISCORD_USER_ID=your_discord_id    # User to ping on alerts
 | `ADMIN_USER` | Yes | Admin username |
 | `ADMIN_PASS` | Yes | Admin password |
 | `SECURITYTRAILS_API_KEY` | No | SecurityTrails API key |
-| `VULNERS_API_KEY` | No | Vulners API key for CVE |
+| `NVD_API_KEY` | No | NVD API key (higher CVE lookup rate limit) |
 | `GEMINI_API_KEY` | No | Google Gemini API key |
 | `DISCORD_WEBHOOK_URL` | No | Discord webhook URL |
 | `DISCORD_USER_ID` | No | Discord user ID to ping |
@@ -454,7 +455,7 @@ LazyEASM/
 │   ├── phase1_runner.py       # Phase 1 scanning pipeline
 │   ├── phase2_dirsearch.py    # Phase 2 deep scan runner
 │   ├── Wappalyzer.py          # Technology fingerprinting
-│   ├── CVEmatch.py            # CVE lookup via Vulners
+│   ├── CVEmatch.py            # CVE lookup via NVD (CPE matching)
 │   ├── AskAI.py               # Gemini AI recommendations
 │   └── Notify.py              # Discord notifications
 ├── utils/
@@ -541,7 +542,7 @@ phase_status ─── Current phase tracking
 | **Port Scanning** | Nmap |
 | **Tech Fingerprinting** | python-Wappalyzer |
 | **Directory Discovery** | Dirsearch |
-| **CVE Database** | Vulners API + NVD (nvdlib) |
+| **CVE Database** | NVD API 2.0 (CPE matching) |
 
 ## Known Limitations
 
@@ -570,5 +571,5 @@ MIT License - See [LICENSE](LICENSE) for details.
 
 - SecurityTrails API for subdomain enumeration
 - crt.sh (Certificate Transparency Logs) for certificate discovery
-- Vulners Database for CVE information
+- NVD (National Vulnerability Database) for CVE information
 - Wappalyzer for technology fingerprinting patterns

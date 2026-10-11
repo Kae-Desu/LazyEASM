@@ -2,274 +2,327 @@
 Module: CVEmatch.py
 Purpose: CVE vulnerability matching for detected technologies
 Flow:
-    1. Query NVD API for CVEs
-    2. Fallback to Vulners API
-    3. Extract CVSS score and description
-    4. Return structured CVE data
+    1. Map the Wappalyzer technology name to its CPE (vendor:product)
+    2. Query the NVD API with a versioned CPE match string
+    3. Keep only CVEs whose vulnerable configuration covers that exact version
+    4. Return structured CVE data plus an 'ok' flag so callers can tell
+       "no CVEs" apart from "lookup failed"
+
+Technologies without a CPE in the Wappalyzer data are not matched. Keyword
+search was removed because it matched CVEs by name only and produced many
+false positives.
 """
 
 import os
-import sys
 import re
+import sys
+import json
+import time
+import logging
+from functools import lru_cache
+from typing import Dict, List, Optional, Tuple
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.config import get_env
-
-try:
-    import nvdlib
-    NVDLIB_AVAILABLE = True
-except ImportError:
-    NVDLIB_AVAILABLE = False
-
 import requests
 
-VULNERS_API_KEY = get_env('VULNERS_API_KEY', '')
-VULNERS_URL = "https://vulners.com/api/v3/search/lucene"
+from utils.config import get_env
+
+logger = logging.getLogger(__name__)
+
+NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+NVD_PAGE_SIZE = 2000
+NVD_RETRY_DELAY = 6.0  # NVD allows 5 requests / 30s without an API key
+
+# NVD renamed some products; Wappalyzer still uses the old CPE.
+CPE_ALIASES = {
+    ('nginx', 'nginx'): [('f5', 'nginx')],
+    ('microsoft', 'internet_information_server'): [('microsoft', 'internet_information_services')],
+}
 
 
-def get_cvss_score(cve) -> float:
-    """
-    Extract CVSS score from NVD CVE object.
-    
-    Args:
-        cve: nvdlib CVE object
-    
-    Returns:
-        CVSS score (float) or 0.0 if not available
-    """
+class CVELookupError(Exception):
+    """NVD lookup failed (network, rate limit, bad response)."""
+
+
+@lru_cache(maxsize=1)
+def _load_wappalyzer_cpes() -> Dict[str, Tuple[str, str, str]]:
+    """Map Wappalyzer technology name -> (part, vendor, product)."""
     try:
-        if hasattr(cve, 'metrics') and cve.metrics:
-            metrics = cve.metrics
-            
-            if hasattr(metrics, 'cvssMetricV31') and metrics.cvssMetricV31:
-                return metrics.cvssMetricV31[0].cvssData.baseScore
-            elif hasattr(metrics, 'cvssMetricV30') and metrics.cvssMetricV30:
-                return metrics.cvssMetricV30[0].cvssData.baseScore
-            elif hasattr(metrics, 'cvssMetricV2') and metrics.cvssMetricV2:
-                return metrics.cvssMetricV2[0].cvssData.baseScore
-        
-        if hasattr(cve, 'cvssScore') and cve.cvssScore:
-            return float(cve.cvssScore)
-        
-        return 0.0
-    except Exception:
-        return 0.0
+        import Wappalyzer
+    except ImportError:
+        return {}
 
-
-def find_nvd(technology: str, limit: int = 10):
-    """
-    Search NVD API for CVEs related to technology.
-    
-    Args:
-        technology: Technology name (e.g., 'nginx 1.20.1')
-        limit: Maximum CVEs to return
-    
-    Returns:
-        List of CVE dicts: [{'cve_id': str, 'cvss': float, 'description': str}, ...]
-    """
-    if not NVDLIB_AVAILABLE:
-        return []
-    
+    path = os.path.join(os.path.dirname(Wappalyzer.__file__), 'data', 'technologies.json')
     try:
-        cve_list = list(nvdlib.searchCVE_V2(keywordSearch=technology, limit=limit))
-        if not cve_list:
-            return []
-        
-        cve_list.sort(key=lambda x: get_cvss_score(x), reverse=True)
-        
-        results = []
-        for cve in cve_list[:limit]:
-            cve_id = cve.id
-            cvss_score = get_cvss_score(cve)
-            
-            description = None
-            if hasattr(cve, 'descriptions') and cve.descriptions:
-                description = cve.descriptions[0].value
-            
-            results.append({
-                'cve_id': cve_id,
-                'cvss': cvss_score,
-                'description': description or 'No description available'
-            })
-        
-        return results
-    except Exception:
-        return []
+        with open(path, encoding='utf8') as f:
+            data = json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+    cpes = {}
+    for name, tech in data.get('technologies', data).items():
+        parsed = parse_cpe(tech.get('cpe') or '')
+        if parsed:
+            cpes[name.lower()] = parsed
+    return cpes
 
 
-def get_cve_details(cve_id: str):
+def parse_cpe(cpe: str) -> Optional[Tuple[str, str, str]]:
     """
-    Get CVE details from NVD including CVSS score.
-    
-    Args:
-        cve_id: CVE identifier (e.g., 'CVE-2023-1234')
-    
-    Returns:
-        Dict: {'cve_id': str, 'cvss': float, 'description': str} or None
+    Parse a CPE 2.2 URI or CPE 2.3 string into (part, vendor, product).
+
+    Examples:
+        'cpe:/a:nginx:nginx' -> ('a', 'nginx', 'nginx')
+        'cpe:2.3:a:f5:nginx:1.20.1:*:*:*:*:*:*:*' -> ('a', 'f5', 'nginx')
     """
-    if not NVDLIB_AVAILABLE:
+    if cpe.startswith('cpe:2.3:'):
+        fields = cpe.split(':')[2:5]
+    elif cpe.startswith('cpe:/'):
+        fields = cpe[len('cpe:/'):].split(':')[:3]
+    else:
         return None
-    
-    try:
-        results = list(nvdlib.searchCVE(cveId=cve_id.upper()))
-        if results:
-            cve = results[0]
-            cvss_score = get_cvss_score(cve)
-            description = cve.descriptions[0].value if hasattr(cve, 'descriptions') else None
-            
-            return {
-                'cve_id': cve_id.upper(),
-                'cvss': cvss_score,
-                'description': description or 'No description available'
-            }
-    except Exception:
-        pass
-    
-    return None
+    if len(fields) != 3 or not all(fields):
+        return None
+    return fields[0], fields[1].lower(), fields[2].lower()
 
 
-def find_vulners(technology: str):
+def get_cpe_for_technology(tech_name: str) -> Optional[Tuple[str, str, str]]:
+    """Return (part, vendor, product) for a Wappalyzer technology name, or None."""
+    return _load_wappalyzer_cpes().get((tech_name or '').lower())
+
+
+def parse_version(version: str) -> Tuple[int, ...]:
     """
-    Search Vulners API for CVEs related to technology.
-    
-    Args:
-        technology: Technology name
-    
-    Returns:
-        List of CVE dicts: [{'cve_id': str, 'cvss': float, 'description': str}, ...]
+    Turn a version string into a comparable tuple of ints.
+
+    '1.20.1' -> (1, 20, 1); '2.4.7-ubuntu' -> (2, 4, 7)
     """
-    if not VULNERS_API_KEY:
-        return []
-    
-    headers = {
-        "Content-Type": "application/json",
-        "X-Api-Key": VULNERS_API_KEY
+    match = re.match(r'\d+(?:\.\d+)*', (version or '').strip().lstrip('vV'))
+    if not match:
+        return ()
+    return tuple(int(p) for p in match.group(0).split('.'))
+
+
+def _cmp(a: Tuple[int, ...], b: Tuple[int, ...]) -> int:
+    width = max(len(a), len(b))
+    a = a + (0,) * (width - len(a))
+    b = b + (0,) * (width - len(b))
+    return (a > b) - (a < b)
+
+
+def version_matches(version: str, cpe_match: dict) -> bool:
+    """
+    Check whether a version is covered by one NVD cpeMatch entry.
+
+    Handles an exact version in the criteria string and the
+    versionStart/End Including/Excluding range fields.
+    """
+    ours = parse_version(version)
+    if not ours:
+        return False
+
+    criteria_version = cpe_match.get('criteria', '').split(':')[5:6]
+    criteria_version = criteria_version[0] if criteria_version else '*'
+
+    if criteria_version == '-':
+        # "not applicable" - no version information to match against
+        return False
+    if criteria_version != '*':
+        return _cmp(ours, parse_version(criteria_version)) == 0
+
+    bounds = {
+        'versionStartIncluding': lambda c: c >= 0,
+        'versionStartExcluding': lambda c: c > 0,
+        'versionEndIncluding': lambda c: c <= 0,
+        'versionEndExcluding': lambda c: c < 0,
     }
-    
-    payload = {
-        "query": technology,
-        "skip": 0,
-        "size": 10,
-        "sort": "cvss",
-        "order": "desc",
-        "fields": ["description", "title", "cvelist", "cvss"]
-    }
-    
-    try:
-        response = requests.post(
-            VULNERS_URL,
-            headers=headers,
-            json=payload,
-            timeout=30
-        )
-        
-        if response.status_code == 200:
+    for key, accept in bounds.items():
+        if key in cpe_match:
+            bound = parse_version(cpe_match[key])
+            if not bound or not accept(_cmp(ours, bound)):
+                return False
+
+    # '*' with no range means NVD lists every version as affected
+    return True
+
+
+def cve_affects(cve: dict, products: List[Tuple[str, str]], version: str) -> bool:
+    """True if any vulnerable cpeMatch for one of the products covers the version."""
+    for config in cve.get('configurations', []):
+        for node in config.get('nodes', []):
+            if node.get('negate'):
+                continue
+            for cpe_match in node.get('cpeMatch', []):
+                if not cpe_match.get('vulnerable'):
+                    continue
+                parsed = parse_cpe(cpe_match.get('criteria', ''))
+                if not parsed or (parsed[1], parsed[2]) not in products:
+                    continue
+                if version_matches(version, cpe_match):
+                    return True
+    return False
+
+
+def get_cvss_score(cve: dict) -> float:
+    """Extract the best available CVSS base score from an NVD CVE dict."""
+    metrics = cve.get('metrics', {})
+    for key in ('cvssMetricV31', 'cvssMetricV30', 'cvssMetricV40', 'cvssMetricV2'):
+        entries = metrics.get(key) or []
+        primary = [m for m in entries if m.get('type') == 'Primary'] or entries
+        if primary:
+            try:
+                return float(primary[0]['cvssData']['baseScore'])
+            except (KeyError, TypeError, ValueError):
+                continue
+    return 0.0
+
+
+def _get_description(cve: dict) -> str:
+    for desc in cve.get('descriptions', []):
+        if desc.get('lang') == 'en':
+            return desc.get('value') or 'No description available'
+    return 'No description available'
+
+
+def fetch_nvd(match_string: str) -> List[dict]:
+    """
+    Fetch all CVEs for a CPE match string from NVD.
+
+    Raises:
+        CVELookupError: on network errors, rate limiting, or bad responses
+    """
+    headers = {}
+    api_key = get_env('NVD_API_KEY', '')
+    if api_key:
+        headers['apiKey'] = api_key
+
+    cves = []
+    start = 0
+    while True:
+        params = {
+            'virtualMatchString': match_string,
+            'resultsPerPage': NVD_PAGE_SIZE,
+            'startIndex': start,
+            'noRejected': '',
+        }
+        response = None
+        for attempt in range(2):
+            try:
+                response = requests.get(NVD_URL, params=params, headers=headers, timeout=60)
+            except requests.RequestException as e:
+                raise CVELookupError(f"NVD request failed: {e}") from e
+            if response.status_code in (403, 429, 503) and attempt == 0:
+                time.sleep(NVD_RETRY_DELAY)
+                continue
+            break
+
+        if response.status_code != 200:
+            raise CVELookupError(f"NVD returned HTTP {response.status_code}")
+        try:
             data = response.json()
-            search_results = data.get('data', {}).get('search', [])
-            
-            if not search_results:
-                return []
-            
-            results = []
-            for item in search_results[:10]:
-                source_data = item.get('_source', {})
-                cvelist = source_data.get('cvelist', [])
-                description = source_data.get('description', 'No description available')
-                cvss_score = source_data.get('cvss', 0.0)
-                
-                if isinstance(cvss_score, (int, float)):
-                    cvss_score = float(cvss_score)
-                else:
-                    cvss_score = 0.0
-                
-                for cve_id in cvelist:
-                    results.append({
-                        'cve_id': cve_id.upper() if cve_id else None,
-                        'cvss': cvss_score,
-                        'description': description
-                    })
-            
-            return results
-        else:
-            return []
-    
-    except Exception:
-        return []
+        except ValueError as e:
+            raise CVELookupError("NVD returned invalid JSON") from e
+
+        cves.extend(item['cve'] for item in data.get('vulnerabilities', []) if 'cve' in item)
+        start += data.get('resultsPerPage', 0) or NVD_PAGE_SIZE
+        if start >= data.get('totalResults', 0):
+            return cves
 
 
-def find_cve(technology: str, min_cvss: float = 0.0) -> dict:
+def find_cve(tech_name: str, version: str, min_cvss: float = 0.0, use_cache: bool = True) -> dict:
     """
-    Find CVEs for a given technology.
-    
-    Searches NVD first, then Vulners as fallback.
-    Filters by minimum CVSS score.
-    
+    Find CVEs affecting a specific technology version.
+
     Args:
-        technology: Technology name with version (e.g., 'nginx 1.20.1')
-        min_cvss: Minimum CVSS score to include (default 0.0)
-    
+        tech_name: Wappalyzer technology name (e.g., 'Nginx')
+        version: Detected version (e.g., '1.20.1')
+        min_cvss: Minimum CVSS score to include
+        use_cache: Use the cve_cache table (24h TTL)
+
     Returns:
         Dict: {
-            'technology': str,
-            'cves': [
-                {'cve_id': str, 'cvss': float, 'description': str, 'tech_name': str},
-                ...
-            ]
+            'technology': 'Nginx 1.20.1',
+            'ok': bool,          # False if the NVD lookup failed
+            'method': 'cpe' | 'no_cpe' | 'no_version',
+            'error': str | None,
+            'cves': [{'cve_id', 'cvss', 'description', 'tech_name'}, ...]
         }
     """
-    tech_name = technology.split()[0] if technology else 'unknown'
-    
-    cves = find_nvd(technology)
-    
-    if not cves:
-        cves = find_vulners(technology)
-    
-    valid_cves = []
-    seen_ids = set()
-    
-    for cve in cves:
-        cve_id = cve.get('cve_id')
-        cvss = cve.get('cvss', 0.0)
-        description = cve.get('description', 'No description available')
-        
-        if not cve_id or cve_id in seen_ids:
-            continue
-        
-        if cvss < min_cvss:
-            continue
-        
-        seen_ids.add(cve_id)
-        valid_cves.append({
-            'cve_id': cve_id,
-            'cvss': cvss,
-            'description': description,
-            'tech_name': tech_name
-        })
-    
-    return {
-        'technology': technology,
-        'cves': valid_cves
+    result = {
+        'technology': f"{tech_name} {version or ''}".strip(),
+        'ok': True,
+        'method': 'cpe',
+        'error': None,
+        'cves': [],
     }
+
+    if not version or not parse_version(version):
+        result['method'] = 'no_version'
+        return result
+
+    cpe = get_cpe_for_technology(tech_name)
+    if not cpe:
+        result['method'] = 'no_cpe'
+        return result
+
+    part, vendor, product = cpe
+    products = [(vendor, product)] + CPE_ALIASES.get((vendor, product), [])
+
+    matches = {}
+    for v, p in products:
+        match_string = f"cpe:2.3:{part}:{v}:{p}:{version}"
+
+        cached = None
+        if use_cache:
+            from utils.db_utils import get_cached_cves
+            cached = get_cached_cves(match_string)
+
+        if cached is None:
+            try:
+                raw = fetch_nvd(match_string)
+            except CVELookupError as e:
+                logger.warning(f"CVE lookup failed for {match_string}: {e}")
+                result['ok'] = False
+                result['error'] = str(e)
+                result['cves'] = []
+                return result
+
+            cached = [
+                {'cve_id': cve['id'], 'cvss': get_cvss_score(cve), 'description': _get_description(cve)}
+                for cve in raw
+                if cve.get('id') and cve_affects(cve, products, version)
+            ]
+            if use_cache:
+                from utils.db_utils import set_cached_cves
+                set_cached_cves(match_string, cached)
+
+        for cve in cached:
+            matches.setdefault(cve['cve_id'], cve)
+
+    result['cves'] = sorted(
+        (
+            {**cve, 'tech_name': tech_name}
+            for cve in matches.values()
+            if cve['cvss'] >= min_cvss
+        ),
+        key=lambda c: c['cvss'],
+        reverse=True,
+    )
+    return result
 
 
 if __name__ == '__main__':
-    import logging
+    import argparse
+
     logging.basicConfig(level=logging.INFO)
-    
-    print("Testing CVEmatch...")
-    print(f"Vulners API Key configured: {'Yes' if VULNERS_API_KEY else 'No'}")
-    print(f"NVDlib available: {'Yes' if NVDLIB_AVAILABLE else 'No'}")
-    
-    test_tech = 'apache 2.4.7'
-    print(f"\nSearching CVEs for: {test_tech}")
-    
-    result = find_cve(test_tech, min_cvss=5.0)
-    
-    if result['cves']:
-        print(f"Found {len(result['cves'])} CVEs:")
-        for cve in result['cves']:
-            print(f"  {cve['cve_id']} (CVSS: {cve['cvss']})")
-            print(f"    {cve['description'][:100]}...")
-    else:
-        print("No CVEs found or API not configured")
+    parser = argparse.ArgumentParser(description='Look up CVEs for a technology version')
+    parser.add_argument('tech_name', help="Wappalyzer technology name, e.g. 'Nginx'")
+    parser.add_argument('version', help="Version, e.g. '1.20.1'")
+    parser.add_argument('--min-cvss', type=float, default=0.0)
+    args = parser.parse_args()
+
+    found = find_cve(args.tech_name, args.version, min_cvss=args.min_cvss, use_cache=False)
+    print(f"{found['technology']}: method={found['method']} ok={found['ok']} error={found['error']}")
+    for cve in found['cves']:
+        print(f"  {cve['cve_id']} (CVSS {cve['cvss']}) {cve['description'][:90]}")
