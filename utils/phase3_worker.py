@@ -4,6 +4,8 @@ Phase 3 Worker - Background threads for continuous monitoring.
 Orchestrates:
     - Liveness checker (every 5 minutes)
     - CT logs monitor (every 1 hour)
+    - Wappalyzer re-scan (every 24 hours)
+    - Subdomain takeover check (every 24 hours)
 
 Exports:
     - start_phase3_workers()
@@ -23,6 +25,7 @@ _phase3_running = False
 _liveness_thread = None
 _ctlogs_thread = None
 _wappalyzer_thread = None
+_takeover_thread = None
 
 
 def send_liveness_notification(result: dict):
@@ -172,6 +175,34 @@ def send_wappalyzer_notification(result: dict):
         logger.error(f"Failed to send Wappalyzer notification: {e}")
 
 
+def send_takeover_notification(result: dict):
+    """
+    Send Discord notification for new or reopened takeover findings.
+
+    Args:
+        result: Dict from run_takeover_check()
+    """
+    try:
+        from modules.Notify import send_message
+
+        lines = [
+            "**Subdomain Takeover Check**",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"\n**Hosts Checked:** {result['hosts_checked']}",
+            f"**New Findings:** {len(result['new_findings'])}",
+            "",
+        ]
+        for finding in result['new_findings'][:10]:
+            lines.append(f"• [{finding['severity'].upper()}] {finding['host']}: {finding['title']}")
+        if len(result['new_findings']) > 10:
+            lines.append(f"• ... and {len(result['new_findings']) - 10} more")
+
+        send_message('\n'.join(lines))
+
+    except Exception as e:
+        logger.error(f"Failed to send takeover notification: {e}")
+
+
 def liveness_loop(interval_min: int = 5):
     """
     Liveness checker loop.
@@ -298,13 +329,54 @@ def wappalyzer_loop(interval_hr: int = 24):
     logger.info("Wappalyzer monitor thread stopped")
 
 
+def takeover_loop(interval_hr: int = 24):
+    """
+    Subdomain takeover check loop.
+
+    Runs every interval_hr hours if Phase 3 is enabled.
+    Checks every domain/subdomain, including ones marked down.
+
+    Args:
+        interval_hr: Interval in hours (default: 24)
+    """
+    global _phase3_running
+
+    from utils.takeover_checker import run_takeover_check
+    from utils.db_utils import get_setting
+
+    logger.info("Takeover monitor thread started")
+
+    while _phase3_running:
+        try:
+            if get_setting('phase3_enabled') == '1':
+                logger.info("Running subdomain takeover check...")
+                result = run_takeover_check()
+
+                if result.get('new_findings'):
+                    send_takeover_notification(result)
+            else:
+                logger.debug("Phase 3 disabled, skipping takeover check")
+
+        except Exception as e:
+            logger.error(f"Takeover check error: {e}")
+
+        # Sleep in small intervals to allow quick shutdown
+        sleep_seconds = interval_hr * 3600
+        elapsed = 0
+        while elapsed < sleep_seconds and _phase3_running:
+            time.sleep(5)
+            elapsed += 5
+
+    logger.info("Takeover monitor thread stopped")
+
+
 def start_phase3_workers():
     """
     Start all Phase 3 monitoring threads.
     
     Checks settings for enabled status and intervals.
     """
-    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread
+    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread, _takeover_thread
     
     from utils.db_utils import get_setting
     
@@ -324,8 +396,9 @@ def start_phase3_workers():
     liveness_interval = int(get_setting('liveness_interval_min') or '5')
     ctlogs_interval = int(get_setting('ctlogs_interval_hr') or '1')
     wappalyzer_interval = int(get_setting('wappalyzer_interval_hr') or '24')
+    takeover_interval = int(get_setting('takeover_interval_hr') or '24')
     
-    logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr, wappalyzer: {wappalyzer_interval}hr)")
+    logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr, wappalyzer: {wappalyzer_interval}hr, takeover: {takeover_interval}hr)")
     
     # Start liveness thread
     _liveness_thread = threading.Thread(
@@ -354,6 +427,15 @@ def start_phase3_workers():
     )
     _wappalyzer_thread.start()
     
+    # Start subdomain takeover thread
+    _takeover_thread = threading.Thread(
+        target=takeover_loop,
+        args=(takeover_interval,),
+        daemon=True,
+        name='Phase3-Takeover'
+    )
+    _takeover_thread.start()
+    
     logger.info("Phase 3 workers started")
 
 
@@ -375,6 +457,9 @@ def stop_phase3_workers():
     
     if _wappalyzer_thread and _wappalyzer_thread.is_alive():
         _wappalyzer_thread.join(timeout=10)
+
+    if _takeover_thread and _takeover_thread.is_alive():
+        _takeover_thread.join(timeout=10)
     
     logger.info("Phase 3 workers stopped")
 
@@ -401,9 +486,11 @@ def get_phase3_status() -> dict:
         'last_liveness_check': get_setting('last_liveness_check') or '-',
         'last_ctlogs_check': get_setting('last_ctlogs_check') or '-',
         'last_wappalyzer_check': get_setting('last_wappalyzer_check') or '-',
+        'last_takeover_check': get_setting('last_takeover_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
         'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
-        'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24')
+        'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
+        'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24')
     }
 
 

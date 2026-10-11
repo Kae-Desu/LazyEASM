@@ -116,6 +116,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Liveness Monitoring** - ICMP/TCP checks every 5 minutes
 - **CT Logs Monitoring** - Poll for new subdomains every hour
 - **Wappalyzer Re-scanning** - Periodic technology re-fingerprinting (default: every 24 hours)
+- **Subdomain Takeover Detection** - Follows CNAME chains for every domain/subdomain (default: every 24 hours); flags services known to allow takeover (NXDOMAIN or unclaimed-page fingerprint) and dangling CNAMEs. Findings use the open / fixed / accepted / false positive lifecycle. Manual trigger: `/api/phase3/takeover/check`
 - **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
   - Each threshold notified exactly once per certificate
   - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)
@@ -469,6 +470,7 @@ LazyEASM/
 │   ├── phase3_worker.py       # Phase 3 monitoring orchestrator
 │   ├── liveness_checker.py    # ICMP/TCP liveness checks
 │   ├── wappalyzer_monitor.py  # Periodic Wappalyzer re-scanning (Phase 3)
+│   ├── takeover_checker.py    # Subdomain takeover / dangling CNAME checks (Phase 3)
 │   ├── process_utils.py       # Process detection utilities
 │   └── ct_monitor.py         # CT logs polling + cert tracking
 ├── templates/
@@ -578,3 +580,4 @@ Releases published before this change remain available under the MIT License.
 - crt.sh (Certificate Transparency Logs) for certificate discovery
 - NVD (National Vulnerability Database) for CVE information
 - Wappalyzer for technology fingerprinting patterns
+- [can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz) by EdOverflow and contributors for subdomain takeover fingerprints (CC BY 4.0, see [data/README.md](data/README.md))

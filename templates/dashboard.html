@@ -350,6 +350,10 @@
                                 <span class="text-slate-400">Tech Scan:</span>
                                 <span id="last-wappalyzer" class="font-mono dark:text-white">-</span>
                             </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Takeover:</span>
+                                <span id="last-takeover" class="font-mono dark:text-white">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -815,11 +819,12 @@
             });
         }
 
-        async function updateVulnStatus(vulnId, select) {
+        // Status dropdown for CVEs and security findings
+        async function updateStatus(url, select) {
             const status = select.value;
             select.disabled = true;
             try {
-                const response = await fetch(`/api/vulnerabilities/${vulnId}/status`, {
+                const response = await fetch(url, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ status, csrf_token: select.dataset.csrf })
@@ -828,7 +833,7 @@
                 if (!response.ok || !data.success) throw new Error(data.error || 'Failed to update status');
 
                 select.dataset.previous = status;
-                const card = select.closest('[data-vuln-id]');
+                const card = select.closest('[data-status-card]');
                 if (card) card.classList.toggle('opacity-60', status !== 'open');
                 showToast('Finding status updated', 'success');
             } catch (err) {
@@ -1086,6 +1091,7 @@
                 document.getElementById('last-liveness').textContent = formatRelativeTime(data.last_liveness_check);
                 document.getElementById('last-ctlogs').textContent = formatRelativeTime(data.last_ctlogs_check);
                 document.getElementById('last-wappalyzer').textContent = formatRelativeTime(data.last_wappalyzer_check);
+                document.getElementById('last-takeover').textContent = formatRelativeTime(data.last_takeover_check);
                 
                 // Start or stop auto-refresh based on enabled status
                 if (data.enabled) {

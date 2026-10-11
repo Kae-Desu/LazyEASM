@@ -436,6 +436,27 @@ def init_db():
         )
     ''')
 
+    # Non-CVE security findings (subdomain takeover, misconfigurations).
+    # Same lifecycle as vulnerabilities: open / fixed / accepted / false_positive.
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS findings (
+            finding_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            finding_type TEXT NOT NULL,
+            host TEXT NOT NULL,
+            title TEXT NOT NULL,
+            severity TEXT NOT NULL,
+            evidence TEXT,
+            status TEXT DEFAULT 'open',
+            status_note TEXT,
+            status_updated_at TEXT,
+            first_seen TEXT,
+            last_seen TEXT,
+            UNIQUE(finding_type, host)
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_host ON findings(host)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_status ON findings(status)')
+
     # Create token_blacklist table if not exists (migration for existing DBs)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS token_blacklist (

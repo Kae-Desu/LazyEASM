@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
 from utils.env_manager import set_env_key, delete_env_key, get_config_for_ui, EDITABLE_KEYS
-from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, VULN_STATUSES
+from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
 from utils.asset_repository import AssetQueryError, get_asset_detail, list_assets
@@ -846,6 +846,29 @@ def update_vulnerability_status(vuln_id):
     return jsonify({'success': True, 'vuln_id': vuln_id, 'status': status, 'updated': updated})
 
 
+@app.route('/api/findings/<int:finding_id>/status', methods=['POST'])
+@token_required
+@csrf_protected
+def update_finding_status(finding_id):
+    data = request.get_json(silent=True) or {}
+    status = data.get('status')
+    note = (data.get('note') or '').strip()[:500] or None
+
+    if status not in VULN_STATUSES:
+        return jsonify({'success': False, 'error': f"status must be one of: {', '.join(VULN_STATUSES)}"}), 400
+
+    try:
+        updated = set_finding_status(finding_id, status, note)
+    except Exception as e:
+        logger.error(f"Error updating finding {finding_id} status: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Failed to update status'}), 500
+
+    if not updated:
+        return jsonify({'success': False, 'error': 'Finding not found'}), 404
+
+    return jsonify({'success': True, 'finding_id': finding_id, 'status': status})
+
+
 @app.route('/process_assets', methods=['POST'])
 @token_required
 @csrf_protected
@@ -1226,9 +1249,11 @@ def phase3_status():
         'last_liveness_check': status['last_liveness_check'],
         'last_ctlogs_check': status['last_ctlogs_check'],
         'last_wappalyzer_check': status['last_wappalyzer_check'],
+        'last_takeover_check': status['last_takeover_check'],
         'liveness_interval_min': status['liveness_interval_min'],
         'ctlogs_interval_hr': status['ctlogs_interval_hr'],
         'wappalyzer_interval_hr': status['wappalyzer_interval_hr'],
+        'takeover_interval_hr': status['takeover_interval_hr'],
         'assets': {
             'total': liveness['total'],
             'up': liveness['up'],
@@ -1323,6 +1348,24 @@ def phase3_wappalyzer_check():
     if result.get('new_cves'):
         send_wappalyzer_notification(result)
     
+    return jsonify({
+        'success': True,
+        'result': result
+    })
+
+
+@app.route('/api/phase3/takeover/check', methods=['POST'])
+@token_required
+def phase3_takeover_check():
+    """Manually trigger a subdomain takeover check."""
+    from utils.takeover_checker import run_takeover_check
+    from utils.phase3_worker import send_takeover_notification
+
+    result = run_takeover_check()
+
+    if result.get('new_findings'):
+        send_takeover_notification(result)
+
     return jsonify({
         'success': True,
         'result': result

@@ -809,6 +809,155 @@ def set_cached_cves(cpe: str, cves: list) -> None:
         conn.close()
 
 
+def upsert_finding(finding_type: str, host: str, title: str, severity: str,
+                   evidence: dict = None) -> tuple:
+    """
+    Create or refresh a non-CVE finding (e.g. subdomain takeover).
+
+    A 'fixed' finding is reopened when detected again; 'accepted' and
+    'false_positive' keep their status.
+
+    Returns:
+        (finding_id, alert) - alert is True when the finding is new or reopened
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        evidence_json = json.dumps(evidence or {}, sort_keys=True)
+
+        cursor.execute('''
+            SELECT finding_id, status FROM findings WHERE finding_type = ? AND host = ?
+        ''', (finding_type, host))
+        existing = cursor.fetchone()
+
+        if existing:
+            finding_id = existing['finding_id']
+            cursor.execute('''
+                UPDATE findings SET title = ?, severity = ?, evidence = ?, last_seen = ?
+                WHERE finding_id = ?
+            ''', (title, severity, evidence_json, now, finding_id))
+            reopened = existing['status'] == 'fixed'
+            if reopened:
+                cursor.execute('''
+                    UPDATE findings
+                    SET status = 'open', status_note = 'Detected again on recheck', status_updated_at = ?
+                    WHERE finding_id = ?
+                ''', (now, finding_id))
+            conn.commit()
+            return finding_id, reopened
+
+        cursor.execute('''
+            INSERT INTO findings (finding_type, host, title, severity, evidence, status,
+                                  status_updated_at, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?)
+        ''', (finding_type, host, title, severity, evidence_json, now, now, now))
+        conn.commit()
+        return cursor.lastrowid, True
+    finally:
+        conn.close()
+
+
+def reconcile_findings(host: str, finding_types, seen_finding_ids) -> int:
+    """
+    Mark open findings of the given types on a host as 'fixed' when a
+    conclusive recheck no longer reports them.
+
+    Returns:
+        Number of findings closed
+    """
+    types = list(finding_types)
+    if not types:
+        return 0
+    seen = set(seen_finding_ids)
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        placeholders = ','.join('?' * len(types))
+        cursor.execute(f'''
+            SELECT finding_id FROM findings
+            WHERE host = ? AND status = 'open' AND finding_type IN ({placeholders})
+        ''', [host] + types)
+        to_close = [row['finding_id'] for row in cursor.fetchall() if row['finding_id'] not in seen]
+        for finding_id in to_close:
+            cursor.execute('''
+                UPDATE findings
+                SET status = 'fixed', status_note = 'No longer detected on recheck', status_updated_at = ?
+                WHERE finding_id = ?
+            ''', (now, finding_id))
+        conn.commit()
+        return len(to_close)
+    finally:
+        conn.close()
+
+
+def set_finding_status(finding_id: int, status: str, note: str = None) -> int:
+    """
+    Set the status of a finding from the dashboard.
+
+    Returns:
+        Number of rows updated (0 if finding_id does not exist)
+    """
+    if status not in VULN_STATUSES:
+        raise ValueError(f"invalid status: {status}")
+
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute('''
+            UPDATE findings SET status = ?, status_note = ?, status_updated_at = ?
+            WHERE finding_id = ?
+        ''', (status, note, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), finding_id))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def get_hostnames_for_takeover_check() -> list:
+    """All domain and subdomain names, regardless of liveness status."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT domain_name AS name FROM domain_asset
+            UNION
+            SELECT subdomain_name AS name FROM subdomain_asset
+        ''').fetchall()
+        return [row['name'] for row in rows if row['name']]
+    finally:
+        conn.close()
+
+
+def _get_findings_for_host(cursor, host: str) -> list:
+    """Security findings for a hostname, open first then by severity."""
+    try:
+        cursor.execute('''
+            SELECT finding_id, finding_type, title, severity, evidence, status, status_note,
+                   first_seen, last_seen
+            FROM findings
+            WHERE host = ?
+            ORDER BY status = 'open' DESC,
+                     CASE severity WHEN 'critical' THEN 0 WHEN 'high' THEN 1
+                                   WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END,
+                     finding_id
+        ''', (host,))
+    except sqlite3.OperationalError:
+        # findings table missing (DB not migrated yet)
+        return []
+
+    findings = []
+    for row in cursor.fetchall():
+        finding = dict(row)
+        try:
+            finding['evidence'] = json.loads(finding['evidence'] or '{}')
+        except ValueError:
+            finding['evidence'] = {}
+        findings.append(finding)
+    return findings
+
+
 def get_vulnerabilities_for_tech(tech_id: int, min_cvss: float = 0.0) -> list:
     """
     Get all vulnerabilities for a technology.
@@ -1117,6 +1266,7 @@ def get_all_assets_for_display() -> list:
             asset['cves'] = _get_cves_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['findings'] = _get_ports_for_domain(cursor, asset['id']) if asset['is_scanned'] else []
             asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
+            asset['security_findings'] = _get_findings_for_host(cursor, asset['name'])
             assets.append(asset)
         
         cursor.execute('''
@@ -1152,6 +1302,7 @@ def get_all_assets_for_display() -> list:
             asset['cves'] = _get_cves_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['findings'] = _get_ports_for_subdomain(cursor, asset['id']) if asset['is_scanned'] else []
             asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
+            asset['security_findings'] = _get_findings_for_host(cursor, asset['name'])
             assets.append(asset)
         
         cursor.execute('''
@@ -1190,6 +1341,7 @@ def get_all_assets_for_display() -> list:
             asset['cves'] = _get_cves_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             asset['findings'] = _get_ports_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
+            asset['security_findings'] = _get_findings_for_host(cursor, asset['name'])
             assets.append(asset)
         
         return assets
