@@ -101,7 +101,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Technology Fingerprinting** - Wappalyzer integration (100+ technologies)
 - **CVE Matching** - NVD CPE + version-range matching with CVSS filtering (min 5.0)
 - **Finding Lifecycle** - Open / fixed / accepted / false positive; findings no longer seen on rescan are closed automatically and reopened if they return
-- **AI Recommendations** - Google Gemini-powered vulnerability analysis
+- **AI Recommendations** - Vulnerability analysis with Google Gemini, Anthropic Claude, OpenAI, or any OpenAI-compatible endpoint (e.g. a local Ollama model)
 - **Discord Notifications** - Real-time alerts for completed scans and CVEs
 
 ### Phase 2: Deep Scanning
@@ -132,7 +132,16 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 
 ### AI-Powered Vulnerability Analysis
 
-LazyEASM uses Google Gemini AI to provide personalized CVE recommendations:
+LazyEASM generates personalized CVE recommendations with the AI provider you choose in the dashboard (or `AI_PROVIDER` in `.env`):
+
+| Provider | `AI_PROVIDER` | Default model | Notes |
+|----------|---------------|---------------|-------|
+| Google Gemini | `gemini` (default) | `gemini-2.5-flash`, falls back to `gemini-2.0-flash`, `gemini-2.5-pro` | `GEMINI_API_KEY` |
+| Anthropic Claude | `anthropic` | `claude-opus-5-5` | `ANTHROPIC_API_KEY`. Requests that Claude's safeguards decline are retried server-side on Anthropic's recommended fallback model |
+| OpenAI | `openai` | none, set `AI_MODEL` | `OPENAI_API_KEY` |
+| OpenAI-compatible | `openai_compatible` | none, set `AI_MODEL` | `AI_BASE_URL` (e.g. `http://localhost:11434/v1` for Ollama). Keeps findings on infrastructure you control |
+
+`AI_MODEL` overrides the default model for any provider. Findings sent for analysis include the hostname, port, technology versions and CVE details; use `openai_compatible` with a local model if that data must not leave your network.
 
 **Input Context:**
 - CVE ID, CVSS score, and description
@@ -288,7 +297,10 @@ ADMIN_PASS=randomly_generated       # Set by utils/installation/install.sh
 # API Keys (enhances discovery and CVE matching)
 SECURITYTRAILS_API_KEY=your_key    # Subdomain enumeration
 NVD_API_KEY=your_key               # Optional, raises NVD rate limit
-GEMINI_API_KEY=your_key            # AI recommendations
+AI_PROVIDER=gemini                 # gemini | anthropic | openai | openai_compatible
+GEMINI_API_KEY=your_key            # AI recommendations (gemini)
+ANTHROPIC_API_KEY=your_key         # AI recommendations (anthropic)
+OPENAI_API_KEY=your_key            # AI recommendations (openai)
 
 # Notifications
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
@@ -311,7 +323,12 @@ DISCORD_USER_ID=your_discord_id    # User to ping on alerts
 | `ADMIN_PASS` | Yes | Admin password |
 | `SECURITYTRAILS_API_KEY` | No | SecurityTrails API key |
 | `NVD_API_KEY` | No | NVD API key (higher CVE lookup rate limit) |
+| `AI_PROVIDER` | No | `gemini` (default), `anthropic`, `openai`, or `openai_compatible` |
+| `AI_MODEL` | No | Model override; required for `openai` and `openai_compatible` |
+| `AI_BASE_URL` | No | Endpoint for `openai_compatible` |
 | `GEMINI_API_KEY` | No | Google Gemini API key |
+| `ANTHROPIC_API_KEY` | No | Anthropic API key |
+| `OPENAI_API_KEY` | No | OpenAI API key (optional for `openai_compatible`) |
 | `DISCORD_WEBHOOK_URL` | No | Discord webhook URL |
 | `DISCORD_USER_ID` | No | Discord user ID to ping |
 
@@ -456,7 +473,7 @@ LazyEASM/
 │   ├── phase2_dirsearch.py    # Phase 2 deep scan runner
 │   ├── Wappalyzer.py          # Technology fingerprinting
 │   ├── CVEmatch.py            # CVE lookup via NVD (CPE matching)
-│   ├── AskAI.py               # Gemini AI recommendations
+│   ├── AskAI.py               # AI recommendations (Gemini / Claude / OpenAI / compatible)
 │   └── Notify.py              # Discord notifications
 ├── utils/
 │   ├── config.py              # Environment config loader
@@ -538,7 +555,7 @@ phase_status ─── Current phase tracking
 | **Database** | SQLite |
 | **Frontend** | Tailwind CSS (via CDN) |
 | **Authentication** | JWT (access + refresh tokens) |
-| **AI** | Google Gemini API (2.5-flash, 2.0-flash, 2.5-pro) |
+| **AI** | Google Gemini, Anthropic Claude, OpenAI, or OpenAI-compatible endpoints |
 | **Notifications** | Discord Webhooks |
 | **Port Scanning** | Nmap |
 | **Tech Fingerprinting** | python-Wappalyzer |

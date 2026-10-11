@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
-from utils.env_manager import set_env_key, delete_env_key, get_config_for_ui, EDITABLE_KEYS
+from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_config_for_ui, EDITABLE_KEYS
 from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
@@ -69,7 +69,12 @@ KEY_NAMES = {
     'DISCORD_USER_ID': 'Discord User ID',
     'SECURITYTRAILS_API_KEY': 'SecurityTrails Key',
     'NVD_API_KEY': 'NVD API Key',
-    'GEMINI_API_KEY': 'Gemini Key'
+    'AI_PROVIDER': 'AI Provider',
+    'AI_MODEL': 'AI Model',
+    'AI_BASE_URL': 'AI Base URL',
+    'GEMINI_API_KEY': 'Gemini Key',
+    'OPENAI_API_KEY': 'OpenAI Key',
+    'ANTHROPIC_API_KEY': 'Anthropic Key'
 }
 
 ACCESS_TOKEN_LIFETIME = datetime.timedelta(minutes=15)
@@ -623,7 +628,7 @@ def save_config():
         
         value = request.form.get(key, '').strip()
         
-        if not value:
+        if not value or value == (get_env_key(key) or ''):
             continue
         
         success, error = set_env_key(key, value)
@@ -800,7 +805,7 @@ def generate_ai():
         )
         
         if not recommendation:
-            error_text = f"AI generation failed: {ai_error}" if ai_error else "AI generation failed. Check GEMINI_API_KEY."
+            error_text = f"AI generation failed: {ai_error}" if ai_error else "AI generation failed. Check the AI provider settings."
             return jsonify({'error': error_text}), 500
         
         cursor.execute('''

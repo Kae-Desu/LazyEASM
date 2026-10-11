@@ -185,6 +185,10 @@
                         <input type="hidden" name="CLEAR_SECURITYTRAILS_API_KEY" value="0" id="clear_SECURITYTRAILS_API_KEY">
                         <input type="hidden" name="CLEAR_NVD_API_KEY" value="0" id="clear_NVD_API_KEY">
                         <input type="hidden" name="CLEAR_GEMINI_API_KEY" value="0" id="clear_GEMINI_API_KEY">
+                        <input type="hidden" name="CLEAR_OPENAI_API_KEY" value="0" id="clear_OPENAI_API_KEY">
+                        <input type="hidden" name="CLEAR_ANTHROPIC_API_KEY" value="0" id="clear_ANTHROPIC_API_KEY">
+                        <input type="hidden" name="CLEAR_AI_MODEL" value="0" id="clear_AI_MODEL">
+                        <input type="hidden" name="CLEAR_AI_BASE_URL" value="0" id="clear_AI_BASE_URL">
                         
                         <div class="space-y-1.5">
                             <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord Webhook URL</label>
@@ -224,13 +228,63 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="space-y-1.5">
-                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Gemini API Key</label>
-                            <div class="relative">
-                                <input type="password" name="GEMINI_API_KEY" value="" placeholder="{{ config.GEMINI_API_KEY.masked if config.GEMINI_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                <button type="button" onclick="openConfirmModal('clear_field', 'GEMINI_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                </button>
+                        <div class="space-y-3 pt-2 border-t border-border dark:border-white/5">
+                            <p class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-robot mr-1"></i>AI Recommendations</p>
+                            <div class="space-y-1.5">
+                                <label for="ai_provider" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Provider</label>
+                                <select id="ai_provider" name="AI_PROVIDER" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    {% set current_provider = config.AI_PROVIDER.value or 'gemini' %}
+                                    {% for value, label in [('gemini', 'Google Gemini'), ('anthropic', 'Anthropic Claude'), ('openai', 'OpenAI'), ('openai_compatible', 'OpenAI-compatible (Ollama, vLLM, LM Studio...)')] %}
+                                    <option value="{{ value }}" {% if current_provider == value %}selected{% endif %}>{{ label }}</option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Model (optional for Gemini / Claude)</label>
+                                <div class="relative">
+                                    <input type="text" name="AI_MODEL" value="" placeholder="{{ config.AI_MODEL.value if config.AI_MODEL.value else 'Provider default' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'AI_MODEL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Base URL (OpenAI-compatible only)</label>
+                                <div class="relative">
+                                    <input type="text" name="AI_BASE_URL" value="" placeholder="{{ config.AI_BASE_URL.value if config.AI_BASE_URL.value else 'http://localhost:11434/v1' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'AI_BASE_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-4">
+                                <div class="space-y-1.5">
+                                    <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Gemini Key</label>
+                                    <div class="relative">
+                                        <input type="password" name="GEMINI_API_KEY" value="" placeholder="{{ config.GEMINI_API_KEY.masked if config.GEMINI_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                        <button type="button" onclick="openConfirmModal('clear_field', 'GEMINI_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">OpenAI Key</label>
+                                    <div class="relative">
+                                        <input type="password" name="OPENAI_API_KEY" value="" placeholder="{{ config.OPENAI_API_KEY.masked if config.OPENAI_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                        <button type="button" onclick="openConfirmModal('clear_field', 'OPENAI_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Anthropic Key</label>
+                                    <div class="relative">
+                                        <input type="password" name="ANTHROPIC_API_KEY" value="" placeholder="{{ config.ANTHROPIC_API_KEY.masked if config.ANTHROPIC_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                        <button type="button" onclick="openConfirmModal('clear_field', 'ANTHROPIC_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
                             </div>
                         </div>
                         <button type="button" onclick="testWebhook()" class="w-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 rounded-xl transition-all border border-emerald-500/20 hover:bg-emerald-500/20">

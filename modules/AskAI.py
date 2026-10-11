@@ -1,6 +1,17 @@
 """
 Module: AskAI.py
-Purpose: AI-powered recommendations using Google Gemini
+Purpose: AI-powered vulnerability recommendations
+
+Providers (set AI_PROVIDER in .env or the dashboard):
+    - gemini             Google Gemini (default)
+    - anthropic          Anthropic Claude
+    - openai             OpenAI
+    - openai_compatible  Any OpenAI-compatible endpoint (Ollama, vLLM,
+                         LM Studio...) at AI_BASE_URL - keeps findings on
+                         infrastructure you control
+
+AI_MODEL overrides the provider's default model. It is required for
+openai and openai_compatible.
 """
 
 import os
@@ -11,15 +22,24 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
 
-try:
-    from google import genai
-    GEMINI_AVAILABLE = True
-except ImportError:
-    GEMINI_AVAILABLE = False
+PROVIDERS = ('gemini', 'anthropic', 'openai', 'openai_compatible')
+DEFAULT_PROVIDER = 'gemini'
 
-_api_key = get_env('GEMINI_API_KEY')
-_client = None
 GEMINI_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-2.5-pro"]
+ANTHROPIC_DEFAULT_MODEL = "claude-opus-5-5"
+
+# Claude models that accept server-side refusal fallback ("default" routing)
+# and output_config.effort. CVE analysis can trip the cyber safeguards; the
+# fallback re-runs a declined request on Anthropic's recommended model.
+ANTHROPIC_FALLBACK_MODELS = {"claude-opus-5-5", "claude-opus-5", "claude-fable-5-1", "claude-sonnet-5-5"}
+ANTHROPIC_FALLBACK_BETA = "server-side-fallback-2026-07-01"
+
+MAX_OUTPUT_TOKENS = 16000
+REQUEST_TIMEOUT = 120.0
+
+
+class AIError(Exception):
+    """AI generation failed; the message is safe to show in the dashboard."""
 
 
 def get_cvss_severity(score):
@@ -49,56 +69,174 @@ def format_ai_response(text: str) -> str:
     text = re.sub(r'\n{3,}', '\n\n', text)
     return text.strip()
 
-def _get_client():
-    """Get or create Gemini client."""
-    global _client
-    
-    if not GEMINI_AVAILABLE:
-        return None
-    
-    if not _api_key:
-        return None
-    
-    if _client is None:
-        _client = genai.Client(api_key=_api_key)
-    
-    return _client
+
+def get_ai_settings() -> dict:
+    """Current AI settings, read on every call so dashboard changes apply immediately."""
+    provider = (get_env('AI_PROVIDER') or DEFAULT_PROVIDER).strip().lower()
+    return {
+        'provider': provider,
+        'model': (get_env('AI_MODEL') or '').strip() or None,
+        'base_url': (get_env('AI_BASE_URL') or '').strip() or None,
+    }
 
 
-def send_message(cve_id: str, cve_score, cve_description: str,
-                 tech_name: str, tech_version: str, asset_name: str,
-                 port, is_https, tech_stack: list):
+def _generate_gemini(prompt: str, model: str = None) -> tuple:
+    try:
+        from google import genai
+    except ImportError:
+        raise AIError("Gemini SDK not installed (pip install google-genai)")
+
+    api_key = get_env('GEMINI_API_KEY')
+    if not api_key:
+        raise AIError("Gemini API key not configured. Set GEMINI_API_KEY.")
+
+    client = genai.Client(api_key=api_key)
+    last_error = None
+    for candidate in ([model] if model else GEMINI_MODELS):
+        try:
+            response = client.models.generate_content(model=candidate, contents=prompt)
+            if response.text:
+                return response.text, candidate
+            last_error = "empty response"
+        except Exception as e:
+            last_error = str(e)
+            print(f"Gemini API error ({candidate}): {e}")
+    raise AIError(f"Gemini request failed: {last_error}")
+
+
+def _generate_anthropic(prompt: str, model: str = None) -> tuple:
+    try:
+        import anthropic
+    except ImportError:
+        raise AIError("Anthropic SDK not installed (pip install anthropic)")
+
+    model = model or ANTHROPIC_DEFAULT_MODEL
+    api_key = get_env('ANTHROPIC_API_KEY')
+    # Without a key in .env, the SDK resolves credentials from the environment
+    client = anthropic.Anthropic(api_key=api_key, timeout=REQUEST_TIMEOUT) if api_key \
+        else anthropic.Anthropic(timeout=REQUEST_TIMEOUT)
+
+    request = {
+        'model': model,
+        'max_tokens': MAX_OUTPUT_TOKENS,
+        'messages': [{'role': 'user', 'content': prompt}],
+    }
+
+    try:
+        if model in ANTHROPIC_FALLBACK_MODELS:
+            response = client.beta.messages.create(
+                **request,
+                output_config={'effort': 'medium'},
+                betas=[ANTHROPIC_FALLBACK_BETA],
+                fallbacks='default',
+            )
+        else:
+            response = client.messages.create(**request)
+    except anthropic.AuthenticationError:
+        raise AIError("Anthropic rejected the API key. Check ANTHROPIC_API_KEY.")
+    except anthropic.NotFoundError:
+        raise AIError(f"Anthropic model not found: {model}. Check AI_MODEL.")
+    except anthropic.RateLimitError:
+        raise AIError("Anthropic rate limit reached. Try again later.")
+    except anthropic.APIStatusError as e:
+        raise AIError(f"Anthropic API error ({e.status_code}): {e.message}")
+    except anthropic.APIConnectionError:
+        raise AIError("Could not reach the Anthropic API. Check network connectivity.")
+
+    if response.stop_reason == 'refusal':
+        category = getattr(getattr(response, 'stop_details', None), 'category', None)
+        raise AIError(f"Claude declined this request{f' ({category})' if category else ''}.")
+
+    text = ''.join(block.text for block in response.content if block.type == 'text')
+    if not text:
+        raise AIError(f"Claude returned no text (stop reason: {response.stop_reason}).")
+    # response.model names the model that actually answered (it differs after a fallback)
+    return text, response.model
+
+
+def _generate_openai(prompt: str, model: str = None, base_url: str = None, compatible: bool = False) -> tuple:
+    try:
+        import openai
+    except ImportError:
+        raise AIError("OpenAI SDK not installed (pip install openai)")
+
+    if not model:
+        raise AIError("Set AI_MODEL to the model to use with this provider.")
+    if compatible and not base_url:
+        raise AIError("Set AI_BASE_URL for the OpenAI-compatible endpoint (e.g. http://localhost:11434/v1).")
+
+    api_key = get_env('OPENAI_API_KEY')
+    kwargs = {'timeout': REQUEST_TIMEOUT}
+    if compatible:
+        kwargs['base_url'] = base_url
+        # Local servers usually ignore the key, but the SDK requires one
+        kwargs['api_key'] = api_key or 'not-needed'
+    elif api_key:
+        kwargs['api_key'] = api_key
+    name = 'OpenAI-compatible endpoint' if compatible else 'OpenAI'
+
+    try:
+        client = openai.OpenAI(**kwargs)
+        response = client.chat.completions.create(
+            model=model,
+            messages=[{'role': 'user', 'content': prompt}],
+        )
+    except openai.AuthenticationError:
+        raise AIError(f"{name} rejected the API key. Check OPENAI_API_KEY.")
+    except openai.NotFoundError:
+        raise AIError(f"{name} model not found: {model}. Check AI_MODEL.")
+    except openai.RateLimitError:
+        raise AIError(f"{name} rate limit reached. Try again later.")
+    except openai.APIStatusError as e:
+        raise AIError(f"{name} error ({e.status_code}): {e.message}")
+    except openai.APIConnectionError:
+        raise AIError(f"Could not reach the {name}. Check AI_BASE_URL and network connectivity.")
+    except openai.OpenAIError as e:
+        # e.g. no API key configured
+        raise AIError(f"{name} client error: {e}")
+
+    choice = response.choices[0] if response.choices else None
+    text = choice.message.content if choice and choice.message else None
+    if not text:
+        raise AIError(f"{name} returned no text.")
+    return text, response.model or model
+
+
+def generate_text(prompt: str) -> tuple:
     """
-    Generate AI-powered vulnerability recommendation.
-    
-    Args:
-        cve_id: CVE identifier
-        cve_score: CVSS score (float or None)
-        cve_description: CVE description from NVD/Vulners
-        tech_name: Affected technology name (e.g., 'nginx')
-        tech_version: Affected technology version (e.g., '1.18.0')
-        asset_name: Host/asset name (e.g., 'example.com')
-        port: Port number (int or None)
-        is_https: Whether port is HTTPS (bool or int)
-        tech_stack: List of (name, version) tuples for other techs on same service
-        cve_description: CVE description
-    
+    Send a prompt to the configured provider.
+
     Returns:
-        Tuple of (recommendation_text, error_message)
+        (text, model_used)
+
+    Raises:
+        AIError
     """
-    client = _get_client()
-    
-    if not client:
-        return None, "Gemini client not available. Check GEMINI_API_KEY."
-    
+    settings = get_ai_settings()
+    provider = settings['provider']
+
+    if provider == 'gemini':
+        return _generate_gemini(prompt, settings['model'])
+    if provider == 'anthropic':
+        return _generate_anthropic(prompt, settings['model'])
+    if provider == 'openai':
+        return _generate_openai(prompt, settings['model'], settings['base_url'])
+    if provider == 'openai_compatible':
+        return _generate_openai(prompt, settings['model'], settings['base_url'], compatible=True)
+    raise AIError(f"Unknown AI_PROVIDER '{provider}'. Use one of: {', '.join(PROVIDERS)}.")
+
+
+def build_prompt(cve_id: str, cve_score, cve_description: str,
+                 tech_name: str, tech_version: str, asset_name: str,
+                 port, is_https, tech_stack: list) -> str:
     severity = get_cvss_severity(cve_score)
     score_display = f"{cve_score} ({severity})" if cve_score is not None else "Tidak tersedia"
     tech_display = f"{tech_name} {tech_version}" if tech_version else tech_name
-    
+
     port_display = str(port) if port else "tidak diketahui"
     protocol = "HTTPS" if is_https else "HTTP"
     port_info = f"{port_display} ({protocol})"
-    
+
     stack_info = format_tech_stack(tech_stack, tech_name)
     if stack_info:
         tech_stack_data = f"\nTech Stack (teknologi lain di port yang sama): {stack_info}\n"
@@ -106,8 +244,8 @@ def send_message(cve_id: str, cve_score, cve_description: str,
     else:
         tech_stack_data = ""
         tech_stack_note = ""
-    
-    prompt = f"""Anda adalah Asisten Keamanan Siber. Berikan analisis kerentanan dalam Bahasa Indonesia.
+
+    return f"""Anda adalah Asisten Keamanan Siber. Berikan analisis kerentanan dalam Bahasa Indonesia.
 
 --- DATA SUMBER ---
 Aset: {asset_name}
@@ -152,103 +290,53 @@ Kerentanan XSS memungkinkan injeksi JavaScript berbahaya.
 Tech stack: Node.js. Pastikan kompatibilitas saat patch.
 
 PENTING: Setiap bagian harus di baris baru. Jangan gabungkan dalam satu baris. Ikuti contoh di atas persis."""
-    
-    last_error = None
-    for model in GEMINI_MODELS:
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt
-            )
-            formatted = format_ai_response(response.text)
-            return f"{formatted}\n\n_Generated by {model}_", None
-        except Exception as e:
-            last_error = str(e)
-            print(f"Gemini API error ({model}): {e}")
-            continue
-    
-    return None, "Gemini models unavailable or API key exhausted"
 
 
-def compare_cve_details(desc_nvd: str, desc_vulners: str):
+def send_message(cve_id: str, cve_score, cve_description: str,
+                 tech_name: str, tech_version: str, asset_name: str,
+                 port, is_https, tech_stack: list):
     """
-    Compare two CVE descriptions for semantic match.
-    
+    Generate AI-powered vulnerability recommendation.
+
     Args:
-        desc_nvd: NVD description
-        desc_vulners: Vulners description
-    
+        cve_id: CVE identifier
+        cve_score: CVSS score (float or None)
+        cve_description: CVE description from NVD
+        tech_name: Affected technology name (e.g., 'nginx')
+        tech_version: Affected technology version (e.g., '1.18.0')
+        asset_name: Host/asset name (e.g., 'example.com')
+        port: Port number (int or None)
+        is_https: Whether port is HTTPS (bool or int)
+        tech_stack: List of (name, version) tuples for other techs on same service
+
     Returns:
-        True if match found, False otherwise
+        Tuple of (recommendation_text, error_message)
     """
-    client = _get_client()
-    
-    if not client:
-        return False, "Gemini client not available. Check GEMINI_API_KEY."
+    prompt = build_prompt(cve_id, cve_score, cve_description, tech_name, tech_version,
+                          asset_name, port, is_https, tech_stack)
+    try:
+        text, model = generate_text(prompt)
+    except AIError as e:
+        return None, str(e)
+    except Exception as e:
+        print(f"AI generation error: {e}")
+        return None, f"AI generation failed: {e}"
 
-    prompt = f"""
-    Role: Senior Security Auditor.
-    
-    Task: Determine if there is a MATCH or INCLUSION between the two descriptions.
-    
-    TEXT A:
-    "{desc_nvd}"
-
-    TEXT B:
-    "{desc_vulners}"
-
-    CRITICAL EVALUATION LOGIC (Follow in order):
-    1. **ID MATCH (Silver Bullet):** Scan both texts for CVE IDs (e.g., CVE-2024-7347). 
-       - If BOTH texts contain the SAME CVE ID, return 'True' IMMEDIATELY. 
-       - Ignore the fact that one text might list other CVEs too.
-       
-    2. **SUBSET MATCH:** If one text is a list/advisory (containing multiple fixes) and the other text describes ONE of those fixes, return 'True'.
-       - Example: Text A describes "Bug in MP4 module". Text B says "Fixes: Bug in MP4 module, Bug in HTTP module". -> Result: True.
-       
-    3. **SEMANTIC MATCH:** If no CVE IDs are present, check if they describe the same software (e.g., Nginx) AND the same component/issue (e.g., ngx_http_mp4_module memory corruption).
-
-    OUTPUT: True or False only.
-    """
-
-    last_error = None
-    for model in GEMINI_MODELS:
-        try:
-            response = client.models.generate_content(
-                model=model,
-                contents=prompt
-            )
-            
-            if response and "true" in response.text.lower():
-                return True, None
-            return False, None
-        except Exception as e:
-            last_error = str(e)
-            print(f"Gemini API error ({model}): {e}")
-            continue
-    
-    return False, "Gemini models unavailable or API key exhausted"
+    return f"{format_ai_response(text)}\n\n_Generated by {model}_", None
 
 
 if __name__ == '__main__':
-    print("Testing AskAI...")
-    print(f"Gemini API Key configured: {'Yes' if _api_key else 'No'}")
-    print(f"Gemini available: {'Yes' if GEMINI_AVAILABLE else 'No'}")
-    
-    if _api_key and GEMINI_AVAILABLE:
-        print("\nTesting send_message...")
-        result, error = send_message(
-            cve_id="CVE-2023-1234",
-            cve_score=7.5,
-            cve_description="A vulnerability in nginx allows remote attackers to cause a denial of service.",
-            tech_name="nginx",
-            tech_version="1.18.0",
-            asset_name="test-server",
-            port=443,
-            is_https=True,
-            tech_stack=[("Node.js", "18.0"), ("Express", "4.18")]
-        )
-        if result:
-            print("Response received:")
-            print(result[:500])
-        else:
-            print(f"No response received. Error: {error}")
+    settings = get_ai_settings()
+    print(f"Testing AskAI with provider={settings['provider']} model={settings['model'] or 'default'}")
+    result, error = send_message(
+        cve_id="CVE-2023-1234",
+        cve_score=7.5,
+        cve_description="A vulnerability in nginx allows remote attackers to cause a denial of service.",
+        tech_name="nginx",
+        tech_version="1.18.0",
+        asset_name="test-server",
+        port=443,
+        is_https=True,
+        tech_stack=[("Node.js", "18.0"), ("Express", "4.18")]
+    )
+    print(result[:500] if result else f"Error: {error}")

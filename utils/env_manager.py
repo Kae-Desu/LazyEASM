@@ -15,13 +15,20 @@ EDITABLE_KEYS = [
     'DISCORD_USER_ID',
     'SECURITYTRAILS_API_KEY',
     'NVD_API_KEY',
-    'GEMINI_API_KEY'
+    'AI_PROVIDER',
+    'AI_MODEL',
+    'AI_BASE_URL',
+    'GEMINI_API_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY'
 ]
 
 SENSITIVE_KEYS = [
     'SECURITYTRAILS_API_KEY',
     'NVD_API_KEY',
-    'GEMINI_API_KEY'
+    'GEMINI_API_KEY',
+    'OPENAI_API_KEY',
+    'ANTHROPIC_API_KEY'
 ]
 
 KEY_DISPLAY_NAMES = {
@@ -29,7 +36,12 @@ KEY_DISPLAY_NAMES = {
     'DISCORD_USER_ID': 'Discord User ID',
     'SECURITYTRAILS_API_KEY': 'SecurityTrails API Key',
     'NVD_API_KEY': 'NVD API Key',
-    'GEMINI_API_KEY': 'Gemini API Key'
+    'AI_PROVIDER': 'AI Provider',
+    'AI_MODEL': 'AI Model',
+    'AI_BASE_URL': 'AI Base URL',
+    'GEMINI_API_KEY': 'Gemini API Key',
+    'OPENAI_API_KEY': 'OpenAI API Key',
+    'ANTHROPIC_API_KEY': 'Anthropic API Key'
 }
 
 VALIDATION_RULES = {
@@ -40,6 +52,18 @@ VALIDATION_RULES = {
     'DISCORD_USER_ID': {
         'pattern': r'^(\d+)?$',
         'message': 'Discord User ID must be numeric'
+    },
+    'AI_PROVIDER': {
+        'pattern': r'^(gemini|anthropic|openai|openai_compatible)?$',
+        'message': 'AI provider must be gemini, anthropic, openai or openai_compatible'
+    },
+    'AI_MODEL': {
+        'pattern': r'^[\w.:/@-]*$',
+        'message': 'AI model may only contain letters, digits and . : / @ - _'
+    },
+    'AI_BASE_URL': {
+        'pattern': r'^(https?://[^\s]+)?$',
+        'message': 'AI base URL must start with http:// or https://'
     }
 }
 
