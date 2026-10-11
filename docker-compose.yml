@@ -16,3 +16,10 @@ services:
       - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
       - DISCORD_USER_ID=${DISCORD_USER_ID:-}
     restart: unless-stopped
+    healthcheck:
+      # /health checks the database and the worker heartbeat (no auth from localhost)
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://localhost:10001/health"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
