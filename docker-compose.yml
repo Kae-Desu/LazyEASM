@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  lazyeasm:
+    build: .
+    container_name: lazyeasm
+    ports:
+      - "10002:10001"
+    volumes:
+      - ./db:/app/db
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    environment:
+      - PYTHONUNBUFFERED=1
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
+      - DISCORD_USER_ID=${DISCORD_USER_ID:-}
+    restart: unless-stopped

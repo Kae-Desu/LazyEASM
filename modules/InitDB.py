@@ -1,0 +1,481 @@
+"""
+Module: InitDB.py
+Purpose: Initialize LazyEASM database with asset-centric schema
+
+Tables:
+    - domain_asset: Root domains (example.com)
+    - subdomain_asset: Subdomains (blog.example.com)
+    - ip_asset: IP addresses (1.2.3.4)
+    - domain_ip: Junction table (domain -> IP)
+    - subdomain_ip: Junction table (subdomain -> IP)
+    - ports: Open ports on IPs (from nmap)
+    - http_services: HTTP services per (host + port) - virtual hosting support
+    - technologies: Tech stack per http_service (from Wappalyzer)
+    - vulnerabilities: CVEs per technology
+    - certificates: SSL/TLS certificate info (from CTLogs)
+    - directories: Discovered directories (from dirsearch)
+    - scan_hints: User-specified ports/paths from input
+    - scan_history: Track scan runs per module
+    - scan_queue: Queue for long-running scan tasks
+    - scan_progress: Track progress for resumable scans
+"""
+
+import sqlite3
+import os
+
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DB_DIR = os.path.join(PROJECT_ROOT, "db")
+
+if not os.path.exists(DB_DIR):
+    os.makedirs(DB_DIR)
+
+DB_NAME = os.path.join(DB_DIR, "lazyeasm.db")
+
+
+def init_db():
+    conn = sqlite3.connect(DB_NAME)
+    conn.execute("PRAGMA foreign_keys = ON;")
+    cursor = conn.cursor()
+
+    print(f"Connection initialized to {DB_NAME}")
+
+    # ============================================
+    # ASSET TABLES
+    # ============================================
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS domain_asset (
+        dom_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        domain_name TEXT UNIQUE NOT NULL,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT,
+        last_scanned TEXT,
+        last_wappalyzer_scan TEXT,
+        status TEXT DEFAULT 'up',
+        is_wildcard INTEGER DEFAULT 0,
+        wildcard_ip TEXT,
+        notes TEXT
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS subdomain_asset (
+        sub_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        dom_id INTEGER,
+        subdomain_name TEXT UNIQUE NOT NULL,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT,
+        last_scanned TEXT,
+        last_wappalyzer_scan TEXT,
+        status TEXT DEFAULT 'up',
+        FOREIGN KEY(dom_id) REFERENCES domain_asset(dom_id) ON DELETE SET NULL
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ip_asset (
+        ip_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ip_value TEXT UNIQUE NOT NULL,
+        is_private INTEGER DEFAULT 0,
+        is_shared INTEGER DEFAULT 0,
+        shared_provider TEXT,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT,
+        last_scanned TEXT,
+        status TEXT DEFAULT 'up'
+    )
+    ''')
+
+    # ============================================
+    # JUNCTION TABLES (Asset Relationships)
+    # ============================================
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS domain_ip (
+        dom_id INTEGER,
+        ip_id INTEGER,
+        PRIMARY KEY (dom_id, ip_id),
+        FOREIGN KEY(dom_id) REFERENCES domain_asset(dom_id) ON DELETE CASCADE,
+        FOREIGN KEY(ip_id) REFERENCES ip_asset(ip_id) ON DELETE CASCADE
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS subdomain_ip (
+        sub_id INTEGER,
+        ip_id INTEGER,
+        PRIMARY KEY (sub_id, ip_id),
+        FOREIGN KEY(sub_id) REFERENCES subdomain_asset(sub_id) ON DELETE CASCADE,
+        FOREIGN KEY(ip_id) REFERENCES ip_asset(ip_id) ON DELETE CASCADE
+    )
+    ''')
+
+    # ============================================
+    # SERVICE TABLES
+    # ============================================
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS ports (
+        port_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ip_id INTEGER NOT NULL,
+        port_num INTEGER NOT NULL,
+        protocol TEXT DEFAULT 'tcp',
+        service_name TEXT,
+        banner TEXT,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(ip_id) REFERENCES ip_asset(ip_id) ON DELETE CASCADE
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS http_services (
+        http_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host TEXT NOT NULL,
+        ip_id INTEGER,
+        port_num INTEGER NOT NULL,
+        is_https INTEGER DEFAULT 0,
+        title TEXT,
+        web_server TEXT,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT,
+        UNIQUE(host, port_num),
+        FOREIGN KEY(ip_id) REFERENCES ip_asset(ip_id) ON DELETE SET NULL
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS technologies (
+        tech_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        http_id INTEGER NOT NULL,
+        tech_name TEXT NOT NULL,
+        tech_version TEXT,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(http_id) REFERENCES http_services(http_id) ON DELETE CASCADE
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS vulnerabilities (
+        vuln_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tech_id INTEGER,
+        cve_id TEXT NOT NULL,
+        cve_score REAL,
+        description TEXT,
+        recommendation TEXT,
+        status TEXT DEFAULT 'open',
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        last_seen TEXT,
+        FOREIGN KEY(tech_id) REFERENCES technologies(tech_id) ON DELETE SET NULL
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS certificates (
+        cert_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sub_id INTEGER,
+        hostname TEXT NOT NULL,
+        issuer TEXT,
+        not_before TEXT,
+        not_after TEXT,
+        serial_number TEXT,
+        fingerprint TEXT,
+        source TEXT DEFAULT 'ctlogs',
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(sub_id) REFERENCES subdomain_asset(sub_id) ON DELETE CASCADE
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS directories (
+        dir_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        http_id INTEGER NOT NULL,
+        path TEXT NOT NULL,
+        status_code INTEGER,
+        content_length INTEGER,
+        redirect_url TEXT,
+        title TEXT,
+        first_seen TEXT DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY(http_id) REFERENCES http_services(http_id) ON DELETE CASCADE
+    )
+    ''')
+
+    # ============================================
+    # SCAN TRACKING TABLES
+    # ============================================
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS scan_hints (
+        hint_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        target TEXT NOT NULL,
+        hint_type TEXT NOT NULL,
+        hint_value TEXT NOT NULL,
+        source TEXT DEFAULT 'input',
+        created_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS scan_history (
+        scan_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_type TEXT NOT NULL,
+        target TEXT NOT NULL,
+        started_at TEXT,
+        completed_at TEXT,
+        status TEXT,
+        items_found INTEGER DEFAULT 0
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS scan_queue (
+        queue_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        scan_type TEXT NOT NULL,
+        cycle TEXT NOT NULL,
+        target TEXT NOT NULL,
+        target_id INTEGER,
+        target_type TEXT,
+        status TEXT DEFAULT 'pending',
+        queued_at TEXT DEFAULT CURRENT_TIMESTAMP,
+        started_at TEXT,
+        completed_at TEXT,
+        ports_found INTEGER DEFAULT 0,
+        tech_found INTEGER DEFAULT 0,
+        cve_found INTEGER DEFAULT 0,
+        error_message TEXT
+    )
+    ''')
+
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS scan_progress (
+        progress_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        cycle TEXT NOT NULL,
+        scan_type TEXT NOT NULL,
+        current_target TEXT,
+        current_position INTEGER DEFAULT 0,
+        total_targets INTEGER DEFAULT 0,
+        status TEXT DEFAULT 'idle',
+        started_at TEXT,
+        updated_at TEXT
+    )
+    ''')
+
+    # ============================================
+    # SETTINGS (Phase 3 and general config)
+    # ============================================
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        description TEXT,
+        updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    
+    # Insert default settings
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('phase3_enabled', '1', 'Enable Phase 3 continuous monitoring')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('liveness_interval_min', '5', 'Liveness check interval in minutes')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('ctlogs_interval_hr', '1', 'CT logs polling interval in hours')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_liveness_check', NULL, 'Last liveness check timestamp')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_ctlogs_check', NULL, 'Last CT logs check timestamp')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('wappalyzer_interval_hr', '24', 'Wappalyzer re-scan interval in hours')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_wappalyzer_check', NULL, 'Last Wappalyzer scan timestamp')")
+
+    # ============================================
+    # INDEXES FOR PERFORMANCE
+    # ============================================
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_domain_name ON domain_asset(domain_name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_domain_status ON domain_asset(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_subdomain_name ON subdomain_asset(subdomain_name)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_subdomain_status ON subdomain_asset(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ip_value ON ip_asset(ip_value)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ip_status ON ip_asset(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ip_last_scanned ON ip_asset(last_scanned)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_ports_ip_id ON ports(ip_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_http_host_port ON http_services(host, port_num)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_tech_http_id ON technologies(http_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_vuln_tech_id ON vulnerabilities(tech_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_vuln_status ON vulnerabilities(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cert_hostname ON certificates(hostname)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cert_not_after ON certificates(not_after)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cert_sub_id ON certificates(sub_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_dirs_http_id ON directories(http_id)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_hints_target ON scan_hints(target)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_status ON scan_queue(status)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_cycle ON scan_queue(cycle)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_scan_queue_target_type ON scan_queue(target_type)')
+    
+    # Unique index to prevent duplicate pending/processing entries
+    cursor.execute('''
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_pending_queue
+        ON scan_queue (scan_type, target)
+        WHERE status IN ('pending', 'processing')
+    ''')
+
+    # ============================================
+    # TOKEN BLACKLIST (Refresh token revocation)
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS token_blacklist (
+            jti TEXT PRIMARY KEY,
+            user TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
+
+    # ============================================
+    # CERTIFICATE NOTIFICATION TRACKING
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS cert_notifications (
+            notif_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            cert_id INTEGER NOT NULL,
+            hostname TEXT NOT NULL,
+            days_threshold INTEGER NOT NULL,
+            notified_at TEXT DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(cert_id, days_threshold),
+            FOREIGN KEY(cert_id) REFERENCES certificates(cert_id) ON DELETE CASCADE
+        )
+    ''')
+
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_cert_notif_lookup ON cert_notifications(cert_id, days_threshold)')
+
+    # ============================================
+    # PHASE STATUS TRACKING
+    # ============================================
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS phase_status (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            current_phase INTEGER DEFAULT 0,
+            started_at TEXT,
+            total_assets INTEGER DEFAULT 0,
+            processed_assets INTEGER DEFAULT 0,
+            eta_minutes INTEGER
+        )
+    ''')
+    
+    cursor.execute('INSERT OR IGNORE INTO phase_status (id, current_phase) VALUES (1, 0)')
+
+    # ============================================
+    # MIGRATIONS (for existing databases)
+    # ============================================
+    cursor.execute("PRAGMA table_info(subdomain_asset)")
+    subdomain_columns = [col[1] for col in cursor.fetchall()]
+    if 'last_scanned' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_scanned TEXT")
+    
+    # Add last_deep_scan column to domain_asset
+    cursor.execute("PRAGMA table_info(domain_asset)")
+    domain_columns = [col[1] for col in cursor.fetchall()]
+    if 'last_deep_scan' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_deep_scan TEXT")
+    
+    # Add last_deep_scan column to subdomain_asset
+    if 'last_deep_scan' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_deep_scan TEXT")
+
+    # Add last_dirsearch column to domain_asset and subdomain_asset
+    if 'last_dirsearch' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_dirsearch TEXT")
+    if 'last_dirsearch' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_dirsearch TEXT")
+
+    # Add last_liveness_check column to domain_asset and subdomain_asset
+    if 'last_liveness_check' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_liveness_check TEXT")
+    if 'last_liveness_check' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_liveness_check TEXT")
+
+    # Add last_wappalyzer_scan column to domain_asset and subdomain_asset
+    if 'last_wappalyzer_scan' not in domain_columns:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_wappalyzer_scan TEXT")
+    if 'last_wappalyzer_scan' not in subdomain_columns:
+        cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_wappalyzer_scan TEXT")
+    
+    # Add ports_found and dirs_found to scan_queue if not exists
+    cursor.execute("PRAGMA table_info(scan_queue)")
+    queue_columns = [col[1] for col in cursor.fetchall()]
+    if 'ports_found' not in queue_columns:
+        cursor.execute("ALTER TABLE scan_queue ADD COLUMN ports_found INTEGER DEFAULT 0")
+    if 'dirs_found' not in queue_columns:
+        cursor.execute("ALTER TABLE scan_queue ADD COLUMN dirs_found INTEGER DEFAULT 0")
+    if 'error_message' not in queue_columns:
+        cursor.execute("ALTER TABLE scan_queue ADD COLUMN error_message TEXT")
+
+    # Create token_blacklist table if not exists (migration for existing DBs)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS token_blacklist (
+            jti TEXT PRIMARY KEY,
+            user TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            created_at TEXT DEFAULT CURRENT_TIMESTAMP
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
+
+    conn.commit()
+    conn.close()
+    print("Database initialization complete.")
+
+
+def reset_db():
+    if os.path.exists(DB_NAME):
+        print(f"[!] Database found at: {DB_NAME}")
+        
+        while True:
+            choice = input("Do you want to rewrite the current database? This will reset the database back to nothing-ness (y/N): ").lower().strip()
+            
+            if choice == "" or choice == 'n':
+                print("[*] Skipping database rewrite...")
+                print("[*] Checking for corrupted data...")
+                init_db()
+                break
+            elif choice == 'y':
+                try:
+                    os.remove(DB_NAME)
+                    print("[+] Database successfully rewritten.")
+                    print("[*] Initializing new database...")
+                    init_db()
+                except OSError as e:
+                    print(f"[-] An error occurred when deleting database: {e}")
+                break
+            else:
+                print("[-] Input is not valid (y/n)")
+    else:
+        print("[*] No existing database found. Initializing...")
+        init_db()
+
+
+def show_schema():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+    tables = cursor.fetchall()
+    
+    print("\n=== DATABASE SCHEMA ===\n")
+    
+    for table in tables:
+        table_name = table[0]
+        print(f"Table: {table_name}")
+        
+        cursor.execute(f"PRAGMA table_info({table_name})")
+        columns = cursor.fetchall()
+        
+        for col in columns:
+            col_id, col_name, col_type, not_null, default_val, pk = col
+            pk_marker = " [PK]" if pk else ""
+            not_null_marker = " NOT NULL" if not_null else ""
+            default_marker = f" DEFAULT {default_val}" if default_val else ""
+            print(f"  - {col_name}: {col_type}{pk_marker}{not_null_marker}{default_marker}")
+        print()
+    
+    conn.close()
+
+
+if __name__ == "__main__":
+    reset_db()
+    show_schema()

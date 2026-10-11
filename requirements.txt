@@ -1,0 +1,12 @@
+flask
+pyjwt
+requests
+tldextract
+dnspython>=2.4.0
+python-dotenv
+python-Wappalyzer
+dirsearch
+psutil>=5.9.0
+setuptools<70
+google-genai
+nvdlib>=0.8.3
