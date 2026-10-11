@@ -876,9 +876,14 @@ def process_assets():
     
     # Parse input
     targets = parse_input(input_text)
-    
-    if not any(targets.values()):
-        flash('No valid assets found. Please check your input format.', 'error')
+    invalid = targets.get('invalid', [])
+    invalid_note = ''
+    if invalid:
+        shown = ', '.join(invalid[:5]) + (f' (+{len(invalid) - 5} more)' if len(invalid) > 5 else '')
+        invalid_note = f' Skipped {len(invalid)} invalid or oversized (larger than /20) entries: {shown}.'
+
+    if not any(v for k, v in targets.items() if k != 'invalid'):
+        flash('No valid assets found. Please check your input format.' + invalid_note, 'error')
         return redirect(url_for('dashboard'))
     
     # Log counts
@@ -890,7 +895,7 @@ def process_assets():
     thread.daemon = True
     thread.start()
     
-    flash(f'Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.', 'success')
+    flash('Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.' + invalid_note, 'success')
     return redirect(url_for('dashboard'))
 
 

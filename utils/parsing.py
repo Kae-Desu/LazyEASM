@@ -1,9 +1,8 @@
 """
 Shared parsing functions for LazyEASM.
 Used by:
-    - Parser.py (main entry)
+    - main.py (input form, unified phase1)
     - ExpandAsset.py (subdomain parsing)
-    - main.py (unified phase1)
 """
 
 import re
@@ -16,6 +15,11 @@ try:
     TLDEXTRACT_AVAILABLE = True
 except ImportError:
     TLDEXTRACT_AVAILABLE = False
+
+
+# Largest CIDR accepted as a target (4096 addresses, a /20 for IPv4).
+# Bigger ranges would be expanded into memory and pinged one by one.
+MAX_CIDR_ADDRESSES = 4096
 
 
 def normalize_hostname(hostname: str) -> str:
@@ -156,6 +160,7 @@ def expand_cidr(cidr: str) -> List[str]:
     Returns:
         List of IP addresses (excluding network and broadcast for /31 and below)
         For /31 and /32, returns all addresses in range
+        Empty list if invalid or larger than MAX_CIDR_ADDRESSES
     
     Examples:
         '192.168.1.0/30' → ['192.168.1.1', '192.168.1.2']
@@ -164,6 +169,9 @@ def expand_cidr(cidr: str) -> List[str]:
     """
     try:
         network = ipaddress.ip_network(cidr.strip(), strict=False)
+        
+        if network.num_addresses > MAX_CIDR_ADDRESSES:
+            return []
         
         # For small networks (>= /31), return all addresses
         if network.prefixlen >= 31:
@@ -211,7 +219,10 @@ def categorize_targets(items: List[str]) -> Dict[str, List[str]]:
 
         # Check if CIDR
         if validate_cidr(item):
-            cidrs.append(item)
+            if ipaddress.ip_network(item, strict=False).num_addresses > MAX_CIDR_ADDRESSES:
+                invalid.append(item)
+            else:
+                cidrs.append(item)
             continue
         
         # Check if valid domain/subdomain

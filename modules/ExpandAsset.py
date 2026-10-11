@@ -489,24 +489,9 @@ class Phase1Expander:
         stats = {'status': 'down', 'error': None}
         
         try:
-            from utils.utility import is_ip_live
-            
-            is_live = is_ip_live(ip, timeout=self.ping_timeout)
-            
-            is_shared, provider = is_shared_hosting(ip)
-            
-            upsert_ip(
-                ip_value=ip,
-                is_private=1 if is_private_ip(ip) else 0,
-                is_shared=1 if is_shared else 0,
-                shared_provider=provider or '',
-                status='up' if is_live else 'down'
-            )
-            
+            is_live, is_shared, provider = self._check_ip(ip)
+            self._store_ip(ip, is_live, is_shared, provider)
             stats['status'] = 'up' if is_live else 'down'
-            self.stats['ips_new'] += 1
-            
-            logger.info(f"Processed IP {ip}: {stats['status']}")
         
         except Exception as e:
             stats['error'] = str(e)
@@ -514,6 +499,26 @@ class Phase1Expander:
             logger.error(f"Error processing IP {ip}: {e}")
         
         return stats
+    
+    def _check_ip(self, ip: str) -> Tuple[bool, bool, Optional[str]]:
+        """Network checks for an IP (thread-safe, no DB access)."""
+        from utils.utility import is_ip_live
+        
+        is_live = is_ip_live(ip, timeout=self.ping_timeout)
+        is_shared, provider = is_shared_hosting(ip)
+        return is_live, is_shared, provider
+    
+    def _store_ip(self, ip: str, is_live: bool, is_shared: bool, provider: Optional[str]) -> None:
+        """Persist IP check results. Call from the main thread only (SQLite)."""
+        upsert_ip(
+            ip_value=ip,
+            is_private=1 if is_private_ip(ip) else 0,
+            is_shared=1 if is_shared else 0,
+            shared_provider=provider or '',
+            status='up' if is_live else 'down'
+        )
+        self.stats['ips_new'] += 1
+        logger.info(f"Processed IP {ip}: {'up' if is_live else 'down'}")
     
     def process_cidr(self, cidr: str) -> Dict:
         """
@@ -537,14 +542,21 @@ class Phase1Expander:
             
             logger.info(f"Processing CIDR {cidr}: {len(ips)} IPs")
             
-            # Process each IP
-            # Note: This could be slow for large CIDRs
-            # TODO: Add batch processing for CIDRs
-            for ip in ips:
-                result = self.process_ip(ip)
-                if result.get('status') == 'up':
-                    stats['ips_live'] += 1
-                stats['ips_processed'] += 1
+            # Liveness checks run concurrently; DB writes stay on this thread
+            with ThreadPoolExecutor(max_workers=self.max_ping_workers) as executor:
+                futures = {executor.submit(self._check_ip, ip): ip for ip in ips}
+                for future in as_completed(futures):
+                    ip = futures[future]
+                    try:
+                        is_live, is_shared, provider = future.result()
+                        self._store_ip(ip, is_live, is_shared, provider)
+                    except Exception as e:
+                        self.stats['errors'].append(f"{ip}: {e}")
+                        logger.error(f"Error processing IP {ip}: {e}")
+                        continue
+                    if is_live:
+                        stats['ips_live'] += 1
+                    stats['ips_processed'] += 1
             
             logger.info(f"CIDR {cidr}: {stats['ips_live']}/{stats['ips_processed']} IPs live")
         

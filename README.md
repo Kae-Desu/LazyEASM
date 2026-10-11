@@ -106,7 +106,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 
 ### Phase 2: Deep Scanning
 - **On-Demand Queue** - User-initiated deep scans per asset from dashboard
-- **Full Port Enumeration** - Nmap all 65535 ports with `-T5` timing
+- **Full Port Enumeration** - Nmap all 65535 ports with `-T3` timing
 - **Directory Discovery** - Dirsearch (25 threads, non-recursive)
 - **CDN-Aware** - Skips nmap for CDN/Cloudflare IPs, still runs dirsearch on hostname
 - **Discord Notifications** - Alerts on scan start, completion, and nmap skip
@@ -448,7 +448,6 @@ LazyEASM/
 ├── main.py                     # Flask application & routes
 ├── modules/
 │   ├── InitDB.py              # Database schema & migrations
-│   ├── Parser.py              # Input parsing (domains/IPs/CIDRs)
 │   ├── Nmap.py                # Nmap integration
 │   ├── ExpandAsset.py         # Phase 0 discovery pipeline
 │   ├── FindDir.py             # Directory enumeration

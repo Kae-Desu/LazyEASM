@@ -59,8 +59,9 @@ class CategorizeTargetsTests(unittest.TestCase):
         self.assertEqual(result["invalid"], [])
 
     def test_ipv6_cidr(self):
-        result = parsing.categorize_targets(["2001:db8::/32"])
-        self.assertEqual(result["cidrs"], ["2001:db8::/32"])
+        result = parsing.categorize_targets(["2001:db8::/120", "2001:db8::/32"])
+        self.assertEqual(result["cidrs"], ["2001:db8::/120"])
+        self.assertEqual(result["invalid"], ["2001:db8::/32"])
 
     def test_domains_and_subdomains(self):
         result = parsing.categorize_targets(["https://example.com/", "api.example.com:8080"])
@@ -91,6 +92,16 @@ class ExpandCidrTests(unittest.TestCase):
         self.assertEqual(parsing.expand_cidr("10.0.0.0/31"), ["10.0.0.0", "10.0.0.1"])
         self.assertEqual(parsing.expand_cidr("192.168.1.1/32"), ["192.168.1.1"])
         self.assertEqual(parsing.expand_cidr("nope"), [])
+
+    def test_oversized_cidr_is_rejected(self):
+        self.assertEqual(len(parsing.expand_cidr("10.0.0.0/20")), 4094)
+        self.assertEqual(parsing.expand_cidr("10.0.0.0/19"), [])
+        self.assertEqual(parsing.expand_cidr("2001:db8::/64"), [])
+
+    def test_oversized_cidr_is_categorized_invalid(self):
+        result = parsing.categorize_targets(["10.0.0.0/8", "10.1.0.0/20"])
+        self.assertEqual(result["invalid"], ["10.0.0.0/8"])
+        self.assertEqual(result["cidrs"], ["10.1.0.0/20"])
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ SCAN_PROFILES = {
     },
     'long': {
         'ports': '-p-',
-        'options': '-sV -T5',
+        'options': '-sV -T3',
         'description': 'Full scan (all 65535 ports)',
         'timeout': 1800
     }
@@ -224,14 +224,8 @@ class PortScanner:
         scan_config = SCAN_PROFILES.get(profile, SCAN_PROFILES['medium'])
         timeout = scan_config['timeout']
         
-        # Build command - ports argument needs to be split if it contains spaces
-        ports_args = scan_config['ports'].split()
-        
-        cmd = [
-            'nmap',
-            '-sV',
-            '-T3'
-        ] + ports_args + [
+        # Build command - options/ports need to be split if they contain spaces
+        cmd = ['nmap'] + scan_config['options'].split() + scan_config['ports'].split() + [
             '-oX', '-',
             target
         ]
