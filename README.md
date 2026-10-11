@@ -38,7 +38,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 
 **Docker Deployment**
 - `.env` file mounted as Docker volume to persist configuration across rebuilds
-- `FLASK_ENV` defaults to `development` to prevent HSTS/Secure cookie issues on HTTP deployments
+- HTTPS behavior is controlled by `FORCE_HTTPS` / `TRUST_PROXY` (see Environment Variables); debug mode is off unless `FLASK_DEBUG=true`
 
 **Bug Fixes**
 - Certificate expiry `days_remaining` uses `int()` (floor) instead of `round()` for accurate thresholds
@@ -300,7 +300,8 @@ Create a `.env` file with the following keys:
 # Security (auto-generated on first run if empty)
 FLASK_SECRET_KEY=your_secret_key
 JWT_SECRET=your_jwt_secret
-FLASK_ENV=production             # Set to 'development' for debug mode
+FORCE_HTTPS=false                # true when users reach LazyEASM over HTTPS
+TRUST_PROXY=false                # true behind a reverse proxy setting X-Forwarded-*
 
 # Admin credentials
 ADMIN_USER=lazymin
@@ -330,7 +331,9 @@ DISCORD_USER_ID=your_discord_id    # User to ping on alerts
 |----------|----------|-------------|
 | `FLASK_SECRET_KEY` | Yes | Flask session secret |
 | `JWT_SECRET` | Yes | JWT signing secret |
-| `FLASK_ENV` | No | `production` or `development` (default: `development`) |
+| `FORCE_HTTPS` | No | `true` to always send Secure cookies and HSTS (use when served over HTTPS, including TLS terminated at a proxy). `FLASK_ENV=production` is treated the same for older installs |
+| `TRUST_PROXY` | No | `true` to trust `X-Forwarded-For/Proto/Host` from one reverse proxy |
+| `FLASK_DEBUG` | No | `true` enables the Werkzeug debugger. Development only; never on a reachable host (default: `false`) |
 | `ADMIN_USER` | Yes | Admin username |
 | `ADMIN_PASS` | Yes | Admin password |
 | `SECURITYTRAILS_API_KEY` | No | SecurityTrails API key |

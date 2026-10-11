@@ -38,6 +38,26 @@ if not jwt_secret:
 app.secret_key = flask_secret
 JWT_SECRET = jwt_secret
 
+
+def env_flag(name: str) -> bool:
+    return (get_env(name) or '').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+# HTTPS is decided separately from debug mode. FORCE_HTTPS marks cookies Secure
+# and sends HSTS even when TLS is terminated by a proxy we cannot see.
+# FLASK_ENV=production keeps its old meaning (HTTPS-only) for existing installs.
+FORCE_HTTPS = env_flag('FORCE_HTTPS') or get_env('FLASK_ENV', '') == 'production'
+
+# Behind a reverse proxy, trust X-Forwarded-For/-Proto/-Host so request.is_secure
+# and the client IP used for login rate limiting are correct.
+if env_flag('TRUST_PROXY'):
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
+
+def is_https_request() -> bool:
+    return FORCE_HTTPS or request.is_secure
+
 SECURITY_HEADERS = {
     'X-Content-Type-Options': 'nosniff',
     'X-Frame-Options': 'DENY',
@@ -59,7 +79,7 @@ def add_security_headers(response):
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
     
-    if get_env('FLASK_ENV', 'development') == 'production':
+    if is_https_request():
         response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
     
     return response
@@ -125,13 +145,11 @@ def reset_failed_login(ip: str):
 
 
 def get_secure_cookie_kwargs():
-    # Check if running on localhost (dev mode)
-    # secure=True only works over HTTPS, so disable for localhost
-    is_localhost = request.remote_addr in ['127.0.0.1', '::1', 'localhost'] if request else True
-    
+    # Secure cookies are only sent back over HTTPS, so they are set whenever the
+    # request arrived over HTTPS (or FORCE_HTTPS says TLS ends at a proxy)
     return {
         'httponly': True,
-        'secure': get_env('FLASK_ENV', 'development') == 'production' and not is_localhost,
+        'secure': is_https_request(),
         'samesite': 'Lax'
     }
 
@@ -1447,5 +1465,6 @@ if __name__ == '__main__':
     start_phase3_workers()
     print("[Phase3] Monitoring workers started")
     
-    debug_mode = get_env('FLASK_ENV', 'development') == 'development'
-    app.run(debug=debug_mode, host='0.0.0.0', port=10001)
+    # Debug mode exposes the Werkzeug debugger; it is opt-in only. The reloader
+    # stays off because it runs this module twice and duplicates the workers.
+    app.run(debug=env_flag('FLASK_DEBUG'), use_reloader=False, host='0.0.0.0', port=10001)
