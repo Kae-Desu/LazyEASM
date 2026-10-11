@@ -239,8 +239,9 @@
                                 </div>
                             </div>
                         </div>
-                        <div class="space-y-3 pt-2 border-t border-border dark:border-white/5">
-                            <p class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-robot mr-1"></i>AI Recommendations</p>
+                        <details class="pt-2 border-t border-border dark:border-white/5">
+                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-robot mr-1"></i>AI Recommendations</summary>
+                            <div class="space-y-3 pt-3">
                             <div class="space-y-1.5">
                                 <label for="ai_provider" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Provider</label>
                                 <select id="ai_provider" name="AI_PROVIDER" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
@@ -297,9 +298,11 @@
                                     </div>
                                 </div>
                             </div>
-                        </div>
-                        <div class="space-y-3 pt-2 border-t border-border dark:border-white/5">
-                            <p class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-bell mr-1"></i>More Notification Channels</p>
+                            </div>
+                        </details>
+                        <details class="pt-2 border-t border-border dark:border-white/5">
+                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-bell mr-1"></i>More Notification Channels</summary>
+                            <div class="space-y-3 pt-3">
                             <div class="space-y-1.5">
                                 <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Slack Webhook URL</label>
                                 <div class="relative">
@@ -395,9 +398,11 @@
                             </div>
                                 </div>
                             </details>
-                        </div>
-                        <div class="space-y-3 pt-2 border-t border-border dark:border-white/5">
-                            <p class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-satellite-dish mr-1"></i>Discovery</p>
+                            </div>
+                        </details>
+                        <details class="pt-2 border-t border-border dark:border-white/5">
+                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-satellite-dish mr-1"></i>Discovery</summary>
+                            <div class="space-y-3 pt-3">
                             <div class="space-y-1.5">
                                 <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AlienVault OTX Key (optional)</label>
                                 <div class="relative">
@@ -407,7 +412,8 @@
                                     </button>
                                 </div>
                             </div>
-                        </div>
+                            </div>
+                        </details>
                         <button type="button" onclick="testWebhook()" class="w-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 rounded-xl transition-all border border-emerald-500/20 hover:bg-emerald-500/20">
                             <i class="fas fa-paper-plane mr-2"></i>Send Test Notification
                         </button>

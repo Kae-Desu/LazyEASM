@@ -211,7 +211,7 @@
 
             <div class="space-y-4 max-h-[400px] overflow-y-auto pr-2 custom-scrollbar">
                 {% if asset.security_findings %}
-                <h4 class="text-red-500 font-bold uppercase text-[10px] tracking-widest mb-4 flex items-center sticky top-0 bg-slate-50/50 dark:bg-lazy-dark/40 py-2">
+                <h4 class="text-red-500 font-bold uppercase text-[10px] tracking-widest mb-4 flex items-center py-2">
                     <i class="fas fa-triangle-exclamation mr-2"></i>Security Findings ({{ asset.security_findings|selectattr('status', 'equalto', 'open')|list|length }} open / {{ asset.security_findings|length }} total)
                 </h4>
                 {% for f in asset.security_findings %}
