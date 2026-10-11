@@ -88,14 +88,14 @@ def fetch_ctlogs(domain: str) -> tuple:
                     # Common name
                     if 'common_name' in entry:
                         cn = entry['common_name'].lower()
-                        if cn.endswith(domain_lower) or cn == domain_lower:
+                        if cn.endswith('.' + domain_lower) or cn == domain_lower:
                             subdomains.add(cn)
                     
                     # Subject Alternative Names
                     if 'name_value' in entry:
                         for name in entry['name_value'].split('\n'):
                             name = name.strip().lower()
-                            if name.endswith(domain_lower) or name == domain_lower:
+                            if name.endswith('.' + domain_lower) or name == domain_lower:
                                 subdomains.add(name)
                     
                     # Certificate info
@@ -103,7 +103,7 @@ def fetch_ctlogs(domain: str) -> tuple:
                     not_after = entry.get('not_after')
                     
                     if hostname and not_after:
-                        if hostname.endswith(domain_lower) or hostname == domain_lower:
+                        if hostname.endswith('.' + domain_lower) or hostname == domain_lower:
                             certificates.append({
                                 'hostname': hostname,
                                 'issuer': entry.get('issuer_name', ''),

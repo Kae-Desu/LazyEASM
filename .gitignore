@@ -99,3 +99,6 @@ temp/
 # Docker test
 docker-test/
 test-output.log
+
+# Bundled data files
+!data/*.txt

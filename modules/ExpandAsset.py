@@ -161,14 +161,14 @@ class Phase1Expander:
                         # Common name
                         if 'common_name' in entry:
                             cn = entry['common_name'].lower()
-                            if cn.endswith(domain_lower) or cn == domain_lower:
+                            if cn.endswith('.' + domain_lower) or cn == domain_lower:
                                 subdomains.add(cn)
                         
                         # Subject Alternative Names
                         if 'name_value' in entry:
                             for name in entry['name_value'].split('\n'):
                                 name = name.strip().lower()
-                                if name.endswith(domain_lower) or name == domain_lower:
+                                if name.endswith('.' + domain_lower) or name == domain_lower:
                                     subdomains.add(name)
                         
                         # Extract certificate info for expiry tracking
@@ -177,7 +177,7 @@ class Phase1Expander:
                         
                         if hostname and not_after:
                             # Match wildcard certs (*.domain) and direct matches
-                            if hostname.endswith(domain_lower) or hostname == domain_lower:
+                            if hostname.endswith('.' + domain_lower) or hostname == domain_lower:
                                 cert_key = f"{hostname}|{not_after}"
                                 if cert_key not in seen_certs:
                                     seen_certs.add(cert_key)
@@ -269,7 +269,8 @@ class Phase1Expander:
     
     def discover_subdomains(self, domain: str) -> tuple:
         """
-        Discover subdomains from CTLogs and SecurityTrails.
+        Discover subdomains from CTLogs, SecurityTrails and the extra passive
+        and DNS sources in utils/subdomain_discovery.py.
         
         Args:
             domain: Root domain
@@ -288,6 +289,14 @@ class Phase1Expander:
         # Source 2: SecurityTrails (requires API key)
         st_subs = self.get_securitytrails_subdomains(domain)
         subdomains.update(st_subs)
+        
+        # Sources 3+: Certspotter, HackerTarget, Wayback, OTX, DNS brute force/permutations
+        try:
+            from utils.subdomain_discovery import discover
+            extra, stats = discover(domain, {s.lower() for s in subdomains})
+            subdomains.update(extra)
+        except Exception as e:
+            logger.error(f"Extra subdomain discovery failed for {domain}: {e}")
         
         # Normalize and parse
         parsed = []

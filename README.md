@@ -89,7 +89,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 ## Features
 
 ### Phase 0: Asset Discovery
-- **Domain/Subdomain Discovery** - CTLogs (crt.sh) + SecurityTrails integration
+- **Domain/Subdomain Discovery** - Passive: crt.sh, Certspotter, HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; disable with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
 - **IP/CIDR Handling** - Automatic expansion and liveness detection
 - **DNS Resolution** - Parallel resolution with configurable workers
 - **Liveness Detection** - ICMP ping + TCP fallback (ports 80/443)
@@ -123,6 +123,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Wappalyzer Re-scanning** - Periodic technology re-fingerprinting (default: every 24 hours)
 - **Subdomain Takeover Detection** - Follows CNAME chains for every domain/subdomain (default: every 24 hours); flags services known to allow takeover (NXDOMAIN or unclaimed-page fingerprint) and dangling CNAMEs. Findings use the open / fixed / accepted / false positive lifecycle. Manual trigger: `/api/phase3/takeover/check`
 - **Exploit Intel Refresh** - Updates CISA KEV and EPSS data for all CVEs (default: every 24 hours) and right after scans that find new CVEs. Sends a Discord alert when a CVE with an open finding is (or becomes) known exploited. Manual trigger: `/api/phase3/intel/check`
+- **Subdomain Discovery Monitor** - Re-runs all discovery sources daily for every root domain and queues new subdomains for scanning
 - **Misconfiguration Checks** - Runs daily on every HTTP service and on risky ports of public, non-CDN IPs, and right after an asset is scanned. Discord alert for new medium+ findings. Manual trigger: `/api/phase3/misconfig/check`
   - Exposed `.git`, `.env`, `.htpasswd` (high), Apache `server-status`, `phpinfo.php`, directory listing (medium), `.DS_Store` (low). Every file check needs a content signature, not just HTTP 200, and redirects are not followed, so soft-404 and login pages do not trigger findings
   - Invalid TLS certificate (expired, self-signed, wrong hostname) and TLS 1.0/1.1 still enabled (medium)
@@ -526,6 +527,7 @@ LazyEASM/
 │   ├── takeover_checker.py    # Subdomain takeover / dangling CNAME checks (Phase 3)
 │   ├── threat_intel.py        # CISA KEV + EPSS prioritization (Phase 3)
 │   ├── misconfig_checker.py   # Exposed files, TLS, headers, risky ports (Phase 3)
+│   ├── subdomain_discovery.py # Extra passive sources + DNS brute force / permutations
 │   ├── process_utils.py       # Process detection utilities
 │   └── ct_monitor.py         # CT logs polling + cert tracking
 ├── templates/

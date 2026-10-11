@@ -8,6 +8,7 @@ Orchestrates:
     - Subdomain takeover check (every 24 hours)
     - Exploit intel refresh: CISA KEV + EPSS (every 24 hours)
     - Misconfiguration checks (every 24 hours)
+    - Extra subdomain discovery: passive sources + DNS brute force (every 24 hours)
 
 Exports:
     - start_phase3_workers()
@@ -261,6 +262,34 @@ def send_misconfig_notification(result: dict):
         logger.error(f"Failed to send misconfiguration notification: {e}")
 
 
+def send_discovery_notification(result: dict):
+    """
+    Send Discord notification for subdomains found by the discovery monitor.
+
+    Args:
+        result: Dict from run_discovery_monitor()
+    """
+    try:
+        from modules.Notify import send_message
+
+        new = result['new_subdomains']
+        lines = [
+            "**Subdomain Discovery**",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"\n**New Subdomains:** {len(new)} (queued for scanning)",
+            "",
+        ]
+        for domain, subdomain in new[:15]:
+            lines.append(f"• {subdomain}")
+        if len(new) > 15:
+            lines.append(f"• ... and {len(new) - 15} more")
+
+        send_message('\n'.join(lines))
+
+    except Exception as e:
+        logger.error(f"Failed to send discovery notification: {e}")
+
+
 POLL_SECONDS = 5
 
 
@@ -331,6 +360,13 @@ def _run_misconfig():
         send_misconfig_notification(result)
 
 
+def _run_discovery():
+    from utils.subdomain_discovery import run_discovery_monitor
+    result = run_discovery_monitor()
+    if result.get('new_subdomains'):
+        send_discovery_notification(result)
+
+
 # name -> (setting key, default, seconds per unit, run function)
 MONITORS = {
     'liveness': ('liveness_interval_min', 5, 60, _run_liveness),
@@ -339,6 +375,7 @@ MONITORS = {
     'takeover': ('takeover_interval_hr', 24, 3600, _run_takeover),
     'intel': ('intel_interval_hr', 24, 3600, _run_intel),
     'misconfig': ('misconfig_interval_hr', 24, 3600, _run_misconfig),
+    'discovery': ('discovery_interval_hr', 24, 3600, _run_discovery),
 }
 
 _threads = {}
@@ -412,12 +449,14 @@ def get_phase3_status() -> dict:
         'last_takeover_check': get_setting('last_takeover_check') or '-',
         'last_intel_check': get_setting('last_intel_check') or '-',
         'last_misconfig_check': get_setting('last_misconfig_check') or '-',
+        'last_discovery_check': get_setting('last_discovery_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
         'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
         'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
         'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24'),
         'intel_interval_hr': int(get_setting('intel_interval_hr') or '24'),
         'misconfig_interval_hr': int(get_setting('misconfig_interval_hr') or '24'),
+        'discovery_interval_hr': int(get_setting('discovery_interval_hr') or '24'),
     }
 
 

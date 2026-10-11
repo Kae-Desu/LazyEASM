@@ -416,6 +416,10 @@
                                 <span class="text-slate-400">Misconfig:</span>
                                 <span id="last-misconfig" class="font-mono dark:text-white">-</span>
                             </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Discovery:</span>
+                                <span id="last-discovery" class="font-mono dark:text-white">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1156,6 +1160,7 @@
                 document.getElementById('last-takeover').textContent = formatRelativeTime(data.last_takeover_check);
                 document.getElementById('last-intel').textContent = formatRelativeTime(data.last_intel_check);
                 document.getElementById('last-misconfig').textContent = formatRelativeTime(data.last_misconfig_check);
+                document.getElementById('last-discovery').textContent = formatRelativeTime(data.last_discovery_check);
                 
                 // Start or stop auto-refresh based on enabled status
                 if (data.enabled) {
