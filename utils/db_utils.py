@@ -34,7 +34,9 @@ DB_PATH = os.path.join(BASE_DIR, "db", "lazyeasm.db")
 
 def get_db_connection():
     """Get database connection with row factory."""
-    conn = sqlite3.connect(DB_PATH)
+    # The web and worker processes share this file: wait for locks instead of
+    # failing immediately (WAL mode is enabled once in InitDB.init_db)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.execute("PRAGMA foreign_keys = ON;")
     conn.row_factory = sqlite3.Row
     return conn

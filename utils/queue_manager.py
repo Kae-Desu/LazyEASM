@@ -2,280 +2,270 @@
 Queue Manager for Phase 1 processing.
 
 Architecture:
-    - In-memory queue (queue.Queue)
-    - ThreadPoolExecutor(max_workers=4)
-    - Each worker processes one asset completely:
-      nmap → wappalyzer → dirsearch → cve → discord
-
-No persistence - queue state lost on restart.
+    - The scan_queue table is the queue (scan_type='phase1'), so any process
+      can enqueue and the dashboard can read status from the database
+    - Phase1Worker runs only in the worker process: it claims pending rows
+      atomically and processes up to 4 assets at a time
+      (nmap -> wappalyzer -> cve -> intel -> misconfig)
+    - On worker start, rows left 'running' by a crash go back to 'pending'
 """
 
-import queue
-import threading
 import logging
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
 
+PHASE1 = 'phase1'
+MAX_WORKERS = 4
+
+
+def _now() -> str:
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+
+def _db():
+    from utils.db_utils import get_db_connection
+    return get_db_connection()
+
 
 class TaskQueue:
-    """In-memory task queue with 4 workers."""
-    
-    def __init__(self, max_workers: int = 4):
-        self.queue = queue.Queue()
-        self.executor = ThreadPoolExecutor(max_workers=max_workers)
-        self.workers = []
-        self._lock = threading.Lock()
-        
-        self.stats = {
-            'pending': 0,
-            'running': 0,
-            'completed': 0,
-            'failed': 0,
-            'total': 0,
-            'active': False
-        }
-    
-    def _cleanup_workers(self):
-        """Remove completed futures from workers list."""
-        before = len(self.workers)
-        self.workers = [f for f in self.workers if not f.done()]
-        after = len(self.workers)
-        if before != after:
-            logger.debug(f"Cleaned up {before - after} completed workers")
-    
-    def enqueue(self, target_id: int, target_type: str, target_name: str):
+    """Database-backed Phase 1 queue. Safe to use from the web and worker processes."""
+
+    def enqueue(self, target_id: Optional[int], target_type: str, target_name: str) -> int:
         """
-        Add asset to queue. Updates DB scan_queue table.
-        
-        Args:
-            target_id: Database ID (dom_id, sub_id, or ip_id)
-            target_type: 'domain', 'subdomain', or 'ip'
-            target_name: Hostname or IP address
-        """
-        task = {
-            'target_id': target_id,
-            'target_type': target_type,
-            'target_name': target_name,
-            'queued_at': datetime.now()
-        }
-        
-        # Insert to DB
-        queue_id = self._insert_to_db(task)
-        task['queue_id'] = queue_id
-        
-        # Add to in-memory queue
-        self.queue.put(task)
-        
-        with self._lock:
-            self.stats['pending'] += 1
-            self.stats['total'] += 1
-            self.stats['active'] = True
-        
-        # Clean up finished workers before checking
-        self._cleanup_workers()
-        
-        # Start worker if available
-        if len(self.workers) < self.executor._max_workers:
-            future = self.executor.submit(self._worker)
-            self.workers.append(future)
-            logger.debug(f"Started new worker, total: {len(self.workers)}")
-        
-        logger.info(f"Enqueued: {target_name} (queue_id={queue_id})")
-    
-    def get_status(self) -> Dict:
-        """Return current queue status."""
-        with self._lock:
-            return self.stats.copy()
-    
-    def is_active(self) -> bool:
-        """Check if queue has pending/running tasks."""
-        with self._lock:
-            return self.stats['active']
-    
-    def get_workers_status(self) -> Dict:
-        """
-        Get status of Phase 1 worker threads.
-        
+        Add an asset to the queue unless it is already pending or running.
+
         Returns:
-            {
-                'max_workers': int,
-                'active_workers': int,
-                'workers_alive': bool
-            }
+            queue_id of the new or existing row
         """
-        self._cleanup_workers()
-        
-        active_workers = len([f for f in self.workers if f.running()])
-        
+        conn = _db()
+        try:
+            existing = conn.execute('''
+                SELECT queue_id FROM scan_queue
+                WHERE scan_type = ? AND target = ? AND status IN ('pending', 'running')
+            ''', (PHASE1, target_name)).fetchone()
+            if existing:
+                return existing['queue_id']
+
+            # A new batch starts when the queue was idle
+            idle = conn.execute('''
+                SELECT COUNT(*) AS n FROM scan_queue
+                WHERE scan_type = ? AND status IN ('pending', 'running')
+            ''', (PHASE1,)).fetchone()['n'] == 0
+            now = _now()
+            if idle:
+                conn.execute('''
+                    INSERT INTO settings (key, value, updated_at) VALUES (?, ?, ?)
+                    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+                ''', ('phase1_batch_started_at', now, now))
+
+            cursor = conn.execute('''
+                INSERT INTO scan_queue (scan_type, cycle, target, target_id, target_type, status, queued_at)
+                VALUES (?, 'standard', ?, ?, ?, 'pending', ?)
+            ''', (PHASE1, target_name, target_id, target_type, now))
+            conn.commit()
+            logger.info(f"Enqueued: {target_name} (queue_id={cursor.lastrowid})")
+            return cursor.lastrowid
+        finally:
+            conn.close()
+
+    def get_status(self) -> Dict:
+        """Counts for the current batch; all zero when the queue is idle."""
+        conn = _db()
+        try:
+            counts = {row['status']: row['n'] for row in conn.execute('''
+                SELECT status, COUNT(*) AS n FROM scan_queue
+                WHERE scan_type = ? AND status IN ('pending', 'running')
+                GROUP BY status
+            ''', (PHASE1,))}
+            pending, running = counts.get('pending', 0), counts.get('running', 0)
+            active = pending + running > 0
+
+            completed = failed = 0
+            if active:
+                started = conn.execute("SELECT value FROM settings WHERE key = 'phase1_batch_started_at'").fetchone()
+                done = {row['status']: row['n'] for row in conn.execute('''
+                    SELECT status, COUNT(*) AS n FROM scan_queue
+                    WHERE scan_type = ? AND status IN ('completed', 'failed') AND queued_at >= ?
+                    GROUP BY status
+                ''', (PHASE1, started['value'] if started else ''))}
+                completed, failed = done.get('completed', 0), done.get('failed', 0)
+        finally:
+            conn.close()
+
         return {
-            'max_workers': self.executor._max_workers,
-            'active_workers': active_workers,
-            'workers_alive': active_workers > 0 or self.stats['pending'] == 0
+            'pending': pending,
+            'running': running,
+            'completed': completed,
+            'failed': failed,
+            'total': pending + running + completed + failed,
+            'active': active,
         }
-    
-    def _worker(self):
-        """Process tasks from queue."""
-        worker_id = id(threading.current_thread())
-        logger.debug(f"Worker {worker_id} started")
-        
+
+    def is_active(self) -> bool:
+        return self.get_status()['active']
+
+
+class Phase1Worker:
+    """Processes the Phase 1 queue. Run exactly one per deployment (the worker process)."""
+
+    def __init__(self, max_workers: int = MAX_WORKERS, poll_seconds: float = 3.0):
+        self.max_workers = max_workers
+        self.poll_seconds = poll_seconds
+        self._running = False
+        self._thread = None
+        self._executor = None
+        self._in_flight = 0
+        self._batch = {'completed': 0, 'failed': 0}
+        self._lock = threading.Lock()
+
+    def start(self):
+        if self._running:
+            return
+        self.recover_interrupted()
+        self._running = True
+        self._executor = ThreadPoolExecutor(max_workers=self.max_workers, thread_name_prefix='Phase1')
+        self._thread = threading.Thread(target=self._loop, daemon=True, name='Phase1-Dispatcher')
+        self._thread.start()
+        logger.info(f"[Phase1] Worker started ({self.max_workers} slots)")
+
+    def stop(self):
+        self._running = False
+        if self._executor:
+            self._executor.shutdown(wait=False, cancel_futures=True)
+
+    def is_alive(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    @staticmethod
+    def recover_interrupted() -> int:
+        """Put rows left 'running' by a previous worker back to 'pending'."""
+        conn = _db()
+        try:
+            cursor = conn.execute('''
+                UPDATE scan_queue SET status = 'pending', started_at = NULL
+                WHERE scan_type = ? AND status = 'running'
+            ''', (PHASE1,))
+            conn.commit()
+            if cursor.rowcount:
+                logger.warning(f"[Phase1] Re-queued {cursor.rowcount} interrupted tasks")
+            return cursor.rowcount
+        finally:
+            conn.close()
+
+    @staticmethod
+    def claim_next() -> Optional[dict]:
+        """Atomically move the oldest pending row to 'running' and return it."""
+        conn = _db()
         try:
             while True:
-                try:
-                    task = self.queue.get(timeout=60)
-                    if task is None:
-                        break
-                    
-                    self._process_task(task)
-                    self.queue.task_done()
-                    
-                except queue.Empty:
-                    with self._lock:
-                        self.stats['active'] = False
-                    logger.debug(f"Worker {worker_id} exiting (idle)")
-                    break
-                except Exception as e:
-                    logger.error(f"Worker {worker_id} error: {e}")
+                row = conn.execute('''
+                    SELECT queue_id, target, target_id, target_type FROM scan_queue
+                    WHERE scan_type = ? AND status = 'pending'
+                    ORDER BY queued_at, queue_id LIMIT 1
+                ''', (PHASE1,)).fetchone()
+                if not row:
+                    return None
+                cursor = conn.execute('''
+                    UPDATE scan_queue SET status = 'running', started_at = ?
+                    WHERE queue_id = ? AND status = 'pending'
+                ''', (_now(), row['queue_id']))
+                conn.commit()
+                if cursor.rowcount == 1:
+                    return dict(row)
+                # another process claimed it first; try the next one
         finally:
-            self._cleanup_workers()
-    
-    def _process_task(self, task: Dict):
-        """Run Phase 1 pipeline for one asset."""
-        queue_id = task['queue_id']
-        target_name = task['target_name']
-        
-        logger.info(f"Processing: {target_name}")
-        
-        # Update status: running
-        self._update_db_status(queue_id, 'running')
-        with self._lock:
-            self.stats['pending'] -= 1
-            self.stats['running'] += 1
-        
+            conn.close()
+
+    def _loop(self):
+        while self._running:
+            try:
+                dispatched = False
+                with self._lock:
+                    free = self._in_flight < self.max_workers
+                if free:
+                    task = self.claim_next()
+                    if task:
+                        with self._lock:
+                            self._in_flight += 1
+                        self._executor.submit(self._run_task, task)
+                        dispatched = True
+                if not dispatched:
+                    self._check_batch_complete()
+                    time.sleep(self.poll_seconds)
+            except Exception as e:
+                logger.error(f"[Phase1] Dispatcher error: {e}")
+                time.sleep(self.poll_seconds)
+
+    def _run_task(self, task: dict):
+        name = task['target']
+        logger.info(f"[Phase1] Processing: {name}")
         try:
-            # Run Phase 1
             from modules.phase1_runner import run_phase1
-            stats = run_phase1(
-                asset_id=task['target_id'],
-                asset_type=task['target_type'],
-                asset_name=target_name
-            )
-            
-            # Update status: completed
-            self._update_db_status(queue_id, 'completed', **stats)
-            with self._lock:
-                self.stats['running'] -= 1
-                self.stats['completed'] += 1
-            
-            logger.info(f"Completed: {target_name}")
-            
-            # Check if all tasks complete
-            self._check_completion()
-            
+            stats = run_phase1(asset_id=task['target_id'], asset_type=task['target_type'], asset_name=name)
+            self._finish(task['queue_id'], 'completed', stats)
+            logger.info(f"[Phase1] Completed: {name}")
         except Exception as e:
-            # Update status: failed
-            self._update_db_status(queue_id, 'failed', error_message=str(e))
+            self._finish(task['queue_id'], 'failed', {'error_message': str(e)})
+            logger.error(f"[Phase1] Failed: {name} - {e}")
+        finally:
             with self._lock:
-                self.stats['running'] -= 1
-                self.stats['failed'] += 1
-            
-            logger.error(f"Failed: {target_name} - {e}")
-            
-            # Check if all tasks complete
-            self._check_completion()
-    
-    def _insert_to_db(self, task: Dict) -> int:
-        """Insert task to scan_queue table, return queue_id."""
-        from utils.db_utils import get_db_connection
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT OR IGNORE INTO scan_queue (scan_type, cycle, target, target_id, target_type, status)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', ('phase1', 'standard', task['target_name'], task['target_id'], 
-              task['target_type'], 'pending'))
-        
-        queue_id = cursor.lastrowid
-        conn.commit()
-        conn.close()
-        
-        return queue_id or 0
-    
-    def _update_db_status(self, queue_id: int, status: str, **kwargs):
-        """Update scan_queue status."""
-        from utils.db_utils import get_db_connection
-        
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        if status == 'running':
-            cursor.execute('''
-                UPDATE scan_queue SET status=?, started_at=? WHERE queue_id=?
-            ''', (status, now, queue_id))
-        elif status == 'completed':
-            cursor.execute('''
-                UPDATE scan_queue SET status=?, completed_at=?, ports_found=?, tech_found=?, cve_found=?
-                WHERE queue_id=?
-            ''', (status, now, kwargs.get('ports_found', 0), kwargs.get('tech_found', 0), 
-                  kwargs.get('cve_found', 0), queue_id))
-        elif status == 'failed':
-            cursor.execute('''
-                UPDATE scan_queue SET status=?, completed_at=?, error_message=? WHERE queue_id=?
-            ''', (status, now, kwargs.get('error_message', ''), queue_id))
-        
-        conn.commit()
-        conn.close()
-    
-    def _check_completion(self):
-        """
-        Check if all Phase 1 tasks are complete.
-        If yes, send Discord notification and reset stats.
-        """
+                self._in_flight -= 1
+
+    def _finish(self, queue_id: int, status: str, stats: dict):
+        conn = _db()
+        try:
+            if status == 'completed':
+                conn.execute('''
+                    UPDATE scan_queue SET status = ?, completed_at = ?, ports_found = ?, tech_found = ?, cve_found = ?
+                    WHERE queue_id = ?
+                ''', (status, _now(), stats.get('ports_found', 0), stats.get('tech_found', 0),
+                      stats.get('cve_found', 0), queue_id))
+            else:
+                conn.execute('''
+                    UPDATE scan_queue SET status = ?, completed_at = ?, error_message = ? WHERE queue_id = ?
+                ''', (status, _now(), stats.get('error_message', ''), queue_id))
+            conn.commit()
+        finally:
+            conn.close()
         with self._lock:
-            # Only notify if all tasks done and we had tasks
-            if self.stats['pending'] == 0 and self.stats['running'] == 0:
-                if self.stats['completed'] > 0 or self.stats['failed'] > 0:
-                    self._send_completion_notification()
-                    # Reset stats for next batch
-                    self.stats['completed'] = 0
-                    self.stats['failed'] = 0
-                    self.stats['total'] = 0
-                    self.stats['active'] = False
-    
-    def _send_completion_notification(self):
-        """Send Discord notification when all Phase 1 tasks complete."""
+            self._batch[status] += 1
+
+    def _check_batch_complete(self):
+        """Send the completion notification once the queue drains after work was done."""
+        with self._lock:
+            if self._in_flight or not (self._batch['completed'] or self._batch['failed']):
+                return
+        if task_queue.get_status()['active']:
+            return
+        with self._lock:
+            completed, failed = self._batch['completed'], self._batch['failed']
+            self._batch = {'completed': 0, 'failed': 0}
+        self._send_completion_notification(completed, failed)
+
+    @staticmethod
+    def _send_completion_notification(completed: int, failed: int):
         try:
             from modules.Notify import send_message
-            
-            completed = self.stats['completed']
-            failed = self.stats['failed']
+
             total = completed + failed
-            
-            lines = [
-                "**Initialization Complete**",
-                "━━━━━━━━━━━━━━━━━━"
-            ]
-            
+            lines = ["**Initialization Complete**", "━━━━━━━━━━━━━━━━━━"]
             if failed == 0:
                 lines.append(f"**Processed:** {completed}/{total}")
             else:
                 lines.append(f"**Completed:** {completed}/{total}")
                 lines.append(f"**Failed:** {failed}/{total}")
-            
             lines.append("All assets have been scanned.")
-            
             send_message('\n'.join(lines))
             logger.info(f"Phase 1 completion notification sent: {completed} completed, {failed} failed")
-            
         except Exception as e:
             logger.error(f"Failed to send completion notification: {e}")
 
 
-# Global singleton
-task_queue = TaskQueue(max_workers=4)
+# Global singletons
+task_queue = TaskQueue()
+phase1_worker = Phase1Worker()

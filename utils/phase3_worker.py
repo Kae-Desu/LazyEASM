@@ -24,12 +24,6 @@ logger = logging.getLogger(__name__)
 
 # Global state
 _phase3_running = False
-_liveness_thread = None
-_ctlogs_thread = None
-_wappalyzer_thread = None
-_takeover_thread = None
-_intel_thread = None
-_misconfig_thread = None
 
 
 def send_liveness_notification(result: dict):
@@ -267,392 +261,151 @@ def send_misconfig_notification(result: dict):
         logger.error(f"Failed to send misconfiguration notification: {e}")
 
 
-def liveness_loop(interval_min: int = 5):
+POLL_SECONDS = 5
+
+
+def _monitor_loop(name: str, interval_seconds: int, run_once):
     """
-    Liveness checker loop.
-    
-    Runs every interval_min minutes if Phase 3 is enabled.
-    
-    Args:
-        interval_min: Interval in minutes (default: 5)
+    Run run_once() every interval_seconds while Phase 3 is enabled.
+
+    The enabled flag is re-read every few seconds, so toggling monitoring in
+    the dashboard (web process) takes effect in the worker process promptly.
+    A check that already ran is not repeated before its interval passes.
     """
-    global _phase3_running
-    
+    from utils.db_utils import get_setting
+
+    logger.info(f"{name} thread started")
+    last_run = None
+    while _phase3_running:
+        try:
+            due = last_run is None or time.monotonic() - last_run >= interval_seconds
+            if due and get_setting('phase3_enabled') == '1':
+                last_run = time.monotonic()
+                logger.info(f"Running {name}...")
+                run_once()
+        except Exception as e:
+            logger.error(f"{name} error: {e}")
+        time.sleep(POLL_SECONDS)
+    logger.info(f"{name} thread stopped")
+
+
+def _run_liveness():
     from utils.liveness_checker import check_all_liveness
-    from utils.db_utils import get_setting
-    
-    logger.info("Liveness checker thread started")
-    
-    while _phase3_running:
-        try:
-            # Check if still enabled
-            if get_setting('phase3_enabled') == '1':
-                logger.info("Running liveness check...")
-                result = check_all_liveness()
-                
-                # Send notification if any changes
-                if result['down'] or result['recovered']:
-                    send_liveness_notification(result)
-            else:
-                logger.debug("Phase 3 disabled, skipping liveness check")
-        
-        except Exception as e:
-            logger.error(f"Liveness check error: {e}")
-        
-        # Sleep in small intervals to allow quick shutdown
-        sleep_seconds = interval_min * 60
-        elapsed = 0
-        while elapsed < sleep_seconds and _phase3_running:
-            time.sleep(5)
-            elapsed += 5
-    
-    logger.info("Liveness checker thread stopped")
+    result = check_all_liveness()
+    if result['down'] or result['recovered']:
+        send_liveness_notification(result)
 
 
-def ctlogs_loop(interval_hr: int = 1):
-    """
-    CT logs poller loop.
-    
-    Runs every interval_hr hours if Phase 3 is enabled.
-    
-    Args:
-        interval_hr: Interval in hours (default: 1)
-    """
-    global _phase3_running
-    
+def _run_ctlogs():
     from utils.ct_monitor import poll_all_domains
-    from utils.db_utils import get_setting
-    
-    logger.info("CT logs monitor thread started")
-    
-    while _phase3_running:
-        try:
-            # Check if still enabled
-            if get_setting('phase3_enabled') == '1':
-                logger.info("Polling CT logs...")
-                result = poll_all_domains()
-                
-                # Send notification if any discoveries
-                has_alerts = result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()) or result.get('signature_changes')
-                if has_alerts:
-                    send_ctlogs_notification(result)
-            else:
-                logger.debug("Phase 3 disabled, skipping CT logs poll")
-        
-        except Exception as e:
-            logger.error(f"CT logs poll error: {e}")
-        
-        # Sleep in small intervals to allow quick shutdown
-        sleep_seconds = interval_hr * 3600
-        elapsed = 0
-        while elapsed < sleep_seconds and _phase3_running:
-            time.sleep(5)
-            elapsed += 5
-    
-    logger.info("CT logs monitor thread stopped")
+    result = poll_all_domains()
+    if result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()) or result.get('signature_changes'):
+        send_ctlogs_notification(result)
 
 
-def wappalyzer_loop(interval_hr: int = 24):
-    """
-    Wappalyzer re-scan loop.
-    
-    Runs every interval_hr hours if Phase 3 is enabled.
-    Scans hosts with HTTP services and status='up'.
-    
-    Args:
-        interval_hr: Interval in hours (default: 24)
-    """
-    global _phase3_running
-    
+def _run_wappalyzer():
     from utils.wappalyzer_monitor import run_wappalyzer_scan
-    from utils.db_utils import get_setting
-    
-    logger.info("Wappalyzer monitor thread started")
-    
-    while _phase3_running:
-        try:
-            if get_setting('phase3_enabled') == '1':
-                logger.info("Running Wappalyzer re-scan...")
-                result = run_wappalyzer_scan()
-                
-                if result.get('new_cves'):
-                    send_wappalyzer_notification(result)
-            else:
-                logger.debug("Phase 3 disabled, skipping Wappalyzer scan")
-        
-        except Exception as e:
-            logger.error(f"Wappalyzer scan error: {e}")
-        
-        # Sleep in small intervals to allow quick shutdown
-        sleep_seconds = interval_hr * 3600
-        elapsed = 0
-        while elapsed < sleep_seconds and _phase3_running:
-            time.sleep(5)
-            elapsed += 5
-    
-    logger.info("Wappalyzer monitor thread stopped")
+    result = run_wappalyzer_scan()
+    if result.get('new_cves'):
+        send_wappalyzer_notification(result)
 
 
-def takeover_loop(interval_hr: int = 24):
-    """
-    Subdomain takeover check loop.
-
-    Runs every interval_hr hours if Phase 3 is enabled.
-    Checks every domain/subdomain, including ones marked down.
-
-    Args:
-        interval_hr: Interval in hours (default: 24)
-    """
-    global _phase3_running
-
+def _run_takeover():
     from utils.takeover_checker import run_takeover_check
-    from utils.db_utils import get_setting
-
-    logger.info("Takeover monitor thread started")
-
-    while _phase3_running:
-        try:
-            if get_setting('phase3_enabled') == '1':
-                logger.info("Running subdomain takeover check...")
-                result = run_takeover_check()
-
-                if result.get('new_findings'):
-                    send_takeover_notification(result)
-            else:
-                logger.debug("Phase 3 disabled, skipping takeover check")
-
-        except Exception as e:
-            logger.error(f"Takeover check error: {e}")
-
-        # Sleep in small intervals to allow quick shutdown
-        sleep_seconds = interval_hr * 3600
-        elapsed = 0
-        while elapsed < sleep_seconds and _phase3_running:
-            time.sleep(5)
-            elapsed += 5
-
-    logger.info("Takeover monitor thread stopped")
+    result = run_takeover_check()
+    if result.get('new_findings'):
+        send_takeover_notification(result)
 
 
-def intel_loop(interval_hr: int = 24):
-    """
-    Exploit intel refresh loop (CISA KEV + EPSS).
-
-    Runs every interval_hr hours if Phase 3 is enabled.
-
-    Args:
-        interval_hr: Interval in hours (default: 24)
-    """
-    global _phase3_running
-
+def _run_intel():
     from utils.threat_intel import refresh_threat_intel
-    from utils.db_utils import get_setting
-
-    logger.info("Threat intel thread started")
-
-    while _phase3_running:
-        try:
-            if get_setting('phase3_enabled') == '1':
-                logger.info("Refreshing exploit intel (KEV/EPSS)...")
-                result = refresh_threat_intel()
-
-                if result.get('newly_kev'):
-                    send_kev_notification(result)
-            else:
-                logger.debug("Phase 3 disabled, skipping intel refresh")
-
-        except Exception as e:
-            logger.error(f"Threat intel refresh error: {e}")
-
-        # Sleep in small intervals to allow quick shutdown
-        sleep_seconds = interval_hr * 3600
-        elapsed = 0
-        while elapsed < sleep_seconds and _phase3_running:
-            time.sleep(5)
-            elapsed += 5
-
-    logger.info("Threat intel thread stopped")
+    result = refresh_threat_intel()
+    if result.get('newly_kev'):
+        send_kev_notification(result)
 
 
-def misconfig_loop(interval_hr: int = 24):
-    """
-    Misconfiguration check loop.
-
-    Runs every interval_hr hours if Phase 3 is enabled.
-
-    Args:
-        interval_hr: Interval in hours (default: 24)
-    """
-    global _phase3_running
-
+def _run_misconfig():
     from utils.misconfig_checker import run_misconfig_check
-    from utils.db_utils import get_setting
+    result = run_misconfig_check()
+    if result.get('new_findings'):
+        send_misconfig_notification(result)
 
-    logger.info("Misconfiguration monitor thread started")
 
-    while _phase3_running:
-        try:
-            if get_setting('phase3_enabled') == '1':
-                logger.info("Running misconfiguration check...")
-                result = run_misconfig_check()
+# name -> (setting key, default, seconds per unit, run function)
+MONITORS = {
+    'liveness': ('liveness_interval_min', 5, 60, _run_liveness),
+    'ctlogs': ('ctlogs_interval_hr', 1, 3600, _run_ctlogs),
+    'wappalyzer': ('wappalyzer_interval_hr', 24, 3600, _run_wappalyzer),
+    'takeover': ('takeover_interval_hr', 24, 3600, _run_takeover),
+    'intel': ('intel_interval_hr', 24, 3600, _run_intel),
+    'misconfig': ('misconfig_interval_hr', 24, 3600, _run_misconfig),
+}
 
-                if result.get('new_findings'):
-                    send_misconfig_notification(result)
-            else:
-                logger.debug("Phase 3 disabled, skipping misconfiguration check")
-
-        except Exception as e:
-            logger.error(f"Misconfiguration check error: {e}")
-
-        # Sleep in small intervals to allow quick shutdown
-        sleep_seconds = interval_hr * 3600
-        elapsed = 0
-        while elapsed < sleep_seconds and _phase3_running:
-            time.sleep(5)
-            elapsed += 5
-
-    logger.info("Misconfiguration monitor thread stopped")
+_threads = {}
 
 
 def start_phase3_workers():
     """
-    Start all Phase 3 monitoring threads.
-    
-    Checks settings for enabled status and intervals.
+    Start all Phase 3 monitoring threads (worker process only).
+
+    Threads always start; each one runs only while phase3_enabled is '1'.
+    Intervals are read at start, so changing one requires a worker restart.
     """
-    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread, _takeover_thread, _intel_thread, _misconfig_thread
-    
+    global _phase3_running
+
     from utils.db_utils import get_setting
-    
-    # Check if enabled
-    if get_setting('phase3_enabled') != '1':
-        logger.info("Phase 3 monitoring is disabled")
-        return
-    
-    # Prevent duplicate threads
+
     if _phase3_running:
         logger.warning("Phase 3 workers already running")
         return
-    
     _phase3_running = True
-    
-    # Get intervals
-    liveness_interval = int(get_setting('liveness_interval_min') or '5')
-    ctlogs_interval = int(get_setting('ctlogs_interval_hr') or '1')
-    wappalyzer_interval = int(get_setting('wappalyzer_interval_hr') or '24')
-    takeover_interval = int(get_setting('takeover_interval_hr') or '24')
-    intel_interval = int(get_setting('intel_interval_hr') or '24')
-    misconfig_interval = int(get_setting('misconfig_interval_hr') or '24')
-    
-    logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr, wappalyzer: {wappalyzer_interval}hr, takeover: {takeover_interval}hr)")
-    
-    # Start liveness thread
-    _liveness_thread = threading.Thread(
-        target=liveness_loop,
-        args=(liveness_interval,),
-        daemon=True,
-        name='Phase3-Liveness'
-    )
-    _liveness_thread.start()
-    
-    # Start CT logs thread
-    _ctlogs_thread = threading.Thread(
-        target=ctlogs_loop,
-        args=(ctlogs_interval,),
-        daemon=True,
-        name='Phase3-CTLogs'
-    )
-    _ctlogs_thread.start()
-    
-    # Start Wappalyzer monitor thread
-    _wappalyzer_thread = threading.Thread(
-        target=wappalyzer_loop,
-        args=(wappalyzer_interval,),
-        daemon=True,
-        name='Phase3-Wappalyzer'
-    )
-    _wappalyzer_thread.start()
-    
-    # Start subdomain takeover thread
-    _takeover_thread = threading.Thread(
-        target=takeover_loop,
-        args=(takeover_interval,),
-        daemon=True,
-        name='Phase3-Takeover'
-    )
-    _takeover_thread.start()
 
-    # Start exploit intel thread
-    _intel_thread = threading.Thread(
-        target=intel_loop,
-        args=(intel_interval,),
-        daemon=True,
-        name='Phase3-Intel'
-    )
-    _intel_thread.start()
+    intervals = {}
+    for name, (key, default, unit, run_once) in MONITORS.items():
+        value = int(get_setting(key) or default)
+        intervals[name] = value
+        _threads[name] = threading.Thread(
+            target=_monitor_loop,
+            args=(f"Phase 3 {name}", value * unit, run_once),
+            daemon=True,
+            name=f'Phase3-{name}'
+        )
+        _threads[name].start()
 
-    # Start misconfiguration check thread
-    _misconfig_thread = threading.Thread(
-        target=misconfig_loop,
-        args=(misconfig_interval,),
-        daemon=True,
-        name='Phase3-Misconfig'
-    )
-    _misconfig_thread.start()
-    
-    logger.info("Phase 3 workers started")
+    logger.info(f"Phase 3 workers started (intervals: {intervals})")
 
 
 def stop_phase3_workers():
-    """
-    Stop all Phase 3 monitoring threads.
-    """
+    """Stop all Phase 3 monitoring threads."""
     global _phase3_running
-    
+
     logger.info("Stopping Phase 3 workers...")
     _phase3_running = False
-    
-    # Wait for threads to finish (max 10 seconds each)
-    if _liveness_thread and _liveness_thread.is_alive():
-        _liveness_thread.join(timeout=10)
-    
-    if _ctlogs_thread and _ctlogs_thread.is_alive():
-        _ctlogs_thread.join(timeout=10)
-    
-    if _wappalyzer_thread and _wappalyzer_thread.is_alive():
-        _wappalyzer_thread.join(timeout=10)
-
-    if _takeover_thread and _takeover_thread.is_alive():
-        _takeover_thread.join(timeout=10)
-
-    if _intel_thread and _intel_thread.is_alive():
-        _intel_thread.join(timeout=10)
-
-    if _misconfig_thread and _misconfig_thread.is_alive():
-        _misconfig_thread.join(timeout=10)
-    
+    for thread in _threads.values():
+        if thread.is_alive():
+            thread.join(timeout=10)
     logger.info("Phase 3 workers stopped")
+
+
+def phase3_threads_alive() -> bool:
+    """True when every monitor thread is running in this process."""
+    return bool(_threads) and all(t.is_alive() for t in _threads.values())
 
 
 def get_phase3_status() -> dict:
     """
-    Get current Phase 3 status.
-    
-    Returns:
-        {
-            'running': bool,
-            'enabled': bool,
-            'last_liveness_check': str,
-            'last_ctlogs_check': str,
-            'liveness_interval_min': int,
-            'ctlogs_interval_hr': int
-        }
+    Get current Phase 3 status (works from any process).
+
+    'running' means the worker process is alive and monitoring is enabled.
     """
     from utils.db_utils import get_setting
-    
+    from utils.worker_runtime import get_worker_status
+
+    enabled = get_setting('phase3_enabled') == '1'
+    worker = get_worker_status()
     return {
-        'running': _phase3_running,
-        'enabled': get_setting('phase3_enabled') == '1',
+        'running': enabled and worker['alive'] and worker['components'].get('phase3', False),
+        'enabled': enabled,
         'last_liveness_check': get_setting('last_liveness_check') or '-',
         'last_ctlogs_check': get_setting('last_ctlogs_check') or '-',
         'last_wappalyzer_check': get_setting('last_wappalyzer_check') or '-',
@@ -664,7 +417,7 @@ def get_phase3_status() -> dict:
         'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
         'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24'),
         'intel_interval_hr': int(get_setting('intel_interval_hr') or '24'),
-        'misconfig_interval_hr': int(get_setting('misconfig_interval_hr') or '24')
+        'misconfig_interval_hr': int(get_setting('misconfig_interval_hr') or '24'),
     }
 
 
@@ -674,13 +427,13 @@ if __name__ == '__main__':
         level=logging.INFO,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
-    
+
     parser = argparse.ArgumentParser(description='Phase 3 Worker')
     parser.add_argument('--start', action='store_true', help='Start workers (foreground)')
     parser.add_argument('--status', action='store_true', help='Get status')
-    
+
     args = parser.parse_args()
-    
+
     if args.start:
         print("Starting Phase 3 workers (press Ctrl+C to stop)...")
         start_phase3_workers()

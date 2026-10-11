@@ -221,7 +221,7 @@ def process_phase0_item(item: dict):
         logger.info(f"[Phase0] Completed: {subdomain} - {stats.get('ips_resolved', 0)} IPs resolved")
         
         # Enqueue for Phase 1
-        from main import enqueue_single_asset_for_phase1
+        from utils.pipeline import enqueue_single_asset_for_phase1
         enqueue_single_asset_for_phase1(subdomain, 'subdomain')
         
         return True

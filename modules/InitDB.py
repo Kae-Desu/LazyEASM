@@ -33,8 +33,11 @@ DB_NAME = os.path.join(DB_DIR, "lazyeasm.db")
 
 
 def init_db():
-    conn = sqlite3.connect(DB_NAME)
+    conn = sqlite3.connect(DB_NAME, timeout=30)
     conn.execute("PRAGMA foreign_keys = ON;")
+    # WAL lets the web process read while the worker writes. The setting is
+    # stored in the database file, so it applies to every later connection.
+    conn.execute("PRAGMA journal_mode = WAL;")
     cursor = conn.cursor()
 
     print(f"Connection initialized to {DB_NAME}")

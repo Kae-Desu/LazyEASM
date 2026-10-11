@@ -18,6 +18,7 @@ from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_conf
 from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
+from utils.pipeline import enqueue_input_discovery, enqueue_assets_for_phase1, enqueue_single_asset_for_phase1
 from utils.asset_repository import AssetQueryError, get_asset_detail, list_assets
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
@@ -424,18 +425,15 @@ def health():
             'status': 'healthy' | 'unhealthy',
             'checks': {
                 'database': 'ok' | 'error: ...',
-                'phase0_worker': 'ok' | 'error: ...',
-                'phase1_queue': 'ok' | 'error: ...',
-                'phase2_worker': 'ok' | 'error: ...',
-                'phase3_liveness': 'ok' | 'error: ...',
-                'phase3_ctlogs': 'ok' | 'error: ...'
+                'worker': 'ok' | 'error: ...',
+                'phase0_worker' / 'discovery_worker' / 'phase1_worker' /
+                'phase2_worker' / 'phase3_worker': 'ok' | 'error: ...',
+                'phase1_queue': 'ok' | 'error: ...'
             }
         }
     """
     from flask import request
-    from utils.phase0_worker import get_phase0_status
-    from utils.phase2_worker import get_phase2_status
-    from utils.phase3_worker import get_phase3_status
+    from utils.worker_runtime import get_worker_status
     
     # Check if request is from localhost (no auth required)
     client_ip = request.remote_addr
@@ -468,53 +466,33 @@ def health():
         checks['database'] = f'error: {str(e)[:50]}'
         all_healthy = False
     
-    # 2. Phase 0 worker check
+    # 2. Background worker (separate process): heartbeat freshness + components
     try:
-        phase0_status = get_phase0_status()
-        if phase0_status.get('thread_alive'):
-            checks['phase0_worker'] = 'ok'
-        else:
-            checks['phase0_worker'] = 'error: thread not running'
+        worker = get_worker_status()
+        if not worker['alive']:
+            age = worker['age_seconds']
+            checks['worker'] = 'error: no heartbeat' if age is None else f'error: last heartbeat {age:.0f}s ago'
             all_healthy = False
+        else:
+            checks['worker'] = 'ok'
+        for name in ('phase0', 'discovery', 'phase1', 'phase2', 'phase3'):
+            if worker['alive'] and worker['components'].get(name):
+                checks[f'{name}_worker'] = 'ok'
+            else:
+                checks[f'{name}_worker'] = 'error: not running'
+                all_healthy = False
     except Exception as e:
-        checks['phase0_worker'] = f'error: {str(e)[:50]}'
+        checks['worker'] = f'error: {str(e)[:50]}'
         all_healthy = False
-    
-    # 3. Phase 1 queue check (ThreadPoolExecutor creates threads on demand)
+
+    # 3. Phase 1 queue readable
     try:
-        queue_status = task_queue.get_status()
-        workers_status = task_queue.get_workers_status()
-        # Consider healthy if queue exists and process is running
+        task_queue.get_status()
         checks['phase1_queue'] = 'ok'
     except Exception as e:
         checks['phase1_queue'] = f'error: {str(e)[:50]}'
         all_healthy = False
-    
-    # 4. Phase 2 worker check
-    try:
-        phase2_status = get_phase2_status()
-        if phase2_status.get('thread_alive'):
-            checks['phase2_worker'] = 'ok'
-        else:
-            checks['phase2_worker'] = 'error: thread not running'
-            all_healthy = False
-    except Exception as e:
-        checks['phase2_worker'] = f'error: {str(e)[:50]}'
-        all_healthy = False
-    
-    # 5. Phase 3 workers check
-    try:
-        phase3_status = get_phase3_status()
-        
-        if phase3_status.get('running'):
-            checks['phase3_workers'] = 'ok'
-        else:
-            checks['phase3_workers'] = 'error: workers not running'
-            all_healthy = False
-    except Exception as e:
-        checks['phase3_workers'] = f'error: {str(e)[:50]}'
-        all_healthy = False
-    
+
     status_code = 200 if all_healthy else 503
     return jsonify({
         'status': 'healthy' if all_healthy else 'unhealthy',
@@ -937,151 +915,11 @@ def process_assets():
     counts = {k: len(v) for k, v in targets.items()}
     print(f"[Phase 1] Assets received: {counts}")
     
-    # Start background thread for Phase 1
-    thread = threading.Thread(target=run_phase1_background, args=(targets,))
-    thread.daemon = True
-    thread.start()
+    # Discovery runs in the worker process
+    enqueue_input_discovery(targets)
     
     flash('Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.' + invalid_note, 'success')
     return redirect(url_for('dashboard'))
-
-
-def run_phase1_background(targets: dict):
-    """
-    Background worker for Phase 0 (Asset Discovery).
-    
-    After Phase 0 completes, enqueues assets for Phase 1 processing.
-    Sends Discord notification on completion or error.
-    """
-    import importlib
-    
-    try:
-        # Import module (filename starts with number, use importlib)
-        phase1_module = importlib.import_module('modules.ExpandAsset')
-        
-        # Initialize expander
-        expander = phase1_module.Phase1Expander()
-        
-        # Run Phase 0 (Asset Discovery)
-        stats = expander.run_phase1(targets)
-        
-        # Send success notification for Phase 0
-        message = (
-            f"**Parsing Complete**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"**Domains added:** {stats['domains_added']}\n"
-            f"**Subdomains discovered:** {stats['subdomains_discovered']}\n"
-            f"**New subdomains:** {stats['subdomains_new']}\n"
-            f"**IPs resolved:** {stats['ips_resolved']}\n"
-            f"**Time:** {stats['time_elapsed']:.1f}s"
-        )
-        
-        if stats['errors']:
-            message += f"\n**Errors:** {len(stats['errors'])}"
-        
-        discord_send_message(message)
-        print(f"[Phase 0] Complete: {stats}")
-        
-        # After Phase 0, enqueue assets for Phase 1
-        if stats['domains_added'] > 0 or stats['subdomains_new'] > 0 or stats['ips_resolved'] > 0:
-            enqueue_assets_for_phase1()
-            discord_send_message(f"**Initialization Queued**: Processing assets...")
-        
-    except Exception as e:
-        # Send error notification
-        import traceback
-        error_msg = f"**Parsing Failed**\nError: {str(e)}"
-        discord_send_message(error_msg)
-        print(f"[Phase 0] Error: {e}")
-        traceback.print_exc()
-
-
-def enqueue_assets_for_phase1():
-    """
-    Enqueue all discovered assets from database for Phase 1 processing.
-    
-    Only enqueues assets that haven't been scanned yet (last_scanned IS NULL).
-    Queries domain_asset, subdomain_asset, and ip_asset tables
-    for assets with status='up'.
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        # Enqueue domains that haven't been scanned
-        cursor.execute('''
-            SELECT dom_id, domain_name FROM domain_asset 
-            WHERE status='up' AND last_scanned IS NULL
-        ''')
-        for row in cursor.fetchall():
-            task_queue.enqueue(row['dom_id'], 'domain', row['domain_name'])
-        
-        # Enqueue subdomains that haven't been scanned
-        cursor.execute('''
-            SELECT sub_id, subdomain_name FROM subdomain_asset 
-            WHERE status='up' AND last_scanned IS NULL
-        ''')
-        for row in cursor.fetchall():
-            task_queue.enqueue(row['sub_id'], 'subdomain', row['subdomain_name'])
-        
-        # Enqueue IPs (standalone, not linked to domain/subdomain) that haven't been scanned
-        cursor.execute('''
-            SELECT ip_id, ip_value FROM ip_asset 
-            WHERE status='up' AND last_scanned IS NULL
-              AND ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
-        ''')
-        for row in cursor.fetchall():
-            task_queue.enqueue(row['ip_id'], 'ip', row['ip_value'])
-        
-        conn.close()
-        
-        print(f"[Queue] Enqueued assets for Phase 1")
-        
-    except Exception as e:
-        print(f"[Queue] Error enqueueing assets: {e}")
-
-
-def enqueue_single_asset_for_phase1(asset_name: str, asset_type: str):
-    """
-    Enqueue a single asset for Phase 1 processing.
-    
-    Uses INSERT OR IGNORE to prevent duplicates.
-    Called by Phase 0 worker after processing each subdomain.
-    
-    Args:
-        asset_name: Domain, subdomain, or IP name
-        asset_type: 'domain', 'subdomain', or 'ip'
-    """
-    try:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        
-        now = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Get asset ID based on type
-        asset_id = None
-        if asset_type == 'domain':
-            cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (asset_name,))
-            row = cursor.fetchone()
-            asset_id = row['dom_id'] if row else None
-        elif asset_type == 'subdomain':
-            cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (asset_name,))
-            row = cursor.fetchone()
-            asset_id = row['sub_id'] if row else None
-        
-        # Insert into queue
-        cursor.execute('''
-            INSERT OR IGNORE INTO scan_queue (scan_type, cycle, target, target_id, target_type, status, queued_at)
-            VALUES ('phase1', 'standard', ?, ?, ?, 'pending', ?)
-        ''', (asset_name, asset_id, asset_type, now))
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"[Phase0] Enqueued {asset_name} for Phase 1")
-        
-    except Exception as e:
-        print(f"[Phase0] Error enqueueing {asset_name}: {e}")
 
 
 # ============================================
@@ -1302,19 +1140,13 @@ def phase3_status():
 def phase3_toggle():
     """Enable or disable Phase 3 monitoring."""
     from utils.db_utils import set_setting
-    from utils.phase3_worker import start_phase3_workers, stop_phase3_workers, get_phase3_status
+    from utils.phase3_worker import get_phase3_status
     
     data = request.get_json() or {}
     enabled = data.get('enabled', True)
     
-    # Update setting
+    # The worker process re-reads this flag every few seconds
     set_setting('phase3_enabled', '1' if enabled else '0')
-    
-    # Start or stop workers
-    if enabled:
-        start_phase3_workers()
-    else:
-        stop_phase3_workers()
     
     status = get_phase3_status()
     
@@ -1436,35 +1268,31 @@ def phase3_misconfig_check():
     })
 
 
+def serve_web():
+    """Serve the app with waitress (production WSGI server), or Flask's debug server if FLASK_DEBUG."""
+    host = get_env('HOST', '0.0.0.0')
+    port = int(get_env('PORT', '10001'))
+    if env_flag('FLASK_DEBUG'):
+        # Debug mode exposes the Werkzeug debugger; it is opt-in only. The
+        # reloader stays off because it runs this module twice.
+        app.run(debug=True, use_reloader=False, host=host, port=port)
+        return
+    from waitress import serve
+    logger.info(f"Serving LazyEASM on http://{host}:{port}")
+    serve(app, host=host, port=port, threads=int(get_env('WEB_THREADS', '8')))
+
+
 if __name__ == '__main__':
+    # LAZYEASM_ROLE=web serves only the web app (run.py starts worker.py
+    # separately). The default "all" also runs the background workers in this
+    # process, for local development with a single `python main.py`.
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
     from modules.InitDB import init_db
     init_db()
 
-    # Start Phase 2 worker in background thread
-    from utils.phase2_worker import phase2_worker_loop, _phase2_thread as phase2_thread_ref
-    import utils.phase2_worker
-    
-    worker_thread = threading.Thread(
-        target=phase2_worker_loop,
-        args=(5,),
-        daemon=True
-    )
-    worker_thread.start()
-    
-    # Store thread reference for health check
-    utils.phase2_worker._phase2_thread = worker_thread
-    print("[Phase2] Worker thread started")
-    
-    # Start Phase 0 worker in background thread
-    from utils.phase0_worker import start_phase0_worker
-    start_phase0_worker()
-    print("[Phase0] Discovery worker started")
-    
-    # Start Phase 3 workers in background
-    from utils.phase3_worker import start_phase3_workers
-    start_phase3_workers()
-    print("[Phase3] Monitoring workers started")
-    
-    # Debug mode exposes the Werkzeug debugger; it is opt-in only. The reloader
-    # stays off because it runs this module twice and duplicates the workers.
-    app.run(debug=env_flag('FLASK_DEBUG'), use_reloader=False, host='0.0.0.0', port=10001)
+    if get_env('LAZYEASM_ROLE', 'all') != 'web':
+        from utils.worker_runtime import start_background_workers
+        start_background_workers()
+
+    serve_web()

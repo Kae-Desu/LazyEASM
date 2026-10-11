@@ -191,7 +191,7 @@ start_native() {
 
     setup_venv
 
-    .venv/bin/python main.py
+    .venv/bin/python run.py
 }
 
 MODE="docker"

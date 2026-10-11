@@ -34,4 +34,5 @@ else
     echo "         http://localhost:10001"
 fi
 
-python /app/main.py
+# Web app and background worker run as separate processes (see run.py)
+exec python /app/run.py

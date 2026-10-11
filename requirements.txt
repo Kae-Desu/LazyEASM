@@ -1,4 +1,5 @@
 flask
+waitress>=3.0
 pyjwt
 requests
 tldextract

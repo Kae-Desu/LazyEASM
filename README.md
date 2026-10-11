@@ -288,9 +288,25 @@ cp .env.example .env
 # Initialize database
 python modules/InitDB.py
 
-# Run the application
-python main.py
+# Run the application (web app + background worker as separate processes)
+python run.py
 ```
+
+### How LazyEASM Runs
+
+`run.py` (used by Docker and `start.sh`) starts two processes:
+
+| Process | Command | Does |
+|---------|---------|------|
+| Web | `main.py` with `LAZYEASM_ROLE=web` | Serves the dashboard and API with [waitress](https://docs.pylonsproject.org/projects/waitress/) |
+| Worker | `worker.py` | Runs every queue (asset discovery, Phase 0/1/2) and the Phase 3 monitors |
+
+- The two share the SQLite database (WAL mode). Submitting assets queues a job that the worker picks up, so restarting the web app never interrupts a scan, and queued work survives restarts: jobs a crash left half-done are re-queued when the worker starts.
+- If either process exits, `run.py` stops the other and exits, so Docker's restart policy restarts LazyEASM.
+- The worker writes a heartbeat every 15 seconds; `/health` reports it per component (`phase0_worker`, `discovery_worker`, `phase1_worker`, `phase2_worker`, `phase3_worker`).
+- Run exactly one worker per database.
+- For local development, `python main.py` runs the web app and the worker in one process. `FLASK_DEBUG=true` switches to Flask's debug server (never on a reachable host).
+- `HOST`, `PORT` (default `0.0.0.0:10001`) and `WEB_THREADS` (default `8`) configure the web server.
 
 ## Configuration
 
@@ -479,7 +495,9 @@ graph.
 
 ```
 LazyEASM/
-├── main.py                     # Flask application & routes
+├── run.py                      # Starts the web and worker processes
+├── main.py                     # Flask application & routes (web process)
+├── worker.py                   # Background worker process
 ├── modules/
 │   ├── InitDB.py              # Database schema & migrations
 │   ├── Nmap.py                # Nmap integration
@@ -497,7 +515,9 @@ LazyEASM/
 │   ├── env_manager.py         # .env file management
 │   ├── parsing.py             # Input parsing utilities
 │   ├── utility.py             # DNS, Ping, shared hosting detection
-│   ├── queue_manager.py       # Task queue for Phase 1
+│   ├── queue_manager.py       # Database-backed Phase 1 queue and worker
+│   ├── pipeline.py            # Asset discovery and Phase 1 enqueueing
+│   ├── worker_runtime.py      # Starts background components, heartbeat, crash recovery
 │   ├── phase0_worker.py       # Background worker for Phase 0 queue
 │   ├── phase2_worker.py       # Background worker for Phase 2 queue
 │   ├── phase3_worker.py       # Phase 3 monitoring orchestrator
