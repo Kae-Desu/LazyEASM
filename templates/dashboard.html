@@ -189,6 +189,17 @@
                         <input type="hidden" name="CLEAR_ANTHROPIC_API_KEY" value="0" id="clear_ANTHROPIC_API_KEY">
                         <input type="hidden" name="CLEAR_AI_MODEL" value="0" id="clear_AI_MODEL">
                         <input type="hidden" name="CLEAR_AI_BASE_URL" value="0" id="clear_AI_BASE_URL">
+                        <input type="hidden" name="CLEAR_SLACK_WEBHOOK_URL" value="0" id="clear_SLACK_WEBHOOK_URL">
+                        <input type="hidden" name="CLEAR_NOTIFY_WEBHOOK_URL" value="0" id="clear_NOTIFY_WEBHOOK_URL">
+                        <input type="hidden" name="CLEAR_NOTIFY_WEBHOOK_SECRET" value="0" id="clear_NOTIFY_WEBHOOK_SECRET">
+                        <input type="hidden" name="CLEAR_SMTP_HOST" value="0" id="clear_SMTP_HOST">
+                        <input type="hidden" name="CLEAR_SMTP_PORT" value="0" id="clear_SMTP_PORT">
+                        <input type="hidden" name="CLEAR_SMTP_SECURITY" value="0" id="clear_SMTP_SECURITY">
+                        <input type="hidden" name="CLEAR_SMTP_USERNAME" value="0" id="clear_SMTP_USERNAME">
+                        <input type="hidden" name="CLEAR_SMTP_PASSWORD" value="0" id="clear_SMTP_PASSWORD">
+                        <input type="hidden" name="CLEAR_SMTP_FROM" value="0" id="clear_SMTP_FROM">
+                        <input type="hidden" name="CLEAR_SMTP_TO" value="0" id="clear_SMTP_TO">
+                        <input type="hidden" name="CLEAR_OTX_API_KEY" value="0" id="clear_OTX_API_KEY">
                         
                         <div class="space-y-1.5">
                             <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord Webhook URL</label>
@@ -287,8 +298,118 @@
                                 </div>
                             </div>
                         </div>
+                        <div class="space-y-3 pt-2 border-t border-border dark:border-white/5">
+                            <p class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-bell mr-1"></i>More Notification Channels</p>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Slack Webhook URL</label>
+                                <div class="relative">
+                                    <input type="password" name="SLACK_WEBHOOK_URL" value="" placeholder="{{ config.SLACK_WEBHOOK_URL.masked if config.SLACK_WEBHOOK_URL.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SLACK_WEBHOOK_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Generic Webhook URL (JSON POST)</label>
+                                <div class="relative">
+                                    <input type="text" name="NOTIFY_WEBHOOK_URL" value="" placeholder="{{ config.NOTIFY_WEBHOOK_URL.value if config.NOTIFY_WEBHOOK_URL.value else 'https://example.com/hooks/lazyeasm' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'NOTIFY_WEBHOOK_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Webhook Signing Secret (optional)</label>
+                                <div class="relative">
+                                    <input type="password" name="NOTIFY_WEBHOOK_SECRET" value="" placeholder="{{ config.NOTIFY_WEBHOOK_SECRET.masked if config.NOTIFY_WEBHOOK_SECRET.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'NOTIFY_WEBHOOK_SECRET')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <details class="rounded-xl border border-border dark:border-white/10 px-4 py-2">
+                                <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider">Email (SMTP)</summary>
+                                <div class="space-y-3 pt-3">
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">SMTP Host</label>
+                                <div class="relative">
+                                    <input type="text" name="SMTP_HOST" value="" placeholder="{{ config.SMTP_HOST.value if config.SMTP_HOST.value else 'smtp.example.com' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_HOST')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">SMTP Port</label>
+                                <div class="relative">
+                                    <input type="text" name="SMTP_PORT" value="" placeholder="{{ config.SMTP_PORT.value if config.SMTP_PORT.value else '587' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_PORT')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Security (starttls / ssl / none)</label>
+                                <div class="relative">
+                                    <input type="text" name="SMTP_SECURITY" value="" placeholder="{{ config.SMTP_SECURITY.value if config.SMTP_SECURITY.value else 'starttls' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_SECURITY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Username</label>
+                                <div class="relative">
+                                    <input type="text" name="SMTP_USERNAME" value="" placeholder="{{ config.SMTP_USERNAME.value if config.SMTP_USERNAME.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_USERNAME')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Password</label>
+                                <div class="relative">
+                                    <input type="password" name="SMTP_PASSWORD" value="" placeholder="{{ config.SMTP_PASSWORD.masked if config.SMTP_PASSWORD.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_PASSWORD')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">From Address</label>
+                                <div class="relative">
+                                    <input type="text" name="SMTP_FROM" value="" placeholder="{{ config.SMTP_FROM.value if config.SMTP_FROM.value else 'lazyeasm@example.com' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_FROM')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Recipients (comma separated)</label>
+                                <div class="relative">
+                                    <input type="text" name="SMTP_TO" value="" placeholder="{{ config.SMTP_TO.value if config.SMTP_TO.value else 'secops@example.com' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_TO')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                                </div>
+                            </details>
+                        </div>
+                        <div class="space-y-3 pt-2 border-t border-border dark:border-white/5">
+                            <p class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-satellite-dish mr-1"></i>Discovery</p>
+                            <div class="space-y-1.5">
+                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AlienVault OTX Key (optional)</label>
+                                <div class="relative">
+                                    <input type="password" name="OTX_API_KEY" value="" placeholder="{{ config.OTX_API_KEY.masked if config.OTX_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    <button type="button" onclick="openConfirmModal('clear_field', 'OTX_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
                         <button type="button" onclick="testWebhook()" class="w-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 rounded-xl transition-all border border-emerald-500/20 hover:bg-emerald-500/20">
-                            <i class="fas fa-paper-plane mr-2"></i>Test Discord Webhook
+                            <i class="fas fa-paper-plane mr-2"></i>Send Test Notification
                         </button>
                         <button type="button" onclick="openConfirmModal('save')" class="w-full bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:opacity-90">
                             <i class="fas fa-save mr-2"></i>Save Engine Config
@@ -427,9 +548,16 @@
         </div>
 
         <div class="mt-6">
-            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
-                <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
-            </h3>
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-4 px-2">
+                <h3 class="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center">
+                    <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
+                </h3>
+                <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
+                    <a href="/api/export/assets.csv" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent transition-colors"><i class="fas fa-file-csv mr-1"></i>Assets CSV</a>
+                    <a href="/api/export/findings.csv?status=open" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent transition-colors"><i class="fas fa-file-csv mr-1"></i>Open Findings CSV</a>
+                    <a href="/api/export/findings.json" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent transition-colors"><i class="fas fa-file-code mr-1"></i>All Findings JSON</a>
+                </div>
+            </div>
             <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
                 <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
                     <table class="min-w-[800px] w-full text-sm text-left">

@@ -95,7 +95,18 @@ KEY_NAMES = {
     'AI_BASE_URL': 'AI Base URL',
     'GEMINI_API_KEY': 'Gemini Key',
     'OPENAI_API_KEY': 'OpenAI Key',
-    'ANTHROPIC_API_KEY': 'Anthropic Key'
+    'ANTHROPIC_API_KEY': 'Anthropic Key',
+    'SLACK_WEBHOOK_URL': 'Slack Webhook',
+    'NOTIFY_WEBHOOK_URL': 'Webhook URL',
+    'NOTIFY_WEBHOOK_SECRET': 'Webhook Secret',
+    'SMTP_HOST': 'SMTP Host',
+    'SMTP_PORT': 'SMTP Port',
+    'SMTP_SECURITY': 'SMTP Security',
+    'SMTP_USERNAME': 'SMTP Username',
+    'SMTP_PASSWORD': 'SMTP Password',
+    'SMTP_FROM': 'SMTP From',
+    'SMTP_TO': 'SMTP Recipients',
+    'OTX_API_KEY': 'OTX Key'
 }
 
 ACCESS_TOKEN_LIFETIME = datetime.timedelta(minutes=15)
@@ -692,6 +703,38 @@ def api_changes():
     changes = get_changes(host=request.args.get('host') or None, change_type=request.args.get('type') or None,
                           since=request.args.get('since') or None, limit=limit, offset=offset)
     return jsonify({'success': True, 'changes': changes, 'limit': limit, 'offset': offset})
+
+
+@app.route('/api/export/<dataset>.<fmt>', methods=['GET'])
+@token_required
+def export_data(dataset, fmt):
+    """
+    Download assets or findings as CSV or JSON.
+    
+    /api/export/assets.csv, /api/export/assets.json
+    /api/export/findings.csv, /api/export/findings.json  (?status=open|fixed|accepted|false_positive)
+    """
+    from utils import export
+    from utils.db_utils import get_findings_for_export
+    from utils.asset_repository import export_assets
+    
+    if fmt not in ('csv', 'json') or dataset not in ('assets', 'findings'):
+        return jsonify({'success': False, 'error': 'Use /api/export/<assets|findings>.<csv|json>'}), 404
+    
+    if dataset == 'assets':
+        rows, columns = [export.flatten_asset(a) for a in export_assets()], export.ASSET_COLUMNS
+    else:
+        status = request.args.get('status') or None
+        if status and status not in VULN_STATUSES:
+            return jsonify({'success': False, 'error': f"status must be one of: {', '.join(VULN_STATUSES)}"}), 400
+        rows, columns = get_findings_for_export(status), export.FINDING_COLUMNS
+    
+    body = export.to_csv(rows, columns) if fmt == 'csv' else export.to_json(rows, columns)
+    filename = f"lazyeasm-{dataset}-{datetime.datetime.now().strftime('%Y%m%d-%H%M')}.{fmt}"
+    response = make_response(body)
+    response.headers['Content-Type'] = 'text/csv; charset=utf-8' if fmt == 'csv' else 'application/json'
+    response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
+    return response
 
 
 @app.route('/update_table')

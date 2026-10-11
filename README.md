@@ -107,7 +107,8 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
   - **P3** - CVSS >= 7.0 with no exploitation signal
   - **P4** - everything else
 - **AI Recommendations** - Vulnerability analysis with Google Gemini, Anthropic Claude, OpenAI, or any OpenAI-compatible endpoint (e.g. a local Ollama model)
-- **Discord Notifications** - Real-time alerts for completed scans and CVEs
+- **Notifications** - Discord, Slack, a generic JSON webhook (optionally HMAC-signed with `NOTIFY_WEBHOOK_SECRET`: header `X-LazyEASM-Signature: sha256=<hex>`), and email over SMTP. Every configured channel receives every alert; configure them in the dashboard and use "Send Test Notification"
+- **Export** - Assets and findings (CVEs + security findings with priority, EPSS, KEV, status) as CSV or JSON: `/api/export/assets.csv`, `/api/export/findings.csv?status=open`, `.json` variants. CSV cells that start with a formula character are neutralized
 
 ### Phase 2: Deep Scanning
 - **On-Demand Queue** - User-initiated deep scans per asset from dashboard
@@ -336,6 +337,11 @@ OPENAI_API_KEY=your_key            # AI recommendations (openai)
 # Notifications
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 DISCORD_USER_ID=your_discord_id    # User to ping on alerts
+SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
+NOTIFY_WEBHOOK_URL=https://example.com/hooks/lazyeasm
+NOTIFY_WEBHOOK_SECRET=            # Optional HMAC signing secret
+SMTP_HOST=smtp.example.com         # Email: also SMTP_PORT, SMTP_SECURITY,
+SMTP_TO=secops@example.com         # SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM
 
 # Phase 3 Monitoring Intervals (configurable via dashboard)
 # LIVENESS_INTERVAL_MIN=5        # Liveness check every 5 minutes
@@ -364,6 +370,13 @@ DISCORD_USER_ID=your_discord_id    # User to ping on alerts
 | `OPENAI_API_KEY` | No | OpenAI API key (optional for `openai_compatible`) |
 | `DISCORD_WEBHOOK_URL` | No | Discord webhook URL |
 | `DISCORD_USER_ID` | No | Discord user ID to ping |
+| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook |
+| `NOTIFY_WEBHOOK_URL` | No | Generic JSON webhook (`source`, `title`, `message`, `markdown`, `sent_at`) |
+| `NOTIFY_WEBHOOK_SECRET` | No | Signs webhook bodies with HMAC-SHA256 |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` | No | Email server; security is `starttls` (default), `ssl` or `none` |
+| `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TO` | No | Email credentials, sender and comma-separated recipients |
+| `OTX_API_KEY` | No | AlienVault OTX key for passive DNS discovery |
+| `DNS_BRUTEFORCE` | No | `false` disables DNS brute force and permutations (default `true`) |
 
 ## Authentication
 

@@ -20,7 +20,18 @@ EDITABLE_KEYS = [
     'AI_BASE_URL',
     'GEMINI_API_KEY',
     'OPENAI_API_KEY',
-    'ANTHROPIC_API_KEY'
+    'ANTHROPIC_API_KEY',
+    'SLACK_WEBHOOK_URL',
+    'NOTIFY_WEBHOOK_URL',
+    'NOTIFY_WEBHOOK_SECRET',
+    'SMTP_HOST',
+    'SMTP_PORT',
+    'SMTP_SECURITY',
+    'SMTP_USERNAME',
+    'SMTP_PASSWORD',
+    'SMTP_FROM',
+    'SMTP_TO',
+    'OTX_API_KEY'
 ]
 
 SENSITIVE_KEYS = [
@@ -28,7 +39,11 @@ SENSITIVE_KEYS = [
     'NVD_API_KEY',
     'GEMINI_API_KEY',
     'OPENAI_API_KEY',
-    'ANTHROPIC_API_KEY'
+    'ANTHROPIC_API_KEY',
+    'SLACK_WEBHOOK_URL',
+    'NOTIFY_WEBHOOK_SECRET',
+    'SMTP_PASSWORD',
+    'OTX_API_KEY'
 ]
 
 KEY_DISPLAY_NAMES = {
@@ -41,7 +56,18 @@ KEY_DISPLAY_NAMES = {
     'AI_BASE_URL': 'AI Base URL',
     'GEMINI_API_KEY': 'Gemini API Key',
     'OPENAI_API_KEY': 'OpenAI API Key',
-    'ANTHROPIC_API_KEY': 'Anthropic API Key'
+    'ANTHROPIC_API_KEY': 'Anthropic API Key',
+    'SLACK_WEBHOOK_URL': 'Slack Webhook URL',
+    'NOTIFY_WEBHOOK_URL': 'Notification Webhook URL',
+    'NOTIFY_WEBHOOK_SECRET': 'Notification Webhook Secret',
+    'SMTP_HOST': 'SMTP Host',
+    'SMTP_PORT': 'SMTP Port',
+    'SMTP_SECURITY': 'SMTP Security',
+    'SMTP_USERNAME': 'SMTP Username',
+    'SMTP_PASSWORD': 'SMTP Password',
+    'SMTP_FROM': 'SMTP From',
+    'SMTP_TO': 'SMTP Recipients',
+    'OTX_API_KEY': 'AlienVault OTX API Key'
 }
 
 VALIDATION_RULES = {
@@ -64,6 +90,30 @@ VALIDATION_RULES = {
     'AI_BASE_URL': {
         'pattern': r'^(https?://[^\s]+)?$',
         'message': 'AI base URL must start with http:// or https://'
+    },
+    'SLACK_WEBHOOK_URL': {
+        'pattern': r'^(https://hooks\.slack\.com/[^\s]+)?$',
+        'message': 'Slack webhook URL must start with https://hooks.slack.com/'
+    },
+    'NOTIFY_WEBHOOK_URL': {
+        'pattern': r'^(https?://[^\s]+)?$',
+        'message': 'Webhook URL must start with http:// or https://'
+    },
+    'SMTP_PORT': {
+        'pattern': r'^(\d{1,5})?$',
+        'message': 'SMTP port must be a number'
+    },
+    'SMTP_SECURITY': {
+        'pattern': r'^(starttls|ssl|none)?$',
+        'message': 'SMTP security must be starttls, ssl or none'
+    },
+    'SMTP_TO': {
+        'pattern': r'^([^@\s,]+@[^@\s,]+(\s*,\s*[^@\s,]+@[^@\s,]+)*)?$',
+        'message': 'SMTP recipients must be comma-separated email addresses'
+    },
+    'SMTP_FROM': {
+        'pattern': r'^([^@\s]+@[^@\s]+)?$',
+        'message': 'SMTP sender must be an email address'
     }
 }
 
@@ -217,7 +267,11 @@ def validate_config(key: str, value: str) -> Tuple[bool, str]:
     """
     if not value or not value.strip():
         return True, ''
-    
+
+    # Values are written as KEY=value lines; a line break would inject other keys
+    if '\n' in value or '\r' in value:
+        return False, 'Value must be a single line'
+
     if key in VALIDATION_RULES:
         rule = VALIDATION_RULES[key]
         if not re.match(rule['pattern'], value.strip()):

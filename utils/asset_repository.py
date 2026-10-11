@@ -327,6 +327,17 @@ def _serialize_summary(row: dict) -> dict:
     return row
 
 
+def export_assets() -> list:
+    """Every asset summary (same fields as list_assets), for CSV/JSON export."""
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(f"{ASSET_CTES} SELECT * FROM enriched ORDER BY type ASC, name ASC")
+        return [_serialize_summary(dict(row)) for row in cursor.fetchall()]
+    finally:
+        conn.close()
+
+
 def get_asset_detail(asset_type: str, asset_id: int) -> Optional[dict]:
     """Load the complete detail graph for one asset only."""
     asset_type = (asset_type or "").lower()

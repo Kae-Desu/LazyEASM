@@ -1279,6 +1279,95 @@ def get_risky_ports_by_ip(ports, ips=None) -> dict:
         conn.close()
 
 
+def _cvss_severity(score) -> str:
+    if score is None:
+        return 'unknown'
+    if score >= 9.0:
+        return 'critical'
+    if score >= 7.0:
+        return 'high'
+    if score >= 4.0:
+        return 'medium'
+    return 'low' if score > 0 else 'none'
+
+
+def get_findings_for_export(status: str = None) -> list:
+    """
+    CVE findings (one row per host, port and CVE) and security findings in
+    one list, sorted by host. status filters on open/fixed/accepted/false_positive.
+    """
+    from utils.threat_intel import compute_priority
+
+    conn = get_db_connection()
+    try:
+        params = [status] if status else []
+        rows = []
+        cves = conn.execute(f'''
+            SELECT h.host, h.port_num, t.tech_name, t.tech_version, v.cve_id, v.cve_score,
+                   v.status, v.status_note, v.first_seen, v.last_seen,
+                   ci.epss, COALESCE(ci.in_kev, 0) AS in_kev, ci.kev_due_date
+            FROM vulnerabilities v
+            INNER JOIN technologies t ON t.tech_id = v.tech_id
+            INNER JOIN http_services h ON h.http_id = t.http_id
+            LEFT JOIN cve_intel ci ON ci.cve_id = v.cve_id
+            {'WHERE v.status = ?' if status else ''}
+        ''', params).fetchall()
+        for r in cves:
+            tech = f"{r['tech_name']} {r['tech_version']}".strip() if r['tech_version'] else r['tech_name']
+            rows.append({
+                'host': r['host'],
+                'kind': 'cve',
+                'identifier': r['cve_id'],
+                'title': f"{r['cve_id']} in {tech}",
+                'severity': _cvss_severity(r['cve_score']),
+                'priority': compute_priority(r['cve_score'], r['epss'], bool(r['in_kev']))['priority'],
+                'cvss': r['cve_score'],
+                'epss': r['epss'],
+                'in_kev': bool(r['in_kev']),
+                'kev_due_date': r['kev_due_date'],
+                'technology': tech,
+                'port': r['port_num'],
+                'status': r['status'],
+                'status_note': r['status_note'],
+                'first_seen': r['first_seen'],
+                'last_seen': r['last_seen'],
+                'evidence': '',
+            })
+
+        findings = conn.execute(f'''
+            SELECT host, finding_type, title, severity, evidence, status, status_note, first_seen, last_seen
+            FROM findings {'WHERE status = ?' if status else ''}
+        ''', params).fetchall()
+        for r in findings:
+            try:
+                evidence = json.loads(r['evidence'] or '{}')
+            except ValueError:
+                evidence = {}
+            rows.append({
+                'host': r['host'],
+                'kind': 'finding',
+                'identifier': r['finding_type'],
+                'title': r['title'],
+                'severity': r['severity'],
+                'priority': '',
+                'cvss': None,
+                'epss': None,
+                'in_kev': False,
+                'kev_due_date': None,
+                'technology': '',
+                'port': evidence.get('port'),
+                'status': r['status'],
+                'status_note': r['status_note'],
+                'first_seen': r['first_seen'],
+                'last_seen': r['last_seen'],
+                'evidence': ' '.join(filter(None, [evidence.get('detail'), ', '.join(evidence.get('urls') or [])])),
+            })
+        rows.sort(key=lambda row: (row['host'], row['kind'], row['identifier'] or ''))
+        return rows
+    finally:
+        conn.close()
+
+
 def _get_recent_changes_for_host(cursor, host: str, limit: int = 10) -> list:
     try:
         cursor.execute('''
