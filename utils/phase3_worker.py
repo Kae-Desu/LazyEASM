@@ -7,6 +7,7 @@ Orchestrates:
     - Wappalyzer re-scan (every 24 hours)
     - Subdomain takeover check (every 24 hours)
     - Exploit intel refresh: CISA KEV + EPSS (every 24 hours)
+    - Misconfiguration checks (every 24 hours)
 
 Exports:
     - start_phase3_workers()
@@ -28,6 +29,7 @@ _ctlogs_thread = None
 _wappalyzer_thread = None
 _takeover_thread = None
 _intel_thread = None
+_misconfig_thread = None
 
 
 def send_liveness_notification(result: dict):
@@ -233,6 +235,36 @@ def send_kev_notification(result: dict):
 
     except Exception as e:
         logger.error(f"Failed to send KEV notification: {e}")
+
+
+def send_misconfig_notification(result: dict):
+    """
+    Send Discord notification for new or reopened misconfiguration findings
+    (medium severity and above).
+
+    Args:
+        result: Dict from run_misconfig_check()
+    """
+    try:
+        from modules.Notify import send_message
+
+        order = {'critical': 0, 'high': 1, 'medium': 2}
+        findings = sorted(result['new_findings'], key=lambda f: order.get(f['severity'], 3))
+        lines = [
+            "**Misconfiguration Check**",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            f"\n**New Findings:** {len(findings)}",
+            "",
+        ]
+        for finding in findings[:15]:
+            lines.append(f"• [{finding['severity'].upper()}] {finding['host']}: {finding['title']}")
+        if len(findings) > 15:
+            lines.append(f"• ... and {len(findings) - 15} more")
+
+        send_message('\n'.join(lines))
+
+    except Exception as e:
+        logger.error(f"Failed to send misconfiguration notification: {e}")
 
 
 def liveness_loop(interval_min: int = 5):
@@ -442,13 +474,53 @@ def intel_loop(interval_hr: int = 24):
     logger.info("Threat intel thread stopped")
 
 
+def misconfig_loop(interval_hr: int = 24):
+    """
+    Misconfiguration check loop.
+
+    Runs every interval_hr hours if Phase 3 is enabled.
+
+    Args:
+        interval_hr: Interval in hours (default: 24)
+    """
+    global _phase3_running
+
+    from utils.misconfig_checker import run_misconfig_check
+    from utils.db_utils import get_setting
+
+    logger.info("Misconfiguration monitor thread started")
+
+    while _phase3_running:
+        try:
+            if get_setting('phase3_enabled') == '1':
+                logger.info("Running misconfiguration check...")
+                result = run_misconfig_check()
+
+                if result.get('new_findings'):
+                    send_misconfig_notification(result)
+            else:
+                logger.debug("Phase 3 disabled, skipping misconfiguration check")
+
+        except Exception as e:
+            logger.error(f"Misconfiguration check error: {e}")
+
+        # Sleep in small intervals to allow quick shutdown
+        sleep_seconds = interval_hr * 3600
+        elapsed = 0
+        while elapsed < sleep_seconds and _phase3_running:
+            time.sleep(5)
+            elapsed += 5
+
+    logger.info("Misconfiguration monitor thread stopped")
+
+
 def start_phase3_workers():
     """
     Start all Phase 3 monitoring threads.
     
     Checks settings for enabled status and intervals.
     """
-    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread, _takeover_thread, _intel_thread
+    global _phase3_running, _liveness_thread, _ctlogs_thread, _wappalyzer_thread, _takeover_thread, _intel_thread, _misconfig_thread
     
     from utils.db_utils import get_setting
     
@@ -470,6 +542,7 @@ def start_phase3_workers():
     wappalyzer_interval = int(get_setting('wappalyzer_interval_hr') or '24')
     takeover_interval = int(get_setting('takeover_interval_hr') or '24')
     intel_interval = int(get_setting('intel_interval_hr') or '24')
+    misconfig_interval = int(get_setting('misconfig_interval_hr') or '24')
     
     logger.info(f"Starting Phase 3 workers (liveness: {liveness_interval}min, ctlogs: {ctlogs_interval}hr, wappalyzer: {wappalyzer_interval}hr, takeover: {takeover_interval}hr)")
     
@@ -517,6 +590,15 @@ def start_phase3_workers():
         name='Phase3-Intel'
     )
     _intel_thread.start()
+
+    # Start misconfiguration check thread
+    _misconfig_thread = threading.Thread(
+        target=misconfig_loop,
+        args=(misconfig_interval,),
+        daemon=True,
+        name='Phase3-Misconfig'
+    )
+    _misconfig_thread.start()
     
     logger.info("Phase 3 workers started")
 
@@ -545,6 +627,9 @@ def stop_phase3_workers():
 
     if _intel_thread and _intel_thread.is_alive():
         _intel_thread.join(timeout=10)
+
+    if _misconfig_thread and _misconfig_thread.is_alive():
+        _misconfig_thread.join(timeout=10)
     
     logger.info("Phase 3 workers stopped")
 
@@ -573,11 +658,13 @@ def get_phase3_status() -> dict:
         'last_wappalyzer_check': get_setting('last_wappalyzer_check') or '-',
         'last_takeover_check': get_setting('last_takeover_check') or '-',
         'last_intel_check': get_setting('last_intel_check') or '-',
+        'last_misconfig_check': get_setting('last_misconfig_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
         'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
         'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
         'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24'),
-        'intel_interval_hr': int(get_setting('intel_interval_hr') or '24')
+        'intel_interval_hr': int(get_setting('intel_interval_hr') or '24'),
+        'misconfig_interval_hr': int(get_setting('misconfig_interval_hr') or '24')
     }
 
 

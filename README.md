@@ -123,6 +123,12 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Wappalyzer Re-scanning** - Periodic technology re-fingerprinting (default: every 24 hours)
 - **Subdomain Takeover Detection** - Follows CNAME chains for every domain/subdomain (default: every 24 hours); flags services known to allow takeover (NXDOMAIN or unclaimed-page fingerprint) and dangling CNAMEs. Findings use the open / fixed / accepted / false positive lifecycle. Manual trigger: `/api/phase3/takeover/check`
 - **Exploit Intel Refresh** - Updates CISA KEV and EPSS data for all CVEs (default: every 24 hours) and right after scans that find new CVEs. Sends a Discord alert when a CVE with an open finding is (or becomes) known exploited. Manual trigger: `/api/phase3/intel/check`
+- **Misconfiguration Checks** - Runs daily on every HTTP service and on risky ports of public, non-CDN IPs, and right after an asset is scanned. Discord alert for new medium+ findings. Manual trigger: `/api/phase3/misconfig/check`
+  - Exposed `.git`, `.env`, `.htpasswd` (high), Apache `server-status`, `phpinfo.php`, directory listing (medium), `.DS_Store` (low). Every file check needs a content signature, not just HTTP 200, and redirects are not followed, so soft-404 and login pages do not trigger findings
+  - Invalid TLS certificate (expired, self-signed, wrong hostname) and TLS 1.0/1.1 still enabled (medium)
+  - HTTP served without redirect to HTTPS, missing HSTS / X-Content-Type-Options / frame protection headers (low)
+  - Internet-exposed Docker API, Redis, MongoDB, Elasticsearch, Memcached, etcd, Kubelet, CouchDB, RDP, SMB, VNC, Telnet (high/critical) and databases or FTP (medium); ports recorded by Nmap are re-confirmed with a live TCP connect so closed ports are auto-closed
+  - Timeouts leave a check inconclusive, so a slow host never closes or reopens findings
 - **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
   - Each threshold notified exactly once per certificate
   - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)
@@ -496,6 +502,7 @@ LazyEASM/
 │   ├── wappalyzer_monitor.py  # Periodic Wappalyzer re-scanning (Phase 3)
 │   ├── takeover_checker.py    # Subdomain takeover / dangling CNAME checks (Phase 3)
 │   ├── threat_intel.py        # CISA KEV + EPSS prioritization (Phase 3)
+│   ├── misconfig_checker.py   # Exposed files, TLS, headers, risky ports (Phase 3)
 │   ├── process_utils.py       # Process detection utilities
 │   └── ct_monitor.py         # CT logs polling + cert tracking
 ├── templates/

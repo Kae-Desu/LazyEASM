@@ -1257,11 +1257,13 @@ def phase3_status():
         'last_wappalyzer_check': status['last_wappalyzer_check'],
         'last_takeover_check': status['last_takeover_check'],
         'last_intel_check': status['last_intel_check'],
+        'last_misconfig_check': status['last_misconfig_check'],
         'liveness_interval_min': status['liveness_interval_min'],
         'ctlogs_interval_hr': status['ctlogs_interval_hr'],
         'wappalyzer_interval_hr': status['wappalyzer_interval_hr'],
         'takeover_interval_hr': status['takeover_interval_hr'],
         'intel_interval_hr': status['intel_interval_hr'],
+        'misconfig_interval_hr': status['misconfig_interval_hr'],
         'assets': {
             'total': liveness['total'],
             'up': liveness['up'],
@@ -1391,6 +1393,24 @@ def phase3_intel_check():
 
     if result.get('newly_kev'):
         send_kev_notification(result)
+
+    return jsonify({
+        'success': True,
+        'result': result
+    })
+
+
+@app.route('/api/phase3/misconfig/check', methods=['POST'])
+@token_required
+def phase3_misconfig_check():
+    """Manually trigger misconfiguration checks."""
+    from utils.misconfig_checker import run_misconfig_check
+    from utils.phase3_worker import send_misconfig_notification
+
+    result = run_misconfig_check()
+
+    if result.get('new_findings'):
+        send_misconfig_notification(result)
 
     return jsonify({
         'success': True,

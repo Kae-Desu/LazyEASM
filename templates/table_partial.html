@@ -209,7 +209,7 @@
                             <span class="text-[9px] text-slate-400 font-mono mt-1">First seen {{ f.first_seen }} · last seen {{ f.last_seen }}</span>
                         </div>
                         <div class="flex flex-col items-end space-y-1">
-                            <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border {% if f.severity in ('critical', 'high') %}bg-red-500/10 text-red-500 border-red-500/20{% else %}bg-amber-500/10 text-amber-500 border-amber-500/20{% endif %}">{{ f.severity }}</span>
+                            <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border {% if f.severity in ('critical', 'high') %}bg-red-500/10 text-red-500 border-red-500/20{% elif f.severity == 'medium' %}bg-amber-500/10 text-amber-500 border-amber-500/20{% else %}bg-slate-500/10 text-slate-400 border-slate-500/20{% endif %}">{{ f.severity }}</span>
                             <select onclick="event.stopPropagation()" onchange="updateStatus('/api/findings/{{ f.finding_id }}/status', this)" data-csrf="{{ csrf_token }}" data-previous="{{ f.status }}" aria-label="Finding status for {{ f.title }}" class="text-[10px] font-bold rounded-md px-1.5 py-0.5 bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 dark:text-white">
                                 {% for value, label in [('open', 'Open'), ('fixed', 'Fixed'), ('accepted', 'Accepted risk'), ('false_positive', 'False positive')] %}
                                 <option value="{{ value }}" {% if f.status == value %}selected{% endif %}>{{ label }}</option>
@@ -219,6 +219,12 @@
                     </div>
                     {% if f.evidence.cname_chain %}
                     <p class="text-[10px] text-slate-500 font-mono break-all">CNAME: {{ asset.name }} → {{ f.evidence.cname_chain|join(' → ') }}</p>
+                    {% endif %}
+                    {% if f.evidence.detail %}
+                    <p class="text-[10px] text-slate-600 dark:text-slate-300">{{ f.evidence.detail }}</p>
+                    {% endif %}
+                    {% if f.evidence.urls %}
+                    <p class="text-[10px] text-slate-500 font-mono break-all mt-1">{{ f.evidence.urls|join(', ') }}</p>
                     {% endif %}
                     {% if f.evidence.signal %}
                     <p class="text-[10px] text-slate-500 mt-1">Evidence: {{ f.evidence.signal }}{% if f.evidence.url %} ({{ f.evidence.url }}){% endif %}</p>

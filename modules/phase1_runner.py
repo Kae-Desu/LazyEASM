@@ -150,6 +150,9 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
 
         from utils.threat_intel import refresh_quietly
         refresh_quietly(sorted(unique_cves))
+
+        from utils.misconfig_checker import check_quietly
+        check_quietly(hosts=[asset_name], ips=[asset_name] if asset_type == 'ip' else [])
         
         # Update last_wappalyzer_scan timestamp
         try:

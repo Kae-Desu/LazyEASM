@@ -1017,6 +1017,58 @@ def _add_priority(cve: dict) -> dict:
     return cve
 
 
+def get_http_services_by_host(hosts=None) -> dict:
+    """
+    HTTP services grouped by hostname: {host: [(port, is_https), ...]}.
+    hosts=None returns every host; an empty list returns nothing.
+    """
+    if hosts is not None and not hosts:
+        return {}
+    conn = get_db_connection()
+    try:
+        query = 'SELECT host, port_num, is_https FROM http_services'
+        params = []
+        if hosts is not None:
+            query += f" WHERE host IN ({','.join('?' * len(hosts))})"
+            params = list(hosts)
+        services = {}
+        for row in conn.execute(query + ' ORDER BY host, port_num', params):
+            services.setdefault(row['host'], []).append((row['port_num'], bool(row['is_https'])))
+        return services
+    finally:
+        conn.close()
+
+
+def get_risky_ports_by_ip(ports, ips=None) -> dict:
+    """
+    Recorded open ports from the given list, on public non-CDN IPs: {ip: [port, ...]}.
+    ips=None returns every IP; an empty list returns nothing.
+    """
+    ports = list(ports)
+    if not ports or (ips is not None and not ips):
+        return {}
+    conn = get_db_connection()
+    try:
+        query = f'''
+            SELECT DISTINCT i.ip_value, p.port_num
+            FROM ports p
+            INNER JOIN ip_asset i ON i.ip_id = p.ip_id
+            WHERE COALESCE(i.is_private, 0) = 0 AND COALESCE(i.is_shared, 0) = 0
+              AND COALESCE(p.protocol, 'tcp') = 'tcp'
+              AND p.port_num IN ({','.join('?' * len(ports))})
+        '''
+        params = ports
+        if ips is not None:
+            query += f" AND i.ip_value IN ({','.join('?' * len(ips))})"
+            params = ports + list(ips)
+        result = {}
+        for row in conn.execute(query + ' ORDER BY i.ip_value, p.port_num', params):
+            result.setdefault(row['ip_value'], []).append(row['port_num'])
+        return result
+    finally:
+        conn.close()
+
+
 def _get_findings_for_host(cursor, host: str) -> list:
     """Security findings for a hostname, open first then by severity."""
     try:
