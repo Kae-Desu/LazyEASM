@@ -78,6 +78,171 @@ def ip_exists(ip_value: str) -> bool:
         conn.close()
 
 
+# ============================================
+# CHANGE HISTORY
+# ============================================
+
+def _now() -> str:
+    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _record_change(cursor, host: str, change_type: str, summary: str, details: dict = None) -> None:
+    """
+    Record a change inside the caller's transaction.
+
+    change_type is one of: asset_added, asset_down, asset_up, port_opened,
+    port_closed, tech_added, tech_removed, tech_version_changed,
+    certificate_changed, vulnerability_found, vulnerability_reopened,
+    vulnerability_fixed, vulnerability_closed, finding_opened,
+    finding_reopened, finding_fixed, status_changed
+    """
+    if not host:
+        return
+    try:
+        cursor.execute('''
+            INSERT INTO asset_changes (host, change_type, summary, details, detected_at)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (host, change_type, summary, json.dumps(details, sort_keys=True) if details else None, _now()))
+    except sqlite3.OperationalError as e:
+        # Database not migrated yet; history is best-effort
+        logger.debug(f"Change not recorded ({change_type} {host}): {e}")
+
+
+def _record_status_change(cursor, host: str, old_status: str, new_status: str) -> None:
+    if old_status and new_status and old_status != new_status:
+        if new_status == 'down':
+            _record_change(cursor, host, 'asset_down', 'Went down', {'old': old_status, 'new': new_status})
+        elif new_status == 'up':
+            _record_change(cursor, host, 'asset_up', 'Came back up', {'old': old_status, 'new': new_status})
+
+
+def record_change(host: str, change_type: str, summary: str, details: dict = None) -> None:
+    """Record a change in its own transaction."""
+    conn = get_db_connection()
+    try:
+        _record_change(conn.cursor(), host, change_type, summary, details)
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_changes(host: str = None, change_type: str = None, since: str = None,
+                limit: int = 100, offset: int = 0) -> list:
+    """Most recent changes first, optionally filtered."""
+    where, params = [], []
+    if host:
+        where.append('host = ?')
+        params.append(host)
+    if change_type:
+        where.append('change_type = ?')
+        params.append(change_type)
+    if since:
+        where.append('detected_at >= ?')
+        params.append(since)
+    query = 'SELECT * FROM asset_changes'
+    if where:
+        query += ' WHERE ' + ' AND '.join(where)
+    query += ' ORDER BY detected_at DESC, change_id DESC LIMIT ? OFFSET ?'
+    conn = get_db_connection()
+    try:
+        rows = []
+        for row in conn.execute(query, params + [limit, offset]):
+            item = dict(row)
+            item['details'] = json.loads(item['details']) if item['details'] else {}
+            rows.append(item)
+        return rows
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        conn.close()
+
+
+def prune_changes(days: int = 365) -> int:
+    """Delete change history older than `days`."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute('DELETE FROM asset_changes WHERE detected_at < ?', (cutoff,))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
+def _host_for_tech(cursor, tech_id: int):
+    row = cursor.execute('''
+        SELECT h.host, t.tech_name, t.tech_version
+        FROM technologies t INNER JOIN http_services h ON h.http_id = t.http_id
+        WHERE t.tech_id = ?
+    ''', (tech_id,)).fetchone()
+    return row
+
+
+def sync_technologies(http_id: int, host: str, detected) -> dict:
+    """
+    Store the technologies detected by a successful scan of one HTTP service.
+
+    Technologies not detected any more are marked removed; changes against the
+    previous scan are recorded (none on the first scan of a service).
+
+    Args:
+        detected: [(tech_name, tech_version or None), ...]
+
+    Returns:
+        {tech_name: tech_id}
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        now = _now()
+        previous = cursor.execute('''
+            SELECT tech_id, tech_name, tech_version FROM technologies
+            WHERE http_id = ? AND removed_at IS NULL ORDER BY tech_id
+        ''', (http_id,)).fetchall()
+
+        ids = {}
+        for name, version in detected:
+            row = cursor.execute('''
+                SELECT tech_id FROM technologies
+                WHERE http_id = ? AND tech_name = ? AND (tech_version = ? OR (tech_version IS NULL AND ? IS NULL))
+            ''', (http_id, name, version, version)).fetchone()
+            if row:
+                cursor.execute('UPDATE technologies SET removed_at = NULL WHERE tech_id = ?', (row['tech_id'],))
+                ids[name] = row['tech_id']
+            else:
+                cursor.execute('''
+                    INSERT INTO technologies (http_id, tech_name, tech_version, first_seen) VALUES (?, ?, ?, ?)
+                ''', (http_id, name, version, now))
+                ids[name] = cursor.lastrowid
+
+        current_ids = set(ids.values())
+        for row in previous:
+            if row['tech_id'] not in current_ids:
+                cursor.execute('UPDATE technologies SET removed_at = ? WHERE tech_id = ?', (now, row['tech_id']))
+
+        if previous:
+            before = {row['tech_name']: row['tech_version'] for row in previous}
+            after = dict(detected)
+            label = lambda n, v: f"{n} {v}" if v else n
+            for name in sorted(after.keys() - before.keys()):
+                _record_change(cursor, host, 'tech_added', f"{label(name, after[name])} detected",
+                               {'tech': name, 'version': after[name], 'http_id': http_id})
+            for name in sorted(before.keys() - after.keys()):
+                _record_change(cursor, host, 'tech_removed', f"{label(name, before[name])} no longer detected",
+                               {'tech': name, 'version': before[name], 'http_id': http_id})
+            for name in sorted(before.keys() & after.keys()):
+                if before[name] != after[name]:
+                    _record_change(cursor, host, 'tech_version_changed',
+                                   f"{name} changed from {before[name] or 'unknown'} to {after[name] or 'unknown'}",
+                                   {'tech': name, 'old_version': before[name], 'new_version': after[name],
+                                    'http_id': http_id})
+
+        conn.commit()
+        return ids
+    finally:
+        conn.close()
+
+
 def upsert_domain(domain_name: str, is_wildcard: int = 0, wildcard_ip: str = None, status: str = 'up') -> int:
     """
     Insert new domain or update existing. Returns dom_id.
@@ -96,11 +261,12 @@ def upsert_domain(domain_name: str, is_wildcard: int = 0, wildcard_ip: str = Non
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        cursor.execute("SELECT dom_id FROM domain_asset WHERE domain_name = ?", (domain_name,))
+        cursor.execute("SELECT dom_id, status FROM domain_asset WHERE domain_name = ?", (domain_name,))
         result = cursor.fetchone()
         
         if result:
             dom_id = result['dom_id']
+            _record_status_change(cursor, domain_name, result['status'], status)
             cursor.execute('''
                 UPDATE domain_asset 
                 SET last_seen = ?, status = ?, is_wildcard = ?, wildcard_ip = ?
@@ -113,8 +279,10 @@ def upsert_domain(domain_name: str, is_wildcard: int = 0, wildcard_ip: str = Non
                 INSERT INTO domain_asset (domain_name, first_seen, status, is_wildcard, wildcard_ip)
                 VALUES (?, ?, ?, ?, ?)
             ''', (domain_name, now, status, is_wildcard, wildcard_ip))
+            dom_id = cursor.lastrowid
+            _record_change(cursor, domain_name, 'asset_added', 'New domain added', {'type': 'domain'})
             conn.commit()
-            return cursor.lastrowid
+            return dom_id
     finally:
         conn.close()
 
@@ -136,11 +304,12 @@ def upsert_subdomain(subdomain_name: str, dom_id: int, status: str = 'up') -> in
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        cursor.execute("SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?", (subdomain_name,))
+        cursor.execute("SELECT sub_id, status FROM subdomain_asset WHERE subdomain_name = ?", (subdomain_name,))
         result = cursor.fetchone()
         
         if result:
             sub_id = result['sub_id']
+            _record_status_change(cursor, subdomain_name, result['status'], status)
             cursor.execute('''
                 UPDATE subdomain_asset 
                 SET last_seen = ?, status = ?
@@ -153,8 +322,10 @@ def upsert_subdomain(subdomain_name: str, dom_id: int, status: str = 'up') -> in
                 INSERT INTO subdomain_asset (subdomain_name, dom_id, first_seen, status)
                 VALUES (?, ?, ?, ?)
             ''', (subdomain_name, dom_id, now, status))
+            sub_id = cursor.lastrowid
+            _record_change(cursor, subdomain_name, 'asset_added', 'New subdomain discovered', {'type': 'subdomain'})
             conn.commit()
-            return cursor.lastrowid
+            return sub_id
     finally:
         conn.close()
 
@@ -178,11 +349,12 @@ def upsert_ip(ip_value: str, is_private: int = 0, is_shared: int = 0, shared_pro
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         
-        cursor.execute("SELECT ip_id FROM ip_asset WHERE ip_value = ?", (ip_value,))
+        cursor.execute("SELECT ip_id, status FROM ip_asset WHERE ip_value = ?", (ip_value,))
         result = cursor.fetchone()
         
         if result:
             ip_id = result['ip_id']
+            _record_status_change(cursor, ip_value, result['status'], status)
             cursor.execute('''
                 UPDATE ip_asset 
                 SET last_seen = ?, status = ?, is_shared = ?, shared_provider = ?
@@ -195,8 +367,10 @@ def upsert_ip(ip_value: str, is_private: int = 0, is_shared: int = 0, shared_pro
                 INSERT INTO ip_asset (ip_value, is_private, is_shared, shared_provider, first_seen, status)
                 VALUES (?, ?, ?, ?, ?, ?)
             ''', (ip_value, is_private, is_shared, shared_provider, now, status))
+            ip_id = cursor.lastrowid
+            _record_change(cursor, ip_value, 'asset_added', 'New IP address discovered', {'type': 'ip'})
             conn.commit()
-            return cursor.lastrowid
+            return ip_id
     finally:
         conn.close()
 
@@ -574,7 +748,7 @@ def get_technologies_for_host(http_id: int) -> list:
         cursor.execute('''
             SELECT tech_id, tech_name, tech_version, first_seen
             FROM technologies
-            WHERE http_id = ?
+            WHERE http_id = ? AND removed_at IS NULL
             ORDER BY tech_name
         ''', (http_id,))
         
@@ -662,6 +836,10 @@ def upsert_vulnerability(tech_id: int, cve_id: str, cve_score: float = None,
                     SET status = 'open', status_note = 'Detected again on rescan', status_updated_at = ?
                     WHERE vuln_id = ?
                 ''', (now, vuln_id))
+                tech = _host_for_tech(cursor, tech_id)
+                if tech:
+                    _record_change(cursor, tech['host'], 'vulnerability_reopened',
+                                   f"{cve_id} detected again on {tech['tech_name']}", {'cve_id': cve_id})
 
             conn.commit()
             return vuln_id
@@ -671,9 +849,16 @@ def upsert_vulnerability(tech_id: int, cve_id: str, cve_score: float = None,
                                              first_seen, last_seen, status, status_updated_at, match_method)
                 VALUES (?, ?, ?, ?, ?, ?, ?, 'open', ?, ?)
             ''', (tech_id, cve_id, cve_score, description, recommendation, now, now, now, match_method))
+            vuln_id = cursor.lastrowid
+            tech = _host_for_tech(cursor, tech_id)
+            if tech:
+                version = f" {tech['tech_version']}" if tech['tech_version'] else ''
+                _record_change(cursor, tech['host'], 'vulnerability_found',
+                               f"{cve_id} found in {tech['tech_name']}{version}",
+                               {'cve_id': cve_id, 'cvss': cve_score})
 
             conn.commit()
-            return cursor.lastrowid
+            return vuln_id
     finally:
         conn.close()
 
@@ -705,9 +890,10 @@ def reconcile_vulnerabilities(http_id: int, seen_vuln_ids, min_cvss: float = 0.0
     try:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         cursor.execute('''
-            SELECT v.vuln_id, v.match_method
+            SELECT v.vuln_id, v.match_method, v.cve_id, h.host
             FROM vulnerabilities v
             INNER JOIN technologies t ON t.tech_id = v.tech_id
+            INNER JOIN http_services h ON h.http_id = t.http_id
             WHERE t.http_id = ? AND v.status = 'open' AND COALESCE(v.cve_score, 0) >= ?
         ''', (http_id, min_cvss))
 
@@ -725,6 +911,10 @@ def reconcile_vulnerabilities(http_id: int, seen_vuln_ids, min_cvss: float = 0.0
                 WHERE vuln_id = ?
             ''', (status, note, now, row['vuln_id']))
             counts[status] += 1
+            _record_change(cursor, row['host'],
+                           'vulnerability_fixed' if status == 'fixed' else 'vulnerability_closed',
+                           f"{row['cve_id']} {'no longer detected' if status == 'fixed' else 'not confirmed by CPE matching'}",
+                           {'cve_id': row['cve_id'], 'status': status})
 
         conn.commit()
         return counts
@@ -770,8 +960,12 @@ def set_vulnerability_status(vuln_id: int, status: str, note: str = None) -> int
                 WHERE h.host = ?
             )
         ''', (status, note, now, row['cve_id'], row['host']))
+        updated = cursor.rowcount
+        _record_change(cursor, row['host'], 'status_changed',
+                       f"{row['cve_id']} marked {status.replace('_', ' ')}" + (f": {note}" if note else ''),
+                       {'cve_id': row['cve_id'], 'status': status, 'note': note})
         conn.commit()
-        return cursor.rowcount
+        return updated
     finally:
         conn.close()
 
@@ -847,6 +1041,8 @@ def upsert_finding(finding_type: str, host: str, title: str, severity: str,
                     SET status = 'open', status_note = 'Detected again on recheck', status_updated_at = ?
                     WHERE finding_id = ?
                 ''', (now, finding_id))
+                _record_change(cursor, host, 'finding_reopened', f"{title} (detected again)",
+                               {'finding_type': finding_type, 'severity': severity})
             conn.commit()
             return finding_id, reopened
 
@@ -855,8 +1051,10 @@ def upsert_finding(finding_type: str, host: str, title: str, severity: str,
                                   status_updated_at, first_seen, last_seen)
             VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?)
         ''', (finding_type, host, title, severity, evidence_json, now, now, now))
+        finding_id = cursor.lastrowid
+        _record_change(cursor, host, 'finding_opened', title, {'finding_type': finding_type, 'severity': severity})
         conn.commit()
-        return cursor.lastrowid, True
+        return finding_id, True
     finally:
         conn.close()
 
@@ -880,16 +1078,18 @@ def reconcile_findings(host: str, finding_types, seen_finding_ids) -> int:
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         placeholders = ','.join('?' * len(types))
         cursor.execute(f'''
-            SELECT finding_id FROM findings
+            SELECT finding_id, finding_type, title FROM findings
             WHERE host = ? AND status = 'open' AND finding_type IN ({placeholders})
         ''', [host] + types)
-        to_close = [row['finding_id'] for row in cursor.fetchall() if row['finding_id'] not in seen]
-        for finding_id in to_close:
+        to_close = [row for row in cursor.fetchall() if row['finding_id'] not in seen]
+        for row in to_close:
             cursor.execute('''
                 UPDATE findings
                 SET status = 'fixed', status_note = 'No longer detected on recheck', status_updated_at = ?
                 WHERE finding_id = ?
-            ''', (now, finding_id))
+            ''', (now, row['finding_id']))
+            _record_change(cursor, host, 'finding_fixed', f"{row['title']} (no longer detected)",
+                           {'finding_type': row['finding_type']})
         conn.commit()
         return len(to_close)
     finally:
@@ -908,12 +1108,20 @@ def set_finding_status(finding_id: int, status: str, note: str = None) -> int:
 
     conn = get_db_connection()
     try:
-        cursor = conn.execute('''
+        cursor = conn.cursor()
+        row = cursor.execute('SELECT host, title FROM findings WHERE finding_id = ?', (finding_id,)).fetchone()
+        if not row:
+            return 0
+        cursor.execute('''
             UPDATE findings SET status = ?, status_note = ?, status_updated_at = ?
             WHERE finding_id = ?
         ''', (status, note, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), finding_id))
+        updated = cursor.rowcount
+        _record_change(cursor, row['host'], 'status_changed',
+                       f"{row['title']} marked {status.replace('_', ' ')}" + (f": {note}" if note else ''),
+                       {'finding_id': finding_id, 'status': status, 'note': note})
         conn.commit()
-        return cursor.rowcount
+        return updated
     finally:
         conn.close()
 
@@ -1069,6 +1277,17 @@ def get_risky_ports_by_ip(ports, ips=None) -> dict:
         return result
     finally:
         conn.close()
+
+
+def _get_recent_changes_for_host(cursor, host: str, limit: int = 10) -> list:
+    try:
+        cursor.execute('''
+            SELECT change_type, summary, detected_at FROM asset_changes
+            WHERE host = ? ORDER BY detected_at DESC, change_id DESC LIMIT ?
+        ''', (host, limit))
+        return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        return []
 
 
 def _get_findings_for_host(cursor, host: str) -> list:
@@ -1408,6 +1627,7 @@ def get_all_assets_for_display() -> list:
             asset['findings'] = _get_ports_for_domain(cursor, asset['id']) if asset['is_scanned'] else []
             asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['security_findings'] = _get_findings_for_host(cursor, asset['name'])
+            asset['history'] = _get_recent_changes_for_host(cursor, asset['name'])
             assets.append(asset)
         
         cursor.execute('''
@@ -1444,6 +1664,7 @@ def get_all_assets_for_display() -> list:
             asset['findings'] = _get_ports_for_subdomain(cursor, asset['id']) if asset['is_scanned'] else []
             asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['security_findings'] = _get_findings_for_host(cursor, asset['name'])
+            asset['history'] = _get_recent_changes_for_host(cursor, asset['name'])
             assets.append(asset)
         
         cursor.execute('''
@@ -1483,6 +1704,7 @@ def get_all_assets_for_display() -> list:
             asset['findings'] = _get_ports_for_ip(cursor, asset['id']) if asset['is_scanned'] else []
             asset['directories'] = _get_directories_for_host(cursor, asset['name']) if asset['is_scanned'] else []
             asset['security_findings'] = _get_findings_for_host(cursor, asset['name'])
+            asset['history'] = _get_recent_changes_for_host(cursor, asset['name'])
             assets.append(asset)
         
         return assets
@@ -1509,7 +1731,7 @@ def _get_technologies_for_host(cursor, host: str) -> list:
             h.port_num as port
         FROM technologies t
         INNER JOIN http_services h ON h.http_id = t.http_id
-        WHERE h.host = ?
+        WHERE h.host = ? AND t.removed_at IS NULL
         ORDER BY h.port_num, t.tech_name
     ''', (host,))
     
@@ -1604,7 +1826,7 @@ def _get_technologies_for_ip(cursor, ip_id: int) -> list:
         FROM technologies t
         INNER JOIN http_services h ON h.http_id = t.http_id
         INNER JOIN ip_asset i ON i.ip_id = ?
-        WHERE h.ip_id = ? OR h.host = i.ip_value
+        WHERE (h.ip_id = ? OR h.host = i.ip_value) AND t.removed_at IS NULL
         ORDER BY h.port_num, t.tech_name
     ''', (ip_id, ip_id))
     

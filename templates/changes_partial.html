@@ -1,0 +1,33 @@
+{% set change_styles = {
+    'asset_added': ('fa-plus-circle', 'text-emerald-500'),
+    'asset_up': ('fa-arrow-up', 'text-emerald-500'),
+    'asset_down': ('fa-arrow-down', 'text-amber-500'),
+    'port_opened': ('fa-door-open', 'text-amber-500'),
+    'port_closed': ('fa-door-closed', 'text-slate-400'),
+    'tech_added': ('fa-cube', 'text-sky-500'),
+    'tech_removed': ('fa-cube', 'text-slate-400'),
+    'tech_version_changed': ('fa-code-branch', 'text-sky-500'),
+    'certificate_changed': ('fa-certificate', 'text-sky-500'),
+    'vulnerability_found': ('fa-bug', 'text-red-500'),
+    'vulnerability_reopened': ('fa-bug', 'text-red-500'),
+    'vulnerability_fixed': ('fa-check-circle', 'text-emerald-500'),
+    'vulnerability_closed': ('fa-check-circle', 'text-slate-400'),
+    'finding_opened': ('fa-triangle-exclamation', 'text-red-500'),
+    'finding_reopened': ('fa-triangle-exclamation', 'text-red-500'),
+    'finding_fixed': ('fa-check-circle', 'text-emerald-500'),
+    'status_changed': ('fa-user-pen', 'text-slate-400'),
+} %}
+{% if changes %}
+{% for c in changes %}
+{% set icon, color = change_styles.get(c.change_type, ('fa-circle-info', 'text-slate-400')) %}
+<li class="flex items-start gap-3 px-6 py-3">
+    <i class="fas {{ icon }} {{ color }} mt-0.5 w-4 text-center"></i>
+    <div class="flex-1 min-w-0">
+        <p class="text-xs dark:text-slate-200"><span class="font-mono font-bold break-all">{{ c.host }}</span> · {{ c.summary }}</p>
+        <p class="text-[10px] text-slate-400 font-mono">{{ c.detected_at }}</p>
+    </div>
+</li>
+{% endfor %}
+{% else %}
+<li class="px-6 py-4 text-xs text-slate-400">No changes recorded yet. Changes appear after assets are re-scanned.</li>
+{% endif %}

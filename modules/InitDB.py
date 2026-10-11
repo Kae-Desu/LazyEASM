@@ -459,6 +459,26 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_host ON findings(host)')
 
+    # Change history: one row per detected change on a host
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS asset_changes (
+            change_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            host TEXT NOT NULL,
+            change_type TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            details TEXT,
+            detected_at TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_changes_host ON asset_changes(host, detected_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_changes_time ON asset_changes(detected_at)')
+
+    # Technologies no longer detected on a re-scan are marked removed (rows are
+    # kept so vulnerability history stays linked)
+    cursor.execute("PRAGMA table_info(technologies)")
+    if 'removed_at' not in [col[1] for col in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE technologies ADD COLUMN removed_at TEXT")
+
     # Exploit intelligence per CVE (CISA KEV + FIRST EPSS), shared by all hosts
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS cve_intel (

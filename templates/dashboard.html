@@ -451,6 +451,18 @@
             </div>
         </div>
 
+        <!-- Change History Panel -->
+        <div class="mt-6">
+            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
+                <i class="fas fa-clock-rotate-left mr-2 text-accent"></i>Recent Changes
+            </h3>
+            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl">
+                <ul id="changes-list" class="divide-y divide-slate-100 dark:divide-white/5 max-h-[420px] overflow-y-auto custom-scrollbar">
+                    {% include 'changes_partial.html' %}
+                </ul>
+            </div>
+        </div>
+
         <!-- Phase 2 Queue Status Panel -->
         <div class="mt-6">
             <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
@@ -976,9 +988,10 @@
             if (!document.getElementById('actionModal').classList.contains('hidden')) return;
 
             try {
-                const [tableResponse, queueResponse] = await Promise.all([
+                const [tableResponse, queueResponse, changesResponse] = await Promise.all([
                     fetch('/update_table'),
-                    fetch('/update_queue')
+                    fetch('/update_queue'),
+                    fetch('/update_changes')
                 ]);
                 
                 if (!tableResponse.ok || !queueResponse.ok) throw new Error('Refresh Failed');
@@ -996,6 +1009,11 @@
                 
                 if (queueBody) {
                     queueBody.innerHTML = queueHtml;
+                }
+
+                const changesList = document.getElementById('changes-list');
+                if (changesList && changesResponse.ok) {
+                    changesList.innerHTML = await changesResponse.text();
                 }
             } catch (err) {
                 console.error('Fetch error:', err);

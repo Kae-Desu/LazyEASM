@@ -15,7 +15,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
 from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_config_for_ui, EDITABLE_KEYS
-from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, VULN_STATUSES
+from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, get_changes, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
 from utils.pipeline import enqueue_input_discovery, enqueue_assets_for_phase1, enqueue_single_asset_for_phase1
@@ -529,7 +529,8 @@ def dashboard():
     phase2_queue = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue)
+    return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue,
+                           changes=get_changes(limit=RECENT_CHANGES_LIMIT))
 
 
 @app.route('/api/assets', methods=['GET'])
@@ -666,6 +667,33 @@ def test_webhook_endpoint():
     return redirect(url_for('dashboard'))
 
 
+RECENT_CHANGES_LIMIT = 30
+
+
+@app.route('/update_changes')
+@token_required
+def update_changes():
+    return render_template('changes_partial.html', changes=get_changes(limit=RECENT_CHANGES_LIMIT))
+
+
+@app.route('/api/changes', methods=['GET'])
+@token_required
+def api_changes():
+    """
+    Change history, newest first.
+
+    Query params: host, type, since ('YYYY-MM-DD[ HH:MM:SS]'), limit (max 500), offset
+    """
+    try:
+        limit = min(max(int(request.args.get('limit', 100)), 1), 500)
+        offset = max(int(request.args.get('offset', 0)), 0)
+    except ValueError:
+        return jsonify({'success': False, 'error': 'limit and offset must be integers'}), 400
+    changes = get_changes(host=request.args.get('host') or None, change_type=request.args.get('type') or None,
+                          since=request.args.get('since') or None, limit=limit, offset=offset)
+    return jsonify({'success': True, 'changes': changes, 'limit': limit, 'offset': offset})
+
+
 @app.route('/update_table')
 @token_required
 def update_table():
@@ -782,7 +810,7 @@ def generate_ai():
         cursor.execute('''
             SELECT tech_name, tech_version
             FROM technologies
-            WHERE http_id = ? AND tech_id != ?
+            WHERE http_id = ? AND tech_id != ? AND removed_at IS NULL
         ''', (http_id, tech_id))
         tech_stack = [(r['tech_name'], r['tech_version']) for r in cursor.fetchall()]
         

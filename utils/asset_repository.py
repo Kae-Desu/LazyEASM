@@ -135,6 +135,7 @@ tech_rollup AS (
            COUNT(DISTINCT t.tech_id) AS technology_count
     FROM asset_services services
     JOIN technologies t ON t.http_id = services.http_id
+    WHERE t.removed_at IS NULL
     GROUP BY services.type, services.asset_id
 ),
 vuln_rollup AS (
@@ -263,7 +264,7 @@ def list_assets(
         where.append("LOWER(COALESCE(root_domain, '')) = ?")
         params.append(root_domain.strip().lower())
     if technology:
-        where.append("EXISTS (SELECT 1 FROM asset_services services JOIN technologies t ON t.http_id = services.http_id WHERE services.type = enriched.type AND services.asset_id = enriched.id AND LOWER(t.tech_name) LIKE ?)")
+        where.append("EXISTS (SELECT 1 FROM asset_services services JOIN technologies t ON t.http_id = services.http_id WHERE services.type = enriched.type AND services.asset_id = enriched.id AND t.removed_at IS NULL AND LOWER(t.tech_name) LIKE ?)")
         params.append(f"%{technology.strip().lower()}%")
     if parsed_port is not None:
         where.append("(EXISTS (SELECT 1 FROM asset_ips ai JOIN ports p ON p.ip_id = ai.ip_id WHERE ai.type = enriched.type AND ai.asset_id = enriched.id AND p.port_num = ?) OR EXISTS (SELECT 1 FROM asset_services services JOIN http_services h ON h.http_id = services.http_id WHERE services.type = enriched.type AND services.asset_id = enriched.id AND h.port_num = ?))")

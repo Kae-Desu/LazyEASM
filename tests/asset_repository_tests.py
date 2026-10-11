@@ -33,7 +33,7 @@ CREATE TABLE http_services (
     is_https INTEGER, title TEXT, web_server TEXT
 );
 CREATE TABLE technologies (
-    tech_id INTEGER PRIMARY KEY, http_id INTEGER, tech_name TEXT, tech_version TEXT
+    tech_id INTEGER PRIMARY KEY, http_id INTEGER, tech_name TEXT, tech_version TEXT, removed_at TEXT
 );
 CREATE TABLE vulnerabilities (
     vuln_id INTEGER PRIMARY KEY, tech_id INTEGER, cve_id TEXT,
@@ -82,9 +82,10 @@ class AssetRepositoryTests(unittest.TestCase):
             INSERT INTO http_services VALUES
                 (1, 'api.example.com', 1, 443, 1, 'API', 'nginx'),
                 (2, '198.51.100.20', 2, 8080, 0, 'App', 'gunicorn');
-            INSERT INTO technologies VALUES
-                (1, 1, 'nginx', '1.24'),
-                (2, 2, 'Flask', '3.0');
+            INSERT INTO technologies (tech_id, http_id, tech_name, tech_version, removed_at) VALUES
+                (1, 1, 'nginx', '1.24', NULL),
+                (2, 2, 'Flask', '3.0', NULL),
+                (3, 1, 'nginx', '1.18', '2026-01-01 00:00:00');
             INSERT INTO vulnerabilities (vuln_id, tech_id, cve_id, cve_score, description, recommendation) VALUES
                 (1, 1, 'CVE-2026-0001', 9.8, 'Example issue', NULL);
             INSERT INTO cve_intel (cve_id, epss, epss_percentile, in_kev, kev_required_action)
@@ -160,6 +161,8 @@ class AssetRepositoryTests(unittest.TestCase):
         self.assertEqual(detail["root_domain"], "example.com")
         self.assertEqual(detail["ips"], ["203.0.113.10"])
         self.assertEqual(detail["technologies"][0]["name"], "nginx")
+        # technologies removed by a later scan are not listed
+        self.assertEqual([t["version"] for t in detail["technologies"]], ["1.24"])
         self.assertEqual(detail["vulnerabilities"][0]["cve_id"], "CVE-2026-0001")
         self.assertEqual(detail["vulnerabilities"][0]["priority"], "P1")
         self.assertTrue(detail["vulnerabilities"][0]["in_kev"])

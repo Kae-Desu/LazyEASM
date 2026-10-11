@@ -46,7 +46,7 @@ from utils.db_utils import (
     get_db_connection,
     get_http_targets,
     upsert_http_service,
-    upsert_technology,
+    sync_technologies,
     upsert_vulnerability,
     reconcile_vulnerabilities,
     log_scan
@@ -283,15 +283,13 @@ class WappalyzerScanner:
         seen_vuln_ids = []
         all_lookups_ok = True
         
+        detected = [(name, (data.get('versions') or [None])[0]) for name, data in technologies.items()]
+        tech_ids = sync_technologies(http_id, host, detected)
+        
         for tech_name, tech_data in technologies.items():
             versions = tech_data.get('versions', [])
             tech_version = versions[0] if versions else None
-            
-            tech_id = upsert_technology(
-                http_id=http_id,
-                tech_name=tech_name,
-                tech_version=tech_version
-            )
+            tech_id = tech_ids[tech_name]
             
             result['technologies'].append({
                 'name': tech_name,

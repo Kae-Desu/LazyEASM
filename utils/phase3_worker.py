@@ -367,6 +367,13 @@ def _run_discovery():
         send_discovery_notification(result)
 
 
+def _run_maintenance():
+    from utils.db_utils import prune_changes
+    removed = prune_changes(days=365)
+    if removed:
+        logger.info(f"Pruned {removed} change history entries older than 365 days")
+
+
 # name -> (setting key, default, seconds per unit, run function)
 MONITORS = {
     'liveness': ('liveness_interval_min', 5, 60, _run_liveness),
@@ -376,6 +383,7 @@ MONITORS = {
     'intel': ('intel_interval_hr', 24, 3600, _run_intel),
     'misconfig': ('misconfig_interval_hr', 24, 3600, _run_misconfig),
     'discovery': ('discovery_interval_hr', 24, 3600, _run_discovery),
+    'maintenance': ('maintenance_interval_hr', 24, 3600, _run_maintenance),
 }
 
 _threads = {}

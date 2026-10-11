@@ -30,6 +30,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 from utils.db_utils import (
     get_db_connection,
+    _record_change,
     log_scan
 )
 
@@ -325,7 +326,7 @@ class PortScanner:
         
         return ports
     
-    def save_ports(self, ip_id: int, ports: List[Dict]) -> int:
+    def save_ports(self, ip_id: int, ports: List[Dict], ip_value: str = None) -> int:
         """
         Save discovered ports to database.
         
@@ -368,11 +369,29 @@ class PortScanner:
                         INSERT INTO ports (ip_id, port_num, protocol, service_name, banner, first_seen)
                         VALUES (?, ?, ?, ?, ?, ?)
                     ''', (ip_id, port['port_num'], port['protocol'], port['service'], port['banner'], timestamp))
+                    if ip_value:
+                        service = f" ({port['service']})" if port.get('service') else ''
+                        _record_change(cursor, ip_value, 'port_opened',
+                                       f"Port {port['port_num']}/{port['protocol']} opened{service}",
+                                       {'port': port['port_num'], 'protocol': port['protocol'],
+                                        'service': port.get('service')})
                 
                 saved_count += 1
                 
             except Exception as e:
                 self.logger.error(f"Error saving port {port['port_num']} for ip_id {ip_id}: {e}")
+        
+        # Only a full-range scan can tell that a previously open port is closed
+        if self.cycle == 'long' and ip_value:
+            open_now = {(p['port_num'], p['protocol']) for p in ports}
+            cursor.execute('SELECT port_id, port_num, protocol, service_name FROM ports WHERE ip_id = ?', (ip_id,))
+            for row in cursor.fetchall():
+                if (row['port_num'], row['protocol']) not in open_now:
+                    cursor.execute('DELETE FROM ports WHERE port_id = ?', (row['port_id'],))
+                    _record_change(cursor, ip_value, 'port_closed',
+                                   f"Port {row['port_num']}/{row['protocol']} closed",
+                                   {'port': row['port_num'], 'protocol': row['protocol'],
+                                    'service': row['service_name']})
         
         conn.commit()
         conn.close()
@@ -423,7 +442,7 @@ class PortScanner:
             return result
         
         # Save ports to database
-        saved_count = self.save_ports(ip_id, ports)
+        saved_count = self.save_ports(ip_id, ports, ip_value=ip_value)
         
         # Update scan timestamp
         self.update_scan_timestamp(ip_id)

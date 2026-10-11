@@ -332,6 +332,11 @@ def poll_all_domains() -> Dict:
     
     # Check certificate signature changes
     signature_changes = check_cert_signature_changes(all_certificates)
+    from utils.db_utils import record_change
+    for change in signature_changes:
+        record_change(change['hostname'], 'certificate_changed', 'Certificate replaced (new serial number)',
+                      {'old_serial': change.get('old_serial'), 'new_serial': change.get('new_serial'),
+                       'not_after': change.get('not_after')})
     
     # Update last check timestamp
     set_setting('last_ctlogs_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))

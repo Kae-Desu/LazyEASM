@@ -102,6 +102,7 @@ def check_all_liveness() -> dict:
     
     now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
     updates_to_make = []  # (asset_id, asset_type, new_status)
+    transitions = []      # (asset_name, old_status, new_status) for change history
     
     for asset in assets:
         asset_name = asset['name']
@@ -126,6 +127,7 @@ def check_all_liveness() -> dict:
                     logger.info(f"{asset_name}: NEW asset, now DOWN")
             else:
                 # Status change from confirmed state
+                transitions.append((asset_name, old_status, new_status))
                 if new_status == 'down':
                     result['down'].append(asset_name)
                     logger.info(f"{asset_name}: went DOWN (was {old_status})")
@@ -150,6 +152,10 @@ def check_all_liveness() -> dict:
                 UPDATE {table} SET status = ?, last_liveness_check = ? WHERE {id_col} = ?
             ''', (new_status, now, asset_id))
         
+        from utils.db_utils import _record_status_change
+        for asset_name, old, new in transitions:
+            _record_status_change(cursor, asset_name, old, new)
+
         # Update last_liveness_check for all assets (even if status unchanged)
         for asset in assets:
             table = 'domain_asset' if asset['asset_type'] == 'domain' else 'subdomain_asset'
