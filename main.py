@@ -1231,114 +1231,40 @@ def phase3_toggle():
     })
 
 
-@app.route('/api/phase3/liveness/check', methods=['POST'])
+@app.route('/api/phase3/<name>/check', methods=['POST'])
 @token_required
-def phase3_liveness_check():
-    """Manually trigger a liveness check."""
-    from utils.liveness_checker import check_all_liveness
-    from utils.phase3_worker import send_liveness_notification
-    
-    result = check_all_liveness()
-    
-    # Send notification if any changes
-    if result['down'] or result['recovered']:
-        send_liveness_notification(result)
-    
+def phase3_manual_check(name):
+    """
+    Queue a Phase 3 check to run now in the worker process.
+
+    name: liveness, ctlogs, wappalyzer, takeover, intel, misconfig, discovery, maintenance
+    Returns 202 with a job_id; poll GET /api/jobs/<job_id> for the outcome.
+    """
+    from utils.phase3_worker import MONITORS
+    from utils.pipeline import enqueue_monitor_run
+
+    if name not in MONITORS:
+        return jsonify({'success': False, 'error': f"Unknown check. Use one of: {', '.join(MONITORS)}"}), 404
+
+    job_id, created = enqueue_monitor_run(name)
     return jsonify({
         'success': True,
-        'result': result
-    })
+        'queued': created,
+        'job_id': job_id,
+        'message': f"{name} check queued" if created else f"{name} check already queued"
+    }), 202
 
 
-@app.route('/api/phase3/ctlogs/check', methods=['POST'])
+@app.route('/api/jobs/<int:job_id>', methods=['GET'])
 @token_required
-def phase3_ctlogs_check():
-    """Manually trigger a CT logs check."""
-    from utils.ct_monitor import poll_all_domains
-    from utils.phase3_worker import send_ctlogs_notification
-    
-    result = poll_all_domains()
-    
-    # Send notification if any discoveries
-    if result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()):
-        send_ctlogs_notification(result)
-    
-    return jsonify({
-        'success': True,
-        'result': result
-    })
+def job_status(job_id):
+    """Status of a queued input discovery or manual check job."""
+    from utils.pipeline import get_job
 
-
-@app.route('/api/phase3/wappalyzer/check', methods=['POST'])
-@token_required
-def phase3_wappalyzer_check():
-    """Manually trigger a Wappalyzer re-scan."""
-    from utils.wappalyzer_monitor import run_wappalyzer_scan
-    from utils.phase3_worker import send_wappalyzer_notification
-    
-    result = run_wappalyzer_scan()
-    
-    if result.get('new_cves'):
-        send_wappalyzer_notification(result)
-    
-    return jsonify({
-        'success': True,
-        'result': result
-    })
-
-
-@app.route('/api/phase3/takeover/check', methods=['POST'])
-@token_required
-def phase3_takeover_check():
-    """Manually trigger a subdomain takeover check."""
-    from utils.takeover_checker import run_takeover_check
-    from utils.phase3_worker import send_takeover_notification
-
-    result = run_takeover_check()
-
-    if result.get('new_findings'):
-        send_takeover_notification(result)
-
-    return jsonify({
-        'success': True,
-        'result': result
-    })
-
-
-@app.route('/api/phase3/intel/check', methods=['POST'])
-@token_required
-def phase3_intel_check():
-    """Manually refresh exploit intel (CISA KEV + EPSS)."""
-    from utils.threat_intel import refresh_threat_intel
-    from utils.phase3_worker import send_kev_notification
-
-    result = refresh_threat_intel()
-
-    if result.get('newly_kev'):
-        send_kev_notification(result)
-
-    return jsonify({
-        'success': True,
-        'result': result
-    })
-
-
-@app.route('/api/phase3/misconfig/check', methods=['POST'])
-@token_required
-def phase3_misconfig_check():
-    """Manually trigger misconfiguration checks."""
-    from utils.misconfig_checker import run_misconfig_check
-    from utils.phase3_worker import send_misconfig_notification
-
-    result = run_misconfig_check()
-
-    if result.get('new_findings'):
-        send_misconfig_notification(result)
-
-    return jsonify({
-        'success': True,
-        'result': result
-    })
+    job = get_job(job_id)
+    if not job:
+        return jsonify({'success': False, 'error': 'Job not found'}), 404
+    return jsonify({'success': True, 'job': job})
 
 
 def serve_web():

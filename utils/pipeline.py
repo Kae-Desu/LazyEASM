@@ -17,6 +17,8 @@ from utils.queue_manager import task_queue
 logger = logging.getLogger(__name__)
 
 INPUT_DISCOVERY = 'input_discovery'
+MONITOR_RUN = 'monitor_run'
+JOB_TYPES = (INPUT_DISCOVERY, MONITOR_RUN)
 
 
 def enqueue_input_discovery(targets: dict) -> int:
@@ -40,6 +42,50 @@ def enqueue_input_discovery(targets: dict) -> int:
         return cursor.lastrowid
     finally:
         conn.close()
+
+
+def enqueue_monitor_run(name: str) -> tuple:
+    """
+    Queue a manual run of a Phase 3 check for the worker.
+
+    Returns:
+        (job_id, created) - an already queued run of the same check is reused
+    """
+    conn = get_db_connection()
+    try:
+        existing = conn.execute('''
+            SELECT queue_id FROM scan_queue
+            WHERE scan_type = ? AND target = ? AND status IN ('pending', 'processing')
+        ''', (MONITOR_RUN, name)).fetchone()
+        if existing:
+            return existing['queue_id'], False
+        cursor = conn.execute('''
+            INSERT INTO scan_queue (scan_type, cycle, target, target_type, status)
+            VALUES (?, 'manual', ?, 'monitor', 'pending')
+        ''', (MONITOR_RUN, name))
+        conn.commit()
+        return cursor.lastrowid, True
+    finally:
+        conn.close()
+
+
+def get_job(job_id: int):
+    """Status of an input discovery or manual check job, or None."""
+    conn = get_db_connection()
+    try:
+        row = conn.execute(f'''
+            SELECT queue_id, scan_type, target, status, queued_at, started_at, completed_at, error_message
+            FROM scan_queue WHERE queue_id = ? AND scan_type IN ({','.join('?' * len(JOB_TYPES))})
+        ''', (job_id, *JOB_TYPES)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return None
+    job = dict(row)
+    job['job_id'] = job.pop('queue_id')
+    if job['scan_type'] == INPUT_DISCOVERY:
+        job['target'] = 'submitted assets'
+    return job
 
 
 def run_input_discovery(targets: dict) -> dict:

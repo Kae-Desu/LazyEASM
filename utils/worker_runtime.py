@@ -40,17 +40,21 @@ _threads = {}
 # ---------------------------------------------------------------------------
 
 def _claim_input_job():
-    from utils.db_utils import get_db_connection
     from utils.pipeline import INPUT_DISCOVERY
+    return _claim_job((INPUT_DISCOVERY,))
+
+
+def _claim_job(job_types):
+    from utils.db_utils import get_db_connection
 
     conn = get_db_connection()
     try:
         while True:
-            row = conn.execute('''
-                SELECT queue_id, target FROM scan_queue
-                WHERE scan_type = ? AND status = 'pending'
+            row = conn.execute(f'''
+                SELECT queue_id, scan_type, target FROM scan_queue
+                WHERE scan_type IN ({','.join('?' * len(job_types))}) AND status = 'pending'
                 ORDER BY queue_id LIMIT 1
-            ''', (INPUT_DISCOVERY,)).fetchone()
+            ''', tuple(job_types)).fetchone()
             if not row:
                 return None
             cursor = conn.execute('''
@@ -76,17 +80,30 @@ def _finish_input_job(queue_id: int, status: str, error: str = None):
         conn.close()
 
 
+def _run_job(job: dict):
+    from utils.pipeline import INPUT_DISCOVERY, MONITOR_RUN, run_input_discovery
+    from utils.phase3_worker import run_monitor
+
+    if job['scan_type'] == INPUT_DISCOVERY:
+        run_input_discovery(json.loads(job['target']))
+    elif job['scan_type'] == MONITOR_RUN:
+        run_monitor(job['target'])
+    else:
+        raise ValueError(f"unknown job type {job['scan_type']}")
+
+
 def _input_discovery_loop():
-    from utils.pipeline import run_input_discovery
+    """Runs queued jobs: submitted-asset discovery and manual Phase 3 checks."""
+    from utils.pipeline import JOB_TYPES
 
     while _running:
         job = None
         try:
-            job = _claim_input_job()
+            job = _claim_job(JOB_TYPES)
             if not job:
                 time.sleep(JOB_POLL_SECONDS)
                 continue
-            run_input_discovery(json.loads(job['target']))
+            _run_job(job)
             _finish_input_job(job['queue_id'], 'completed')
         except Exception as e:
             logger.error(f"[Discovery] Job failed: {e}")
@@ -105,14 +122,14 @@ def recover_interrupted_jobs() -> int:
     worker runtime runs per database.
     """
     from utils.db_utils import get_db_connection
-    from utils.pipeline import INPUT_DISCOVERY
+    from utils.pipeline import INPUT_DISCOVERY, MONITOR_RUN
 
     conn = get_db_connection()
     try:
         cursor = conn.execute('''
             UPDATE scan_queue SET status = 'pending', started_at = NULL
-            WHERE status = 'processing' AND scan_type IN (?, 'phase0_discovery', 'phase2_deep_scan')
-        ''', (INPUT_DISCOVERY,))
+            WHERE status = 'processing' AND scan_type IN (?, ?, 'phase0_discovery', 'phase2_deep_scan')
+        ''', (INPUT_DISCOVERY, MONITOR_RUN))
         conn.commit()
         recovered = cursor.rowcount
     finally:

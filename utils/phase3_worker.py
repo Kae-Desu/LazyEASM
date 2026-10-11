@@ -293,6 +293,17 @@ def send_discovery_notification(result: dict):
 POLL_SECONDS = 5
 
 
+def run_monitor(name: str):
+    """
+    Run one Phase 3 check now (scheduled or manual). A per-check lock keeps a
+    manual run from overlapping the scheduled run of the same check.
+    """
+    if name not in MONITORS:
+        raise ValueError(f"unknown check: {name}")
+    with _locks.setdefault(name, threading.Lock()):
+        MONITORS[name][3]()
+
+
 def _monitor_loop(name: str, interval_seconds: int, run_once):
     """
     Run run_once() every interval_seconds while Phase 3 is enabled.
@@ -387,6 +398,7 @@ MONITORS = {
 }
 
 _threads = {}
+_locks = {}
 
 
 def start_phase3_workers():
@@ -411,7 +423,7 @@ def start_phase3_workers():
         intervals[name] = value
         _threads[name] = threading.Thread(
             target=_monitor_loop,
-            args=(f"Phase 3 {name}", value * unit, run_once),
+            args=(f"Phase 3 {name}", value * unit, lambda name=name: run_monitor(name)),
             daemon=True,
             name=f'Phase3-{name}'
         )

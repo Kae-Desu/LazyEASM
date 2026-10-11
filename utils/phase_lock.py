@@ -17,6 +17,9 @@ PHASE_0_RUNNING = 1
 PHASE_1_RUNNING = 2
 PHASE_2_RUNNING = 3
 
+# No batch run takes this long; an older lock was left behind by a crash
+STALE_LOCK_HOURS = 24
+
 
 def get_db_connection():
     """Import here to avoid circular dependency."""
@@ -34,11 +37,31 @@ def get_current_phase() -> int:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT current_phase FROM phase_status WHERE id = 1')
+    cursor.execute('SELECT current_phase, started_at FROM phase_status WHERE id = 1')
     result = cursor.fetchone()
     conn.close()
     
-    return result['current_phase'] if result else PHASE_NONE
+    if not result:
+        return PHASE_NONE
+    
+    phase = result['current_phase']
+    if phase != PHASE_NONE and _is_stale(result['started_at']):
+        # A crash during a batch deep scan never ran clear_phase(); without
+        # this, new assets would be refused forever
+        logger.warning(f"Clearing stale phase lock (phase {phase}, started {result['started_at']})")
+        clear_phase()
+        return PHASE_NONE
+    return phase
+
+
+def _is_stale(started_at: Optional[str]) -> bool:
+    if not started_at:
+        return True
+    try:
+        started = datetime.strptime(started_at, '%Y-%m-%d %H:%M:%S')
+    except ValueError:
+        return True
+    return datetime.now() - started > timedelta(hours=STALE_LOCK_HOURS)
 
 
 def set_phase(phase: int, total_assets: int = 0):

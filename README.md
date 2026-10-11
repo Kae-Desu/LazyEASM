@@ -308,6 +308,8 @@ python run.py
 - If either process exits, `run.py` stops the other and exits, so Docker's restart policy restarts LazyEASM.
 - The worker writes a heartbeat every 15 seconds; `/health` reports it per component (`phase0_worker`, `discovery_worker`, `phase1_worker`, `phase2_worker`, `phase3_worker`).
 - Run exactly one worker per database.
+- `POST /api/phase3/<check>/check` (`liveness`, `ctlogs`, `wappalyzer`, `takeover`, `intel`, `misconfig`, `discovery`, `maintenance`) queues a run in the worker and returns `202` with a `job_id`; `GET /api/jobs/<job_id>` reports `pending` / `processing` / `completed` / `failed`. A manual run never overlaps the scheduled run of the same check.
+- A deep-scan phase lock older than 24 hours is treated as left behind by a crash and cleared.
 - For local development, `python main.py` runs the web app and the worker in one process. `FLASK_DEBUG=true` switches to Flask's debug server (never on a reachable host).
 - `HOST`, `PORT` (default `0.0.0.0:10001`) and `WEB_THREADS` (default `8`) configure the web server.
 
