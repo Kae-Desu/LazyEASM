@@ -51,13 +51,13 @@ class PagesTestCase(unittest.TestCase):
 class NavigationTests(PagesTestCase):
     def test_pages_require_login(self):
         anonymous = self.main.app.test_client()
-        for url in ('/', '/assets', f'/assets/subdomain/{self.sub_id}', '/settings'):
+        for url in ('/', '/assets', '/findings', f'/assets/subdomain/{self.sub_id}', '/settings'):
             response = anonymous.get(url)
             self.assertEqual(response.status_code, 302, url)
             self.assertIn('/login', response.headers['Location'])
 
     def test_sidebar_marks_the_current_page(self):
-        for url, label in (('/', 'Overview'), ('/assets', 'Assets'), ('/settings', 'Settings')):
+        for url, label in (('/', 'Overview'), ('/assets', 'Assets'), ('/findings', 'Findings'), ('/settings', 'Settings')):
             html = self.client.get(url).get_data(as_text=True)
             self.assertRegex(html, rf'aria-current="page">\s*<i class="fas [\w-]+ w-5 mr-3 text-center"></i>{label}')
 

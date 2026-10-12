@@ -1,0 +1,104 @@
+{# Overview headline numbers, riskiest assets and widespread issues (refreshed via /update_overview) #}
+{% set i = overview.issues %}
+{% set a = overview.assets %}
+{% set card = 'block bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl p-5 card-glow transition-all hover:border-accent/50' %}
+{% set label = 'text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400' %}
+{% set sev_tone = {'critical': 'text-red-600', 'high': 'text-red-500', 'medium': 'text-amber-500', 'low': 'text-slate-400'} %}
+
+<div class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+    <div class="{{ card }}">
+        <a href="/findings" class="{{ label }} hover:text-accent">Open findings</a>
+        <a href="/findings" class="block text-3xl font-bold mt-2 dark:text-white">{{ i.open_total }}</a>
+        <div class="flex flex-wrap gap-x-3 gap-y-1 mt-2 text-xs">
+            {% for sev in ('critical', 'high', 'medium', 'low') %}
+            <a href="/findings?severity={{ sev }}" class="hover:underline {{ sev_tone[sev] if i.by_severity[sev] else 'text-slate-400' }}">
+                <span class="font-bold font-mono">{{ i.by_severity[sev] }}</span> {{ sev }}</a>
+            {% endfor %}
+        </div>
+    </div>
+
+    <a href="/findings?kev=1" class="{{ card }}">
+        <span class="{{ label }}">Known exploited</span>
+        <span class="block text-3xl font-bold mt-2 {{ 'text-red-500' if i.kev else 'dark:text-white' }}">{{ i.kev }}</span>
+        <span class="block mt-2 text-xs text-slate-500">
+            {% if i.kev %}Open CISA KEV CVEs on {{ i.kev_hosts }} host{{ 's' if i.kev_hosts != 1 }}{% else %}No open CVE is known to be exploited{% endif %}
+        </span>
+    </a>
+
+    <a href="/assets" class="{{ card }}">
+        <span class="{{ label }}">Assets</span>
+        <span class="block text-3xl font-bold mt-2 dark:text-white">{{ a.total }}</span>
+        <span class="flex flex-wrap gap-x-3 mt-2 text-xs">
+            <span class="text-emerald-500"><span class="font-bold font-mono">{{ a.up }}</span> up</span>
+            <span class="{{ 'text-amber-500' if a.down else 'text-slate-400' }}"><span class="font-bold font-mono">{{ a.down }}</span> down</span>
+            <span class="text-slate-500"><span class="font-bold font-mono">{{ a.new_this_week }}</span> new this week</span>
+        </span>
+    </a>
+
+    <a href="/assets?cert_state={{ 'expired' if a.certs_expired and not a.certs_expiring else 'expiring' }}" class="{{ card }}">
+        <span class="{{ label }}">Certificates</span>
+        <span class="block text-3xl font-bold mt-2 {{ 'text-amber-500' if a.certs_expiring or a.certs_expired else 'dark:text-white' }}">{{ a.certs_expiring + a.certs_expired }}</span>
+        <span class="flex flex-wrap gap-x-3 mt-2 text-xs">
+            <span class="{{ 'text-amber-500' if a.certs_expiring else 'text-slate-400' }}"><span class="font-bold font-mono">{{ a.certs_expiring }}</span> expiring ≤30d</span>
+            <span class="{{ 'text-red-500' if a.certs_expired else 'text-slate-400' }}"><span class="font-bold font-mono">{{ a.certs_expired }}</span> expired</span>
+        </span>
+    </a>
+</div>
+
+<p class="mt-3 px-1 text-xs text-slate-500">
+    This week: <span class="font-bold">{{ i.new_this_week }}</span> new open finding{{ 's' if i.new_this_week != 1 }},
+    <a href="#changes" class="font-bold hover:text-accent">{{ overview.changes_this_week }}</a> change{{ 's' if overview.changes_this_week != 1 }} recorded.
+</p>
+
+<div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">
+    <section class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-border dark:border-white/5">
+            <h2 class="{{ label }}"><i class="fas fa-fire mr-2 text-accent"></i>Riskiest assets</h2>
+            <a href="/assets?sort=kev_count%3Adesc" class="text-[10px] font-bold uppercase text-slate-400 hover:text-accent">All assets</a>
+        </div>
+        <ul class="divide-y divide-slate-100 dark:divide-white/5">
+            {% for r in overview.riskiest_assets %}
+            <li>
+                <a href="/assets/{{ r.type }}/{{ r.id }}" class="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5">
+                    {% if r.screenshot_id %}
+                    <img src="/screenshots/{{ r.screenshot_id }}/thumb" alt="" loading="lazy" width="48" height="30" class="w-12 h-[30px] object-cover object-top rounded border border-border dark:border-white/10 shrink-0">
+                    {% else %}
+                    <span class="w-12 h-[30px] rounded border border-dashed border-border dark:border-white/10 shrink-0"></span>
+                    {% endif %}
+                    <span class="flex-1 min-w-0 font-mono text-xs font-semibold truncate dark:text-white">{{ r.name }}</span>
+                    {% if r.kev_count %}<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white whitespace-nowrap">KEV {{ r.kev_count }}</span>{% endif %}
+                    {% if r.max_cvss %}<span class="font-mono text-xs font-bold {{ 'text-red-500' if r.max_cvss >= 9 else 'text-orange-500' if r.max_cvss >= 7 else 'text-amber-500' }}" title="Highest CVSS">{{ '%.1f'|format(r.max_cvss) }}</span>{% endif %}
+                    {% if r.finding_count %}<span class="text-[10px] text-slate-500 whitespace-nowrap">{{ r.finding_count }} finding{{ 's' if r.finding_count != 1 }}</span>{% endif %}
+                </a>
+            </li>
+            {% else %}
+            <li class="px-5 py-6 text-xs text-slate-400">No open findings on any asset.</li>
+            {% endfor %}
+        </ul>
+    </section>
+
+    <section class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden">
+        <div class="flex items-center justify-between px-5 py-3 border-b border-border dark:border-white/5">
+            <h2 class="{{ label }}"><i class="fas fa-layer-group mr-2 text-accent"></i>Most widespread issues</h2>
+            <a href="/findings" class="text-[10px] font-bold uppercase text-slate-400 hover:text-accent">All findings</a>
+        </div>
+        <ul class="divide-y divide-slate-100 dark:divide-white/5">
+            {% for w in overview.widespread_issues %}
+            <li>
+                <a href="/findings?identifier={{ w.identifier|urlencode }}" class="flex items-center gap-3 px-5 py-2.5 hover:bg-slate-50 dark:hover:bg-white/5">
+                    {% if w.priority %}
+                    <span class="text-[10px] font-bold px-1.5 py-0.5 rounded border shrink-0 {{ 'bg-red-600 text-white border-red-600' if w.priority == 'P1' else 'bg-orange-500/10 text-orange-500 border-orange-500/30' if w.priority == 'P2' else 'bg-amber-500/10 text-amber-500 border-amber-500/30' if w.priority == 'P3' else 'bg-slate-500/10 text-slate-400 border-slate-500/20' }}">{{ w.priority }}</span>
+                    {% else %}
+                    <span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border shrink-0 {{ 'bg-red-500/10 text-red-500 border-red-500/20' if w.severity in ('critical', 'high') else 'bg-amber-500/10 text-amber-500 border-amber-500/20' if w.severity == 'medium' else 'bg-slate-500/10 text-slate-400 border-slate-500/20' }}">{{ w.severity }}</span>
+                    {% endif %}
+                    <span class="flex-1 min-w-0 text-xs font-semibold truncate dark:text-white {{ 'font-mono' if w.kind == 'cve' }}">{{ w.title }}</span>
+                    {% if w.in_kev %}<span class="text-[10px] font-bold text-red-500 whitespace-nowrap">KEV</span>{% endif %}
+                    <span class="text-[10px] text-slate-500 whitespace-nowrap">{{ w.host_count }} host{{ 's' if w.host_count != 1 }}</span>
+                </a>
+            </li>
+            {% else %}
+            <li class="px-5 py-6 text-xs text-slate-400">No open findings.</li>
+            {% endfor %}
+        </ul>
+    </section>
+</div>

@@ -922,48 +922,87 @@ def reconcile_vulnerabilities(http_id: int, seen_vuln_ids, min_cvss: float = 0.0
         conn.close()
 
 
+def _set_vulnerability_status(cursor, vuln_id: int, status: str, note: str, now: str) -> int:
+    """
+    Apply a status to every row with the same CVE on the same host as vuln_id
+    (the dashboard groups CVEs per host). Returns rows updated, 0 if not found.
+    """
+    cursor.execute('''
+        SELECT v.cve_id, h.host
+        FROM vulnerabilities v
+        INNER JOIN technologies t ON t.tech_id = v.tech_id
+        INNER JOIN http_services h ON h.http_id = t.http_id
+        WHERE v.vuln_id = ?
+    ''', (vuln_id,))
+    row = cursor.fetchone()
+    if not row:
+        return 0
+
+    cursor.execute('''
+        UPDATE vulnerabilities
+        SET status = ?, status_note = ?, status_updated_at = ?
+        WHERE cve_id = ? AND tech_id IN (
+            SELECT t.tech_id FROM technologies t
+            INNER JOIN http_services h ON h.http_id = t.http_id
+            WHERE h.host = ?
+        )
+    ''', (status, note, now, row['cve_id'], row['host']))
+    updated = cursor.rowcount
+    _record_change(cursor, row['host'], 'status_changed',
+                   f"{row['cve_id']} marked {status.replace('_', ' ')}" + (f": {note}" if note else ''),
+                   {'cve_id': row['cve_id'], 'status': status, 'note': note})
+    return updated
+
+
+def _set_finding_status(cursor, finding_id: int, status: str, note: str, now: str) -> int:
+    row = cursor.execute('SELECT host, title FROM findings WHERE finding_id = ?', (finding_id,)).fetchone()
+    if not row:
+        return 0
+    cursor.execute('''
+        UPDATE findings SET status = ?, status_note = ?, status_updated_at = ?
+        WHERE finding_id = ?
+    ''', (status, note, now, finding_id))
+    updated = cursor.rowcount
+    _record_change(cursor, row['host'], 'status_changed',
+                   f"{row['title']} marked {status.replace('_', ' ')}" + (f": {note}" if note else ''),
+                   {'finding_id': finding_id, 'status': status, 'note': note})
+    return updated
+
+
 def set_vulnerability_status(vuln_id: int, status: str, note: str = None) -> int:
     """
-    Set the status of a finding from the dashboard.
-
-    The dashboard groups findings by CVE per host, so the status is applied to
-    every row with the same CVE on the same host.
+    Set the status of a CVE finding from the dashboard (every row with the
+    same CVE on the same host).
 
     Returns:
         Number of rows updated (0 if vuln_id does not exist)
     """
+    return set_statuses([('cve', vuln_id)], status, note)
+
+
+def set_statuses(items, status: str, note: str = None) -> int:
+    """
+    Set the status of several CVE findings and security findings in one transaction.
+
+    Args:
+        items: iterable of ('cve', vuln_id) or ('finding', finding_id)
+
+    Returns:
+        Number of rows updated
+    """
     if status not in VULN_STATUSES:
         raise ValueError(f"invalid status: {status}")
+    setters = {'cve': _set_vulnerability_status, 'finding': _set_finding_status}
 
     conn = get_db_connection()
-    cursor = conn.cursor()
-
     try:
+        cursor = conn.cursor()
         now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        cursor.execute('''
-            SELECT v.cve_id, h.host
-            FROM vulnerabilities v
-            INNER JOIN technologies t ON t.tech_id = v.tech_id
-            INNER JOIN http_services h ON h.http_id = t.http_id
-            WHERE v.vuln_id = ?
-        ''', (vuln_id,))
-        row = cursor.fetchone()
-        if not row:
-            return 0
-
-        cursor.execute('''
-            UPDATE vulnerabilities
-            SET status = ?, status_note = ?, status_updated_at = ?
-            WHERE cve_id = ? AND tech_id IN (
-                SELECT t.tech_id FROM technologies t
-                INNER JOIN http_services h ON h.http_id = t.http_id
-                WHERE h.host = ?
-            )
-        ''', (status, note, now, row['cve_id'], row['host']))
-        updated = cursor.rowcount
-        _record_change(cursor, row['host'], 'status_changed',
-                       f"{row['cve_id']} marked {status.replace('_', ' ')}" + (f": {note}" if note else ''),
-                       {'cve_id': row['cve_id'], 'status': status, 'note': note})
+        updated = 0
+        for kind, item_id in items:
+            if kind not in setters:
+                raise ValueError(f"invalid kind: {kind}")
+            updated += setters[kind](cursor, int(item_id), status, note, now)
         conn.commit()
         return updated
     finally:
@@ -1098,32 +1137,12 @@ def reconcile_findings(host: str, finding_types, seen_finding_ids) -> int:
 
 def set_finding_status(finding_id: int, status: str, note: str = None) -> int:
     """
-    Set the status of a finding from the dashboard.
+    Set the status of a security finding from the dashboard.
 
     Returns:
         Number of rows updated (0 if finding_id does not exist)
     """
-    if status not in VULN_STATUSES:
-        raise ValueError(f"invalid status: {status}")
-
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        row = cursor.execute('SELECT host, title FROM findings WHERE finding_id = ?', (finding_id,)).fetchone()
-        if not row:
-            return 0
-        cursor.execute('''
-            UPDATE findings SET status = ?, status_note = ?, status_updated_at = ?
-            WHERE finding_id = ?
-        ''', (status, note, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), finding_id))
-        updated = cursor.rowcount
-        _record_change(cursor, row['host'], 'status_changed',
-                       f"{row['title']} marked {status.replace('_', ' ')}" + (f": {note}" if note else ''),
-                       {'finding_id': finding_id, 'status': status, 'note': note})
-        conn.commit()
-        return updated
-    finally:
-        conn.close()
+    return set_statuses([('finding', finding_id)], status, note)
 
 
 def get_hostnames_for_takeover_check() -> list:

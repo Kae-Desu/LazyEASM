@@ -16,11 +16,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
 from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_config_for_ui, EDITABLE_KEYS, KEY_DEFAULTS
-from utils.db_utils import get_db_connection, set_vulnerability_status, set_finding_status, get_changes, VULN_STATUSES
+from utils.db_utils import get_db_connection, set_vulnerability_status, set_finding_status, set_statuses, get_changes, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
 from utils.pipeline import enqueue_input_discovery, enqueue_assets_for_phase1, enqueue_single_asset_for_phase1
 from utils.asset_repository import AssetQueryError, get_asset_detail, list_assets
+from utils.findings_repository import FindingQueryError, get_overview, list_findings
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
 from utils import auth
@@ -562,7 +563,14 @@ def dashboard():
     conn.close()
     
     return render_template('dashboard.html', active_page='overview', queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue,
-                           changes=get_changes(limit=RECENT_CHANGES_LIMIT))
+                           changes=get_changes(limit=RECENT_CHANGES_LIMIT), overview=get_overview())
+
+
+@app.route('/update_overview')
+@token_required
+def update_overview():
+    """Headline numbers partial (Overview auto-refresh)."""
+    return render_template('overview_partial.html', overview=get_overview())
 
 
 @app.route('/assets')
@@ -570,6 +578,13 @@ def dashboard():
 def assets_page():
     """Paginated, filterable asset list (data from /api/assets)."""
     return render_template('assets.html', active_page='assets')
+
+
+@app.route('/findings')
+@token_required
+def findings_page():
+    """Cross-asset triage list (data from /api/findings)."""
+    return render_template('findings.html', active_page='findings')
 
 
 @app.route('/assets/<asset_type>/<int:asset_id>')
@@ -643,6 +658,66 @@ def api_assets():
         return jsonify({'success': False, 'error': str(exc)}), 400
 
     return jsonify({'success': True, **result})
+
+
+@app.route('/api/findings', methods=['GET'])
+@token_required
+def api_findings():
+    """
+    CVEs (grouped per host) and security findings across all assets, most urgent first.
+
+    Query params: q, kind (cve|finding), severity, status (open|fixed|accepted|false_positive|all,
+    default open), kev=1, identifier, host, sort (urgency|newest|last_seen|host), page, page_size
+    """
+    try:
+        result = list_findings(
+            page=request.args.get('page', 1),
+            page_size=request.args.get('page_size', 25),
+            query=request.args.get('q'),
+            kind=request.args.get('kind') or None,
+            severity=request.args.get('severity') or None,
+            status=request.args.get('status') or 'open',
+            kev_only=request.args.get('kev', ''),
+            identifier=request.args.get('identifier') or None,
+            host=request.args.get('host') or None,
+            sort=request.args.get('sort') or 'urgency',
+        )
+    except FindingQueryError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return jsonify({'success': True, **result})
+
+
+BULK_STATUS_LIMIT = 500
+
+
+@app.route('/api/findings/bulk_status', methods=['POST'])
+@token_required
+@csrf_protected
+def bulk_finding_status():
+    """Body: {"items": [{"kind": "cve"|"finding", "id": int}, ...], "status": ..., "note": ...}"""
+    data = request.get_json(silent=True) or {}
+    status = data.get('status')
+    note = (data.get('note') or '').strip()[:500] or None
+    if status not in VULN_STATUSES:
+        return jsonify({'success': False, 'error': f"status must be one of: {', '.join(VULN_STATUSES)}"}), 400
+
+    raw_items = data.get('items')
+    if not isinstance(raw_items, list) or not raw_items:
+        return jsonify({'success': False, 'error': 'items must be a non-empty list'}), 400
+    if len(raw_items) > BULK_STATUS_LIMIT:
+        return jsonify({'success': False, 'error': f'at most {BULK_STATUS_LIMIT} items per request'}), 400
+    items = []
+    for item in raw_items:
+        if not isinstance(item, dict) or item.get('kind') not in ('cve', 'finding')                 or not isinstance(item.get('id'), int) or isinstance(item.get('id'), bool):
+            return jsonify({'success': False, 'error': 'each item needs kind (cve|finding) and an integer id'}), 400
+        items.append((item['kind'], item['id']))
+
+    try:
+        updated = set_statuses(items, status, note)
+    except Exception as e:
+        logger.error(f"Error updating {len(items)} finding statuses: {e}", exc_info=True)
+        return jsonify({'success': False, 'error': 'Failed to update status'}), 500
+    return jsonify({'success': True, 'status': status, 'updated': updated})
 
 
 @app.route('/api/assets/<asset_type>/<int:asset_id>', methods=['GET'])

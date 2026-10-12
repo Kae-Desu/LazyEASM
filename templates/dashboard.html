@@ -16,7 +16,11 @@
 {% block content %}
         <h1 class="text-2xl font-bold mb-6 dark:text-white"><i class="fas fa-gauge-high mr-2 text-accent"></i>Overview</h1>
 
-                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden flex flex-col card-glow transition-all">
+        <div id="overview-stats">
+            {% include 'overview_partial.html' %}
+        </div>
+
+                <div class="mt-8 bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden flex flex-col card-glow transition-all">
                     <div class="px-6 py-4 border-b border-border dark:border-white/5 bg-lazy-dark flex items-center justify-between text-white">
                         <h2 class="font-bold flex items-center text-secondary uppercase text-xs tracking-widest">
                             <i class="fas fa-crosshairs mr-3"></i>Target Assets
@@ -26,7 +30,7 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <div class="flex-grow space-y-1.5">
                             <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Asset Queue (Newline separated)</label>
-                            <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-40 resize-y dark:text-white" placeholder="example.com"></textarea>
+                            <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-28 resize-y dark:text-white" placeholder="example.com"></textarea>
                         </div>
                         <button type="button" 
                                 data-action="scan" 
@@ -64,83 +68,39 @@
                     </div>
                 </div>
                 
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                    <!-- Assets Status -->
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl p-4 border border-border dark:border-white/10">
-                        <div class="flex items-center justify-between mb-2">
-                            <span class="text-slate-500 dark:text-slate-400 font-medium">Assets Status</span>
-                            <span id="assets-total" class="text-xs text-slate-400">0 total</span>
-                        </div>
-                        <div class="flex space-x-4">
-                            <div class="flex items-center">
-                                <span class="w-2 h-2 rounded-full bg-emerald-500 mr-2"></span>
-                                <span id="assets-up" class="font-mono text-emerald-500">0</span>
-                                <span class="text-xs text-slate-400 ml-1">up</span>
-                            </div>
-                            <div class="flex items-center">
-                                <span class="w-2 h-2 rounded-full bg-red-500 mr-2"></span>
-                                <span id="assets-down" class="font-mono text-red-500">0</span>
-                                <span class="text-xs text-slate-400 ml-1">down</span>
-                            </div>
-                        </div>
+                <div class="text-slate-500 dark:text-slate-400 font-medium text-xs mb-2">Last checks</div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Liveness</div>
+                        <div id="last-liveness" class="font-mono text-[11px] dark:text-white truncate">-</div>
                     </div>
-                    
-                    <!-- Certificates -->
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl p-4 border border-border dark:border-white/10">
-                        <div class="text-slate-500 dark:text-slate-400 font-medium mb-2">Certificates</div>
-                        <div class="flex items-center space-x-4">
-                            <div>
-                                <span id="certs-total" class="font-mono text-lg dark:text-white">0</span>
-                                <span class="text-xs text-slate-400 ml-1">total</span>
-                            </div>
-                            <div id="certs-expired" class="hidden">
-                                <span class="text-red-500 text-xs"><i class="fas fa-times-circle mr-1"></i></span>
-                                <span id="certs-expired-count" class="text-red-500 text-xs font-medium">0 expired</span>
-                            </div>
-                            <div id="certs-warning" class="hidden">
-                                <span class="text-amber-500 text-xs"><i class="fas fa-exclamation-triangle mr-1"></i></span>
-                                <span id="certs-expiring" class="text-amber-500 text-xs font-medium">0 expiring ≤7d</span>
-                            </div>
-                        </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">CT logs</div>
+                        <div id="last-ctlogs" class="font-mono text-[11px] dark:text-white truncate">-</div>
                     </div>
-                    
-                    <!-- Last Checks -->
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl p-4 border border-border dark:border-white/10">
-                        <div class="text-slate-500 dark:text-slate-400 font-medium mb-2">Last Checks</div>
-                        <div class="space-y-1 text-xs">
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Liveness:</span>
-                                <span id="last-liveness" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">CT Logs:</span>
-                                <span id="last-ctlogs" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Tech Scan:</span>
-                                <span id="last-wappalyzer" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Takeover:</span>
-                                <span id="last-takeover" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Exploit Intel:</span>
-                                <span id="last-intel" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Misconfig:</span>
-                                <span id="last-misconfig" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Discovery:</span>
-                                <span id="last-discovery" class="font-mono dark:text-white">-</span>
-                            </div>
-                            <div class="flex justify-between">
-                                <span class="text-slate-400">Screenshots:</span>
-                                <span id="last-screenshots" class="font-mono dark:text-white">-</span>
-                            </div>
-                        </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Tech scan</div>
+                        <div id="last-wappalyzer" class="font-mono text-[11px] dark:text-white truncate">-</div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Takeover</div>
+                        <div id="last-takeover" class="font-mono text-[11px] dark:text-white truncate">-</div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Exploit intel</div>
+                        <div id="last-intel" class="font-mono text-[11px] dark:text-white truncate">-</div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Misconfig</div>
+                        <div id="last-misconfig" class="font-mono text-[11px] dark:text-white truncate">-</div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Discovery</div>
+                        <div id="last-discovery" class="font-mono text-[11px] dark:text-white truncate">-</div>
+                    </div>
+                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
+                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Screenshots</div>
+                        <div id="last-screenshots" class="font-mono text-[11px] dark:text-white truncate">-</div>
                     </div>
                 </div>
                 <div class="mt-6 pt-4 border-t border-border dark:border-white/5 text-xs">
@@ -150,7 +110,7 @@
         </div>
 
         <!-- Change History Panel -->
-        <div class="mt-6">
+        <div class="mt-6" id="changes">
             <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
                 <i class="fas fa-clock-rotate-left mr-2 text-accent"></i>Recent Changes
             </h3>
@@ -201,7 +161,9 @@
     async function refreshOverview() {
         if (isModalOpen()) return;
         try {
-            const [queueResponse, changesResponse] = await Promise.all([fetch('/update_queue'), fetch('/update_changes')]);
+            const [queueResponse, changesResponse, statsResponse] = await Promise.all([fetch('/update_queue'), fetch('/update_changes'), fetch('/update_overview')]);
+            const stats = document.getElementById('overview-stats');
+            if (stats && statsResponse.ok) stats.innerHTML = await statsResponse.text();
             const queueBody = document.getElementById('queue-table-body');
             if (queueBody && queueResponse.ok) queueBody.innerHTML = await queueResponse.text();
             const changesList = document.getElementById('changes-list');
@@ -243,17 +205,6 @@
             set('phase3-status-label', data.enabled ? 'Enabled' : 'Disabled');
             const runningBadge = document.getElementById('phase3-running-badge');
             if (runningBadge) runningBadge.classList.toggle('hidden', !(data.running && data.enabled));
-
-            set('assets-total', `${data.assets.total} total`);
-            set('assets-up', data.assets.up);
-            set('assets-down', data.assets.down);
-            set('certs-total', data.certificates.total_certs);
-            const certExpired = document.getElementById('certs-expired');
-            if (certExpired) certExpired.classList.toggle('hidden', !(data.certificates.expired > 0));
-            set('certs-expired-count', `${data.certificates.expired} expired`);
-            const certWarning = document.getElementById('certs-warning');
-            if (certWarning) certWarning.classList.toggle('hidden', !(data.certificates.expiring_7_days > 0));
-            set('certs-expiring', `${data.certificates.expiring_7_days} expiring ≤7d`);
 
             [['last-liveness', 'last_liveness_check'], ['last-ctlogs', 'last_ctlogs_check'],
              ['last-wappalyzer', 'last_wappalyzer_check'], ['last-takeover', 'last_takeover_check'],

@@ -1,0 +1,326 @@
+{% extends 'base.html' %}
+{% block title %}Findings{% endblock %}
+
+{% block content %}
+{% set input_cls = 'bg-white dark:bg-dark-card border border-border dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-accent outline-none dark:text-white' %}
+
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h1 class="text-2xl font-bold dark:text-white"><i class="fas fa-triangle-exclamation mr-2 text-accent"></i>Findings</h1>
+    <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
+        <a href="/api/export/findings.csv?status=open" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent"><i class="fas fa-file-csv mr-1"></i>Open Findings CSV</a>
+        <a href="/api/export/findings.json" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent"><i class="fas fa-file-code mr-1"></i>All Findings JSON</a>
+    </div>
+</div>
+
+<form id="finding-filters" class="flex flex-wrap gap-3 mb-3" role="search" onsubmit="return false">
+    <div class="flex-[2_1_260px]">
+        <label for="f-q" class="sr-only">Search</label>
+        <input id="f-q" name="q" type="search" placeholder="Search host, CVE or title" class="w-full {{ input_cls }}">
+    </div>
+    <div class="flex-[1_1_140px]">
+        <label for="f-status" class="sr-only">Status</label>
+        <select id="f-status" name="status" class="w-full {{ input_cls }}">
+            <option value="open">Open</option><option value="fixed">Fixed</option><option value="accepted">Accepted risk</option>
+            <option value="false_positive">False positive</option><option value="all">Any status</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_140px]">
+        <label for="f-kind" class="sr-only">Kind</label>
+        <select id="f-kind" name="kind" class="w-full {{ input_cls }}">
+            <option value="">All kinds</option><option value="cve">CVEs</option><option value="finding">Security findings</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_140px]">
+        <label for="f-severity" class="sr-only">Severity</label>
+        <select id="f-severity" name="severity" class="w-full {{ input_cls }}">
+            <option value="">Any severity</option><option value="critical">Critical</option><option value="high">High</option>
+            <option value="medium">Medium</option><option value="low">Low</option><option value="info">Info</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_140px]">
+        <label for="f-kev" class="sr-only">Exploitation</label>
+        <select id="f-kev" name="kev" class="w-full {{ input_cls }}">
+            <option value="">Any exploitation</option><option value="1">Known exploited (KEV)</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_140px]">
+        <label for="f-sort" class="sr-only">Sort</label>
+        <select id="f-sort" name="sort" class="w-full {{ input_cls }}">
+            <option value="urgency">Most urgent</option><option value="newest">Newest</option>
+            <option value="last_seen">Recently seen</option><option value="host">Host A–Z</option>
+        </select>
+    </div>
+    <input type="hidden" id="f-identifier" name="identifier">
+    <input type="hidden" id="f-host" name="host">
+</form>
+<div id="active-chips" class="flex flex-wrap gap-2 mb-4 empty:hidden"></div>
+
+<div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-xl mb-20">
+    <div class="overflow-x-auto">
+        <table class="min-w-[860px] w-full text-sm text-left">
+            <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.15em]">
+                <tr>
+                    <th scope="col" class="p-0 w-10"><label class="block pl-5 pr-2 py-3 cursor-pointer"><input type="checkbox" id="select-page" aria-label="Select all on this page" class="w-4 h-4 accent-[#CC9ACC] cursor-pointer"></label></th>
+                    <th scope="col" class="px-3 py-3">Finding</th>
+                    <th scope="col" class="px-3 py-3">Asset</th>
+                    <th scope="col" class="px-3 py-3">Risk</th>
+                    <th scope="col" class="px-3 py-3">Status</th>
+                    <th scope="col" class="px-3 py-3">First seen</th>
+                </tr>
+            </thead>
+            <tbody id="finding-rows" class="divide-y divide-slate-100 dark:divide-white/5">
+                <tr><td colspan="6" class="px-5 py-10 text-center text-slate-400">Loading…</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-border dark:border-white/5 text-xs text-slate-500">
+        <span id="page-info" aria-live="polite"></span>
+        <div class="flex items-center gap-2">
+            <label for="f-size">Per page</label>
+            <select id="f-size" class="{{ input_cls }} py-1">
+                <option>25</option><option>50</option><option>100</option>
+            </select>
+            <button type="button" id="prev-page" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 disabled:opacity-40" aria-label="Previous page"><i class="fas fa-chevron-left"></i></button>
+            <button type="button" id="next-page" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 disabled:opacity-40" aria-label="Next page"><i class="fas fa-chevron-right"></i></button>
+        </div>
+    </div>
+</div>
+
+<!-- Bulk status bar: shown while rows are selected -->
+<div id="bulk-bar" class="hidden fixed bottom-4 left-1/2 -translate-x-1/2 lg:ml-28 z-40 w-[calc(100%-2rem)] max-w-3xl bg-lazy-dark text-white rounded-2xl shadow-2xl border border-white/10 px-4 py-3">
+    <div class="flex flex-wrap items-center gap-2 text-sm">
+        <span class="font-bold"><span id="bulk-count">0</span> selected</span>
+        <label for="bulk-status" class="sr-only">New status</label>
+        <select id="bulk-status" class="bg-dark-card border border-white/10 rounded-lg px-2 py-1.5 text-xs">
+            <option value="fixed">Mark fixed</option><option value="accepted">Accept risk</option>
+            <option value="false_positive">False positive</option><option value="open">Reopen</option>
+        </select>
+        <label for="bulk-note" class="sr-only">Note</label>
+        <input id="bulk-note" type="text" maxlength="500" placeholder="Note (optional)" class="flex-1 min-w-[140px] bg-dark-card border border-white/10 rounded-lg px-2 py-1.5 text-xs">
+        <button type="button" id="bulk-apply" class="px-3 py-1.5 rounded-lg bg-accent text-lazy-dark text-xs font-bold hover:opacity-90">Apply</button>
+        <button type="button" id="bulk-clear" class="px-2 py-1.5 text-xs text-slate-300 hover:text-white">Clear</button>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const CSRF = {{ csrf_token|tojson }};
+    const fields = {
+        q: document.getElementById('f-q'), status: document.getElementById('f-status'),
+        kind: document.getElementById('f-kind'), severity: document.getElementById('f-severity'),
+        kev: document.getElementById('f-kev'), sort: document.getElementById('f-sort'),
+        identifier: document.getElementById('f-identifier'), host: document.getElementById('f-host'),
+        page_size: document.getElementById('f-size'),
+    };
+    const DEFAULTS = { status: 'open', sort: 'urgency', page_size: '25' };
+    const STATUS_OPTIONS = [['open', 'Open'], ['fixed', 'Fixed'], ['accepted', 'Accepted risk'], ['false_positive', 'False positive']];
+    let page = 1;
+    let requestSeq = 0;
+    let items = [];
+    const selected = new Map();  // "kind:id" -> {kind, id}
+
+    function readUrl() {
+        const params = new URLSearchParams(location.search);
+        Object.entries(fields).forEach(([key, el]) => { el.value = params.get(key) || DEFAULTS[key] || ''; });
+        page = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
+    }
+
+    function stateParams() {
+        const params = new URLSearchParams();
+        Object.entries(fields).forEach(([key, el]) => { if (el.value && el.value !== DEFAULTS[key]) params.set(key, el.value); });
+        if (page > 1) params.set('page', page);
+        return params;
+    }
+
+    function apiParams() {
+        const params = new URLSearchParams();
+        Object.entries(fields).forEach(([key, el]) => { if (el.value) params.set(key, el.value); });
+        params.set('page', page);
+        return params;
+    }
+
+    // identifier / host filters come from links (Overview, row clicks) and show as removable chips
+    function renderChips() {
+        const chips = [['identifier', 'Issue'], ['host', 'Host']].filter(([key]) => fields[key].value);
+        document.getElementById('active-chips').innerHTML = chips.map(([key, label]) =>
+            `<button type="button" data-clear="${key}" class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/15 text-accent text-xs font-semibold">
+                ${label}: <span class="font-mono">${escapeHtml(fields[key].value)}</span><i class="fas fa-xmark" aria-hidden="true"></i><span class="sr-only">Remove filter</span></button>`).join('');
+    }
+
+    const keyOf = item => `${item.kind}:${item.id}`;
+    const statusUrl = item => item.kind === 'cve' ? `/api/vulnerabilities/${item.id}/status` : `/api/findings/${item.id}/status`;
+
+    function severityBadge(sev) {
+        const tone = ['critical', 'high'].includes(sev) ? 'bg-red-500/10 text-red-500 border-red-500/20'
+                   : sev === 'medium' ? 'bg-amber-500/10 text-amber-500 border-amber-500/20' : 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+        return `<span class="text-[10px] font-bold uppercase px-1.5 py-0.5 rounded border ${tone}">${escapeHtml(sev)}</span>`;
+    }
+
+    function priorityBadge(p) {
+        const tone = { P1: 'bg-red-600 text-white border-red-600', P2: 'bg-orange-500/10 text-orange-500 border-orange-500/30',
+                       P3: 'bg-amber-500/10 text-amber-500 border-amber-500/30' }[p] || 'bg-slate-500/10 text-slate-400 border-slate-500/20';
+        return `<span class="text-[10px] font-bold px-1.5 py-0.5 rounded border ${tone}">${escapeHtml(p)}</span>`;
+    }
+
+    function riskCell(f) {
+        const parts = [f.priority ? priorityBadge(f.priority) : '', severityBadge(f.severity)];
+        if (f.in_kev) parts.push(`<span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/10 text-red-500 border border-red-500/30" title="CISA Known Exploited Vulnerabilities${f.kev_due_date ? ', due ' + escapeHtml(f.kev_due_date) : ''}">KEV</span>`);
+        const scores = [];
+        if (f.cvss !== null && f.cvss !== undefined) scores.push(`CVSS ${Number(f.cvss).toFixed(1)}`);
+        if (f.epss !== null && f.epss !== undefined) scores.push(`EPSS ${(f.epss * 100).toFixed(1)}%`);
+        return `<div class="flex flex-wrap items-center gap-1.5">${parts.join('')}</div>${scores.length ? `<div class="text-[10px] text-slate-500 font-mono mt-1">${scores.join(' · ')}</div>` : ''}`;
+    }
+
+    function statusSelect(f) {
+        const options = STATUS_OPTIONS.map(([v, t]) => `<option value="${v}"${v === f.status ? ' selected' : ''}>${t}</option>`).join('');
+        return `<select data-status-url="${statusUrl(f)}" data-csrf="${escapeHtml(CSRF)}" data-previous="${escapeHtml(f.status)}" aria-label="Status for ${escapeHtml(f.title)} on ${escapeHtml(f.host)}"
+                    class="text-[10px] font-bold rounded-md px-1.5 py-0.5 bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 dark:text-white">${options}</select>
+                ${f.status_note ? `<div class="text-[10px] text-slate-400 italic mt-1 max-w-[180px] truncate" title="${escapeHtml(f.status_note)}">${escapeHtml(f.status_note)}</div>` : ''}`;
+    }
+
+    function render(data) {
+        items = data.items;
+        const rows = document.getElementById('finding-rows');
+        if (!items.length) {
+            rows.innerHTML = '<tr><td colspan="6" class="px-5 py-10 text-center text-slate-400">No findings match these filters.</td></tr>';
+        } else {
+            rows.innerHTML = items.map(f => {
+                const key = keyOf(f);
+                const asset = f.asset_type ? `/assets/${encodeURIComponent(f.asset_type)}/${encodeURIComponent(f.asset_id)}` : null;
+                const hostLink = asset ? `<a href="${asset}" class="font-mono text-xs font-semibold dark:text-white hover:text-accent break-all">${escapeHtml(f.host)}</a>`
+                                       : `<span class="font-mono text-xs font-semibold dark:text-white break-all">${escapeHtml(f.host)}</span>`;
+                const nvd = f.kind === 'cve' ? ` <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(f.identifier)}" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-accent" title="Open in NVD"><i class="fas fa-arrow-up-right-from-square text-[9px]"></i></a>` : '';
+                return `<tr class="${f.status !== 'open' ? 'opacity-60 ' : ''}hover:bg-slate-50 dark:hover:bg-white/5" data-status-card>
+                    <td class="p-0 align-top"><label class="block pl-5 pr-2 py-3 cursor-pointer"><input type="checkbox" data-key="${escapeHtml(key)}" ${selected.has(key) ? 'checked' : ''} aria-label="Select ${escapeHtml(f.title)} on ${escapeHtml(f.host)}" class="w-4 h-4 accent-[#CC9ACC] cursor-pointer"></label></td>
+                    <td class="px-3 py-3 align-top max-w-md">
+                        <div class="text-xs font-semibold dark:text-slate-100">${escapeHtml(f.title)}</div>
+                        <div class="text-[10px] text-slate-400 font-mono mt-0.5"><button type="button" data-filter="identifier" data-value="${escapeHtml(f.identifier)}" class="hover:text-accent hover:underline" title="Show this issue on every host">${escapeHtml(f.identifier)}</button>${nvd}</div>
+                        ${f.detail ? `<div class="text-[11px] text-slate-500 mt-1 line-clamp-2">${escapeHtml(f.detail)}</div>` : ''}
+                    </td>
+                    <td class="px-3 py-3 align-top">${hostLink}
+                        <div class="text-[10px] text-slate-400 mt-0.5">${f.ports.length ? 'Port ' + escapeHtml(f.ports.join(', ')) + ' · ' : ''}<button type="button" data-filter="host" data-value="${escapeHtml(f.host)}" class="hover:text-accent hover:underline">all on host</button></div></td>
+                    <td class="px-3 py-3 align-top">${riskCell(f)}</td>
+                    <td class="px-3 py-3 align-top">${statusSelect(f)}</td>
+                    <td class="px-3 py-3 align-top text-[11px] text-slate-500 font-mono whitespace-nowrap">${escapeHtml((f.first_seen || '-').slice(0, 10))}</td>
+                </tr>`;
+            }).join('');
+        }
+        const p = data.pagination;
+        const from = p.total ? (p.page - 1) * p.page_size + 1 : 0;
+        const to = Math.min(p.page * p.page_size, p.total);
+        document.getElementById('page-info').textContent = `${from}–${to} of ${p.total} findings`;
+        document.getElementById('prev-page').disabled = !p.has_previous;
+        document.getElementById('next-page').disabled = !p.has_next;
+        syncSelection();
+    }
+
+    function syncSelection() {
+        const boxes = [...document.querySelectorAll('#finding-rows input[data-key]')];
+        const pageBox = document.getElementById('select-page');
+        const checkedOnPage = boxes.filter(b => b.checked).length;
+        pageBox.checked = boxes.length > 0 && checkedOnPage === boxes.length;
+        pageBox.indeterminate = checkedOnPage > 0 && checkedOnPage < boxes.length;
+        document.getElementById('bulk-count').textContent = selected.size;
+        document.getElementById('bulk-bar').classList.toggle('hidden', selected.size === 0);
+    }
+
+    async function load(updateUrl = true) {
+        const seq = ++requestSeq;
+        if (updateUrl) history.replaceState(null, '', `${location.pathname}${stateParams().toString() ? '?' + stateParams() : ''}`);
+        renderChips();
+        try {
+            const response = await fetch(`/api/findings?${apiParams()}`);
+            const data = await response.json();
+            if (seq !== requestSeq) return;  // a newer request superseded this one
+            if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load findings');
+            render(data);
+        } catch (err) {
+            if (seq !== requestSeq) return;
+            document.getElementById('finding-rows').innerHTML = `<tr><td colspan="6" class="px-5 py-10 text-center text-red-500">${escapeHtml(err.message)}</td></tr>`;
+        }
+    }
+    window.onDataChanged = () => load(false);
+
+    function reset(keepSelection = false) {
+        if (!keepSelection) selected.clear();
+        page = 1;
+        load();
+    }
+
+    let debounce;
+    Object.entries(fields).forEach(([key, el]) => {
+        if (el.type === 'hidden') return;
+        el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => reset(), el.tagName === 'INPUT' ? 300 : 0);
+        });
+    });
+    document.getElementById('prev-page').addEventListener('click', () => { page = Math.max(1, page - 1); load(); });
+    document.getElementById('next-page').addEventListener('click', () => { page += 1; load(); });
+
+    document.getElementById('active-chips').addEventListener('click', (event) => {
+        const chip = event.target.closest('[data-clear]');
+        if (!chip) return;
+        fields[chip.dataset.clear].value = '';
+        reset();
+    });
+
+    const rowsEl = document.getElementById('finding-rows');
+    rowsEl.addEventListener('click', (event) => {
+        const filter = event.target.closest('[data-filter]');
+        if (!filter) return;
+        fields[filter.dataset.filter].value = filter.dataset.value;
+        reset();
+    });
+    rowsEl.addEventListener('change', (event) => {
+        const box = event.target.closest('input[data-key]');
+        if (!box) return;
+        const [kind, id] = box.dataset.key.split(':');
+        if (box.checked) selected.set(box.dataset.key, { kind, id: Number(id) });
+        else selected.delete(box.dataset.key);
+        syncSelection();
+    });
+    document.getElementById('select-page').addEventListener('change', (event) => {
+        items.forEach(f => {
+            if (event.target.checked) selected.set(keyOf(f), { kind: f.kind, id: f.id });
+            else selected.delete(keyOf(f));
+        });
+        document.querySelectorAll('#finding-rows input[data-key]').forEach(b => { b.checked = event.target.checked; });
+        syncSelection();
+    });
+
+    document.getElementById('bulk-clear').addEventListener('click', () => {
+        selected.clear();
+        document.querySelectorAll('#finding-rows input[data-key]').forEach(b => { b.checked = false; });
+        syncSelection();
+    });
+    document.getElementById('bulk-apply').addEventListener('click', async (event) => {
+        const button = event.currentTarget;
+        const status = document.getElementById('bulk-status').value;
+        const note = document.getElementById('bulk-note').value.trim();
+        button.disabled = true;
+        try {
+            const response = await fetch('/api/findings/bulk_status', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ items: [...selected.values()], status, note, csrf_token: CSRF })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'Failed to update findings');
+            showToast(`${selected.size} finding${selected.size === 1 ? '' : 's'} updated`, 'success');
+            selected.clear();
+            document.getElementById('bulk-note').value = '';
+            load(false);
+        } catch (err) {
+            showToast(err.message || 'Network error. Please try again.', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    });
+
+    readUrl();
+    load(false);
+})();
+</script>
+{% endblock %}
