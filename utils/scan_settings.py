@@ -17,6 +17,7 @@ SCHEDULE = [
     ('intel', 'Exploit intel (KEV / EPSS)', 'intel_interval_hr', 24, 'hours', 1, 720),
     ('misconfig', 'Misconfiguration check', 'misconfig_interval_hr', 24, 'hours', 1, 720),
     ('discovery', 'Subdomain discovery', 'discovery_interval_hr', 24, 'hours', 1, 720),
+    ('screenshots', 'Web screenshots', 'screenshot_interval_hr', 24, 'hours', 1, 720),
 ]
 
 CVE_MIN_CVSS_KEY = 'cve_min_cvss'

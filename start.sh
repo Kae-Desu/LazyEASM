@@ -148,6 +148,10 @@ setup_venv() {
     echo "Installing Python dependencies..."
     .venv/bin/pip install --upgrade pip --quiet
     .venv/bin/pip install -r requirements.txt --quiet
+
+    echo "Installing headless Chromium for web screenshots..."
+    .venv/bin/python -m playwright install --with-deps chromium \
+        || echo "Chromium install failed; web screenshots stay disabled until it is installed."
 }
 
 start_docker() {

@@ -136,6 +136,10 @@
                                 <span class="text-slate-400">Discovery:</span>
                                 <span id="last-discovery" class="font-mono dark:text-white">-</span>
                             </div>
+                            <div class="flex justify-between">
+                                <span class="text-slate-400">Screenshots:</span>
+                                <span id="last-screenshots" class="font-mono dark:text-white">-</span>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -254,7 +258,7 @@
             [['last-liveness', 'last_liveness_check'], ['last-ctlogs', 'last_ctlogs_check'],
              ['last-wappalyzer', 'last_wappalyzer_check'], ['last-takeover', 'last_takeover_check'],
              ['last-intel', 'last_intel_check'], ['last-misconfig', 'last_misconfig_check'],
-             ['last-discovery', 'last_discovery_check']].forEach(([id, key]) => set(id, formatRelativeTime(data[key])));
+             ['last-discovery', 'last_discovery_check'], ['last-screenshots', 'last_screenshot_check']].forEach(([id, key]) => set(id, formatRelativeTime(data[key])));
 
             if (data.enabled && !phase3Interval) phase3Interval = setInterval(fetchPhase3Status, 60000);
             if (!data.enabled && phase3Interval) { clearInterval(phase3Interval); phase3Interval = null; }

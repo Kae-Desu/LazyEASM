@@ -51,6 +51,7 @@
 <!-- Tabs -->
 {% set tabs = [
     ('findings', 'Findings', open_findings|length + open_cves|length),
+    ('screenshots', 'Screenshots', asset.screenshots|length),
     ('technologies', 'Technologies', asset.technologies|length),
     ('ports', 'Ports & IPs', asset.ports|length),
     ('directories', 'Directories', asset.directories|length),
@@ -81,6 +82,25 @@
             {% for cve in asset.vulnerabilities %}{{ cve_card(cve, csrf_token) }}{% else %}{{ empty_state('fa-check-circle', 'No CVEs found for this asset.') }}{% endfor %}
         </div>
     </div>
+</section>
+
+<section id="panel-screenshots" role="tabpanel" aria-labelledby="tab-screenshots" class="tab-panel hidden">
+    {% if asset.screenshots %}
+    <div class="grid lg:grid-cols-2 gap-6">
+        {% for shot in asset.screenshots %}
+        <figure class="rounded-2xl border border-border dark:border-white/10 bg-white dark:bg-dark-card overflow-hidden">
+            <a href="/screenshots/{{ shot.screenshot_id }}/full" target="_blank" rel="noopener" title="Open full size">
+                <img src="/screenshots/{{ shot.screenshot_id }}/full" alt="Screenshot of {{ shot.url }}" loading="lazy" class="w-full aspect-[16/10] object-cover object-top bg-slate-100">
+            </a>
+            <figcaption class="px-4 py-3 text-xs space-y-1">
+                <p class="font-mono font-semibold break-all">{{ shot.url }}{% if shot.final_url and shot.final_url != shot.url %} <span class="text-slate-400">→ {{ shot.final_url }}</span>{% endif %}</p>
+                <p class="text-slate-500">{% if shot.status_code %}HTTP {{ shot.status_code }} · {% endif %}{{ shot.title or 'No title' }}</p>
+                <p class="text-slate-400">Captured {{ shot.captured_at }}{% if shot.capture_count > 1 %} · {{ shot.capture_count }} captures kept{% endif %}</p>
+            </figcaption>
+        </figure>
+        {% endfor %}
+    </div>
+    {% else %}{{ empty_state('fa-image', 'No screenshots yet. They are captured after a scan finds a web service, and on the screenshot schedule.') }}{% endif %}
 </section>
 
 <section id="panel-technologies" role="tabpanel" aria-labelledby="tab-technologies" class="tab-panel hidden">

@@ -102,3 +102,6 @@ test-output.log
 
 # Bundled data files
 !data/*.txt
+
+# Captured screenshots
+db/screenshots/

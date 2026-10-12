@@ -1368,6 +1368,110 @@ def get_findings_for_export(status: str = None) -> list:
         conn.close()
 
 
+def get_screenshot_targets(hosts=None) -> list:
+    """
+    HTTP services to capture: [{'http_id', 'host', 'url'}].
+    hosts=None returns every service; an empty list returns nothing.
+    """
+    if hosts is not None and not hosts:
+        return []
+    conn = get_db_connection()
+    try:
+        query = 'SELECT http_id, host, port_num, is_https FROM http_services'
+        params = []
+        if hosts is not None:
+            query += f" WHERE host IN ({','.join('?' * len(hosts))})"
+            params = list(hosts)
+        targets = []
+        for row in conn.execute(query + ' ORDER BY host, port_num', params):
+            scheme = 'https' if row['is_https'] else 'http'
+            default = 443 if row['is_https'] else 80
+            port = '' if row['port_num'] == default else f":{row['port_num']}"
+            targets.append({'http_id': row['http_id'], 'host': row['host'],
+                            'url': f"{scheme}://{row['host']}{port}/"})
+        return targets
+    finally:
+        conn.close()
+
+
+def store_screenshot(capture, image_file: str, thumb_file: str, change_threshold: int,
+                     keep: int, delete_file) -> bool:
+    """
+    Store a capture, record an appearance change against the previous one,
+    keep the newest `keep` captures per service (older files are deleted)
+    and remember the page title.
+
+    Returns:
+        True if the page looks substantially different from the previous capture
+    """
+    from utils.screenshots import hash_distance
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        now = _now()
+        previous = cursor.execute('''
+            SELECT phash FROM screenshots WHERE http_id = ? ORDER BY captured_at DESC, screenshot_id DESC LIMIT 1
+        ''', (capture.http_id,)).fetchone()
+        cursor.execute('''
+            INSERT INTO screenshots (http_id, host, url, final_url, status_code, title, image_file, thumb_file, phash, captured_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (capture.http_id, capture.host, capture.url, capture.final_url, capture.status_code,
+              capture.title, image_file, thumb_file, capture.phash, now))
+        cursor.execute('UPDATE http_services SET title = ? WHERE http_id = ?', (capture.title or None, capture.http_id))
+
+        changed = False
+        if previous and previous['phash'] and capture.phash:
+            distance = hash_distance(previous['phash'], capture.phash)
+            if distance > change_threshold:
+                changed = True
+                _record_change(cursor, capture.host, 'appearance_changed',
+                               f"Page at {capture.url} looks different" + (f" ({capture.title})" if capture.title else ''),
+                               {'url': capture.url, 'distance': distance, 'title': capture.title})
+
+        old = cursor.execute('''
+            SELECT screenshot_id, image_file, thumb_file FROM screenshots WHERE http_id = ?
+            ORDER BY captured_at DESC, screenshot_id DESC LIMIT -1 OFFSET ?
+        ''', (capture.http_id, keep)).fetchall()
+        for row in old:
+            cursor.execute('DELETE FROM screenshots WHERE screenshot_id = ?', (row['screenshot_id'],))
+        conn.commit()
+    finally:
+        conn.close()
+
+    for row in old:
+        delete_file(row['image_file'])
+        delete_file(row['thumb_file'])
+    return changed
+
+
+def get_screenshot(screenshot_id: int):
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT * FROM screenshots WHERE screenshot_id = ?', (screenshot_id,)).fetchone()
+        return dict(row) if row else None
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        conn.close()
+
+
+def _get_screenshots_for_host(cursor, host: str) -> list:
+    """Latest screenshot per HTTP service of a host, plus how many captures each has."""
+    try:
+        cursor.execute('''
+            SELECT s.*, (SELECT COUNT(*) FROM screenshots c WHERE c.http_id = s.http_id) AS capture_count
+            FROM screenshots s
+            WHERE s.host = ? AND s.screenshot_id = (
+                SELECT screenshot_id FROM screenshots l WHERE l.http_id = s.http_id
+                ORDER BY captured_at DESC, screenshot_id DESC LIMIT 1)
+            ORDER BY s.url
+        ''', (host,))
+        return [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        return []
+
+
 def _get_recent_changes_for_host(cursor, host: str, limit: int = 10) -> list:
     try:
         cursor.execute('''

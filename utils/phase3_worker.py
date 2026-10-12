@@ -9,6 +9,7 @@ Orchestrates:
     - Exploit intel refresh: CISA KEV + EPSS (every 24 hours)
     - Misconfiguration checks (every 24 hours)
     - Extra subdomain discovery: passive sources + DNS brute force (every 24 hours)
+    - Web screenshots (every 24 hours)
 
 Exports:
     - start_phase3_workers()
@@ -387,6 +388,11 @@ def _run_discovery():
         send_discovery_notification(result)
 
 
+def _run_screenshots():
+    from utils.screenshots import run_screenshots
+    run_screenshots()
+
+
 def _run_maintenance():
     from utils.db_utils import prune_changes
     removed = prune_changes(days=365)
@@ -403,6 +409,7 @@ MONITORS = {
     'intel': ('intel_interval_hr', 24, 3600, _run_intel),
     'misconfig': ('misconfig_interval_hr', 24, 3600, _run_misconfig),
     'discovery': ('discovery_interval_hr', 24, 3600, _run_discovery),
+    'screenshots': ('screenshot_interval_hr', 24, 3600, _run_screenshots),
     'maintenance': ('maintenance_interval_hr', 24, 3600, _run_maintenance),
 }
 
@@ -476,6 +483,7 @@ def get_phase3_status() -> dict:
         'last_intel_check': get_setting('last_intel_check') or '-',
         'last_misconfig_check': get_setting('last_misconfig_check') or '-',
         'last_discovery_check': get_setting('last_discovery_check') or '-',
+        'last_screenshot_check': get_setting('last_screenshot_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
         'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
         'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
@@ -483,6 +491,7 @@ def get_phase3_status() -> dict:
         'intel_interval_hr': int(get_setting('intel_interval_hr') or '24'),
         'misconfig_interval_hr': int(get_setting('misconfig_interval_hr') or '24'),
         'discovery_interval_hr': int(get_setting('discovery_interval_hr') or '24'),
+        'screenshot_interval_hr': int(get_setting('screenshot_interval_hr') or '24'),
     }
 
 

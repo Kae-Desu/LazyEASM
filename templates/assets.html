@@ -172,9 +172,12 @@
             rows.innerHTML = data.items.map(a => {
                 const href = `/assets/${encodeURIComponent(a.type)}/${encodeURIComponent(a.id)}`;
                 const ips = a.type !== 'ip' && a.ips.length ? `<div class="text-[10px] text-slate-400 mt-0.5 font-mono truncate max-w-xs">${escapeHtml(a.ips.join(', '))}</div>` : '';
+                const thumb = a.screenshot_id
+                    ? `<img src="/screenshots/${encodeURIComponent(a.screenshot_id)}/thumb" alt="" loading="lazy" width="64" height="40" class="w-16 h-10 object-cover object-top rounded border border-border dark:border-white/10 bg-slate-100 shrink-0">`
+                    : `<div class="w-16 h-10 rounded border border-dashed border-border dark:border-white/10 shrink-0"></div>`;
                 return `<tr class="hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer" data-href="${href}">
-                    <td class="px-5 py-3"><a href="${href}" class="font-mono text-xs font-semibold dark:text-white hover:text-accent">${escapeHtml(a.name)}</a>
-                        <span class="ml-2 text-[9px] uppercase text-slate-400">${escapeHtml(a.type)}</span>${ips}</td>
+                    <td class="px-5 py-3"><div class="flex items-center gap-3">${thumb}<div class="min-w-0"><a href="${href}" class="font-mono text-xs font-semibold dark:text-white hover:text-accent">${escapeHtml(a.name)}</a>
+                        <span class="ml-2 text-[9px] uppercase text-slate-400">${escapeHtml(a.type)}</span>${ips}</div></div></td>
                     <td class="px-5 py-3">${statusBadge(a.status)}${a.phase2_status === 'pending' || a.phase2_status === 'processing' ? `<span class="ml-1 text-[9px] uppercase font-bold text-blue-500">${a.phase2_status === 'pending' ? 'queued' : 'scanning'}</span>` : ''}</td>
                     <td class="px-5 py-3">${riskCell(a)}</td>
                     <td class="px-5 py-3 text-right">${findingsCell(a)}</td>

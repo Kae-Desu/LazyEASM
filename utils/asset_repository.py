@@ -16,6 +16,7 @@ from utils.db_utils import (
     _get_directories_for_host,
     _get_findings_for_host,
     _get_recent_changes_for_host,
+    _get_screenshots_for_host,
     _get_ips_for_domain,
     _get_ips_for_subdomain,
     _get_ports_for_domain,
@@ -161,6 +162,10 @@ finding_rollup AS (
     FROM findings WHERE status = 'open'
     GROUP BY host
 ),
+screenshot_rollup AS (
+    SELECT host, MAX(screenshot_id) AS screenshot_id
+    FROM screenshots GROUP BY host
+),
 cert_rollup AS (
     SELECT hostname,
            MIN(CASE WHEN julianday(not_after) > julianday('now') THEN not_after END) AS active_not_after,
@@ -190,6 +195,7 @@ enriched AS (
            vr.max_epss AS max_epss,
            COALESCE(vr.kev_count, 0) AS kev_count,
            COALESCE(fr.finding_count, 0) AS finding_count,
+           shr.screenshot_id AS screenshot_id,
            CASE fr.max_finding_severity WHEN 4 THEN 'critical' WHEN 3 THEN 'high' WHEN 2 THEN 'medium'
                                         WHEN 1 THEN 'low' END AS max_finding_severity,
            cr.active_not_after AS certificate_not_after,
@@ -213,6 +219,7 @@ enriched AS (
     LEFT JOIN tech_rollup tr ON tr.type = a.type AND tr.asset_id = a.id
     LEFT JOIN vuln_rollup vr ON vr.type = a.type AND vr.asset_id = a.id
     LEFT JOIN finding_rollup fr ON fr.host = a.name
+    LEFT JOIN screenshot_rollup shr ON shr.host = a.name
     LEFT JOIN cert_rollup cr ON cr.hostname = a.name
     LEFT JOIN latest_phase2 lp ON lp.target = a.name
 )
@@ -393,6 +400,7 @@ def get_asset_detail(asset_type: str, asset_id: int) -> Optional[dict]:
         asset["directories"] = _get_directories_for_host(cursor, asset["name"])
         asset["certificate"] = _get_cert_expiry(cursor, asset["name"])
         asset["security_findings"] = _get_findings_for_host(cursor, asset["name"])
+        asset["screenshots"] = _get_screenshots_for_host(cursor, asset["name"])
         asset["history"] = _get_recent_changes_for_host(cursor, asset["name"], limit=200)
         row = cursor.execute(
             "SELECT status FROM scan_queue WHERE target = ? AND scan_type = 'phase2_deep_scan' "

@@ -10,5 +10,7 @@ dirsearch
 psutil>=5.9.0
 setuptools<70
 google-genai
+playwright>=1.40
+pillow>=10.0
 anthropic>=1.13.0
 openai>=1.0.0

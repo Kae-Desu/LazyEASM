@@ -32,7 +32,8 @@ EDITABLE_KEYS = [
     'SMTP_FROM',
     'SMTP_TO',
     'OTX_API_KEY',
-    'DNS_BRUTEFORCE'
+    'DNS_BRUTEFORCE',
+    'SCREENSHOTS_ENABLED'
 ]
 
 # Value used when a key is not in .env (dropdown settings always submit a value)
@@ -40,6 +41,7 @@ KEY_DEFAULTS = {
     'AI_PROVIDER': 'gemini',
     'DNS_BRUTEFORCE': 'true',
     'SMTP_SECURITY': 'starttls',
+    'SCREENSHOTS_ENABLED': 'true',
 }
 
 SENSITIVE_KEYS = [
@@ -76,7 +78,8 @@ KEY_DISPLAY_NAMES = {
     'SMTP_FROM': 'SMTP From',
     'SMTP_TO': 'SMTP Recipients',
     'OTX_API_KEY': 'AlienVault OTX API Key',
-    'DNS_BRUTEFORCE': 'DNS Brute Force'
+    'DNS_BRUTEFORCE': 'DNS Brute Force',
+    'SCREENSHOTS_ENABLED': 'Web Screenshots'
 }
 
 VALIDATION_RULES = {
@@ -127,6 +130,10 @@ VALIDATION_RULES = {
     'DNS_BRUTEFORCE': {
         'pattern': r'^(true|false)?$',
         'message': 'DNS brute force must be true or false'
+    },
+    'SCREENSHOTS_ENABLED': {
+        'pattern': r'^(true|false)?$',
+        'message': 'Web screenshots must be true or false'
     }
 }
 

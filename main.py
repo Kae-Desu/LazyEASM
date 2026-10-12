@@ -77,8 +77,9 @@ def add_security_headers(response):
     for header, value in SECURITY_HEADERS.items():
         response.headers[header] = value
     
-    # Prevent caching authenticated pages (but allow static assets)
-    if not request.path.startswith('/static') and request.path not in ['/login', '/health']:
+    # Prevent caching authenticated pages (but allow static assets and
+    # screenshots, which never change for a given id and set their own private header)
+    if not request.path.startswith(('/static', '/screenshots/')) and request.path not in ['/login', '/health']:
         response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
         response.headers['Expires'] = '0'
@@ -110,7 +111,8 @@ KEY_NAMES = {
     'SMTP_FROM': 'SMTP From',
     'SMTP_TO': 'SMTP Recipients',
     'OTX_API_KEY': 'OTX Key',
-    'DNS_BRUTEFORCE': 'DNS Brute Force'
+    'DNS_BRUTEFORCE': 'DNS Brute Force',
+    'SCREENSHOTS_ENABLED': 'Web Screenshots'
 }
 
 ACCESS_TOKEN_LIFETIME = datetime.timedelta(minutes=15)
@@ -581,6 +583,28 @@ def asset_detail_page(asset_type, asset_id):
         flash("Asset not found.", "error")
         return redirect(url_for('assets_page'))
     return render_template('asset_detail.html', active_page='assets', asset=asset)
+
+
+@app.route('/screenshots/<int:screenshot_id>/<kind>')
+@token_required
+def screenshot_image(screenshot_id, kind):
+    """Serve a stored screenshot ('full' or 'thumb'). Files are looked up by id only."""
+    import re
+    from flask import abort, send_from_directory
+    from utils.db_utils import get_screenshot
+    from utils.screenshots import SCREENSHOT_DIR
+
+    if kind not in ('full', 'thumb'):
+        abort(404)
+    shot = get_screenshot(screenshot_id)
+    if not shot:
+        abort(404)
+    name = shot['thumb_file'] if kind == 'thumb' else shot['image_file']
+    if not re.fullmatch(r'[0-9a-f]{32}(_thumb)?\.jpg', name or ''):
+        abort(404)
+    response = send_from_directory(SCREENSHOT_DIR, name, mimetype='image/jpeg', max_age=3600)
+    response.headers['Cache-Control'] = 'private, max-age=3600'
+    return response
 
 
 @app.route('/settings')
@@ -1280,6 +1304,7 @@ def phase3_status():
         'last_intel_check': status['last_intel_check'],
         'last_misconfig_check': status['last_misconfig_check'],
         'last_discovery_check': status['last_discovery_check'],
+        'last_screenshot_check': status['last_screenshot_check'],
         'liveness_interval_min': status['liveness_interval_min'],
         'ctlogs_interval_hr': status['ctlogs_interval_hr'],
         'wappalyzer_interval_hr': status['wappalyzer_interval_hr'],
@@ -1287,6 +1312,7 @@ def phase3_status():
         'intel_interval_hr': status['intel_interval_hr'],
         'misconfig_interval_hr': status['misconfig_interval_hr'],
         'discovery_interval_hr': status['discovery_interval_hr'],
+        'screenshot_interval_hr': status['screenshot_interval_hr'],
         'assets': {
             'total': liveness['total'],
             'up': liveness['up'],

@@ -476,6 +476,25 @@ def init_db():
         )
     ''')
 
+    # Web screenshots (files in db/screenshots/, see utils/screenshots.py)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS screenshots (
+            screenshot_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            http_id INTEGER NOT NULL,
+            host TEXT NOT NULL,
+            url TEXT NOT NULL,
+            final_url TEXT,
+            status_code INTEGER,
+            title TEXT,
+            image_file TEXT NOT NULL,
+            thumb_file TEXT NOT NULL,
+            phash TEXT,
+            captured_at TEXT NOT NULL
+        )
+    ''')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_host ON screenshots(host, captured_at)')
+    cursor.execute('CREATE INDEX IF NOT EXISTS idx_screenshots_http ON screenshots(http_id, captured_at)')
+
     # Change history: one row per detected change on a host
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS asset_changes (
