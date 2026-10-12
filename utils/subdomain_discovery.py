@@ -11,7 +11,8 @@ Active (DNS queries through the configured resolver):
     - Brute force with the bundled wordlist (data/subdomain_wordlist.txt)
     - Permutations of known subdomains (api -> api-dev, dev-api, api2, ...)
     Skipped for domains with wildcard DNS, where every name would resolve.
-    Disable with DNS_BRUTEFORCE=false.
+    Toggle in the dashboard (Configuration > Discovery) or DNS_BRUTEFORCE=false;
+    read on every run, so a change applies to the next discovery run.
 
 Every source is isolated: a failing or rate-limited source is reported in
 the stats and the others still count.

@@ -31,8 +31,15 @@ EDITABLE_KEYS = [
     'SMTP_PASSWORD',
     'SMTP_FROM',
     'SMTP_TO',
-    'OTX_API_KEY'
+    'OTX_API_KEY',
+    'DNS_BRUTEFORCE'
 ]
+
+# Value used when a key is not in .env (dropdown settings always submit a value)
+KEY_DEFAULTS = {
+    'AI_PROVIDER': 'gemini',
+    'DNS_BRUTEFORCE': 'true',
+}
 
 SENSITIVE_KEYS = [
     'SECURITYTRAILS_API_KEY',
@@ -67,7 +74,8 @@ KEY_DISPLAY_NAMES = {
     'SMTP_PASSWORD': 'SMTP Password',
     'SMTP_FROM': 'SMTP From',
     'SMTP_TO': 'SMTP Recipients',
-    'OTX_API_KEY': 'AlienVault OTX API Key'
+    'OTX_API_KEY': 'AlienVault OTX API Key',
+    'DNS_BRUTEFORCE': 'DNS Brute Force'
 }
 
 VALIDATION_RULES = {
@@ -114,6 +122,10 @@ VALIDATION_RULES = {
     'SMTP_FROM': {
         'pattern': r'^([^@\s]+@[^@\s]+)?$',
         'message': 'SMTP sender must be an email address'
+    },
+    'DNS_BRUTEFORCE': {
+        'pattern': r'^(true|false)?$',
+        'message': 'DNS brute force must be true or false'
     }
 }
 

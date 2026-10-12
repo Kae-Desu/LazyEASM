@@ -123,6 +123,62 @@ class ActiveDiscoveryTests(unittest.TestCase):
         self.assertEqual(len(words), len(set(words)))
 
 
+class DashboardToggleTests(unittest.TestCase):
+    """DNS brute force is switched from the dashboard settings form."""
+
+    def setUp(self):
+        import datetime
+        import jwt
+        from pathlib import Path
+        os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret')
+        os.environ.setdefault('JWT_SECRET', 'test-jwt-secret')
+        import main
+        from utils import env_manager
+
+        self.env_file = Path(tempfile.mkdtemp()) / '.env'
+        self.env_file.write_text('')
+        patcher = patch.object(env_manager, 'ENV_FILE', self.env_file)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        self.main = main
+        self.client = main.app.test_client()
+        token = jwt.encode({'type': 'access', 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=5)},
+                           main.JWT_SECRET, algorithm='HS256')
+        self.client.set_cookie('access_token', token)
+        self.csrf = main.generate_csrf_token(token)
+
+    def save(self, **form):
+        self.client.post('/save_config', data={'csrf_token': self.csrf, **form})
+        with self.client.session_transaction() as session:
+            return session.pop('_flashes', None)
+
+    def test_toggle_from_dashboard_controls_discovery(self):
+        # submitting the untouched defaults is not reported as a change
+        self.assertEqual(self.save(DNS_BRUTEFORCE='true', AI_PROVIDER='gemini'), [('warning', 'No changes submitted.')])
+
+        self.assertEqual(self.save(DNS_BRUTEFORCE='false'), [('success', 'Configuration updated: DNS Brute Force')])
+        self.assertIn('DNS_BRUTEFORCE=false', self.env_file.read_text())
+        found, stats = sd.active_subdomains('example.com')
+        self.assertEqual((found, stats), (set(), {'active': 'disabled (DNS_BRUTEFORCE=false)'}))
+
+        self.assertEqual(self.save(DNS_BRUTEFORCE='maybe')[0][0], 'error')
+        self.save(DNS_BRUTEFORCE='true')
+        with patch.object(sd, 'make_resolver', return_value=FakeResolver(wildcard=True)):
+            self.assertEqual(sd.active_subdomains('example.com')[1], {'active': 'skipped (wildcard DNS)'})
+
+    def test_dashboard_shows_current_value(self):
+        self.env_file.write_text('DNS_BRUTEFORCE=false\n')
+        with patch.object(self.main, 'get_all_assets_for_display', return_value=[]), \
+             patch.object(self.main, 'get_changes', return_value=[]), \
+             patch.object(self.main.task_queue, 'get_status', return_value={'active': False}), \
+             patch.object(self.main.task_queue, 'is_active', return_value=False), \
+             patch.object(self.main, 'get_db_connection') as db:
+            db.return_value.cursor.return_value.fetchall.return_value = []
+            html = self.client.get('/').get_data(as_text=True)
+        self.assertRegex(html, r'<option value="false" selected>Disabled</option>')
+
+
 class DiscoveryMonitorTests(unittest.TestCase):
     def setUp(self):
         fd, self.db_path = tempfile.mkstemp(suffix='.db')

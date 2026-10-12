@@ -89,7 +89,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 ## Features
 
 ### Phase 0: Asset Discovery
-- **Domain/Subdomain Discovery** - Passive: crt.sh, Certspotter, HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; disable with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
+- **Domain/Subdomain Discovery** - Passive: crt.sh, Certspotter, HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; toggle it in the dashboard (Configuration > Discovery) or with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
 - **IP/CIDR Handling** - Automatic expansion and liveness detection
 - **DNS Resolution** - Parallel resolution with configurable workers
 - **Liveness Detection** - ICMP ping + TCP fallback (ports 80/443)
@@ -378,7 +378,7 @@ SMTP_TO=secops@example.com         # SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` | No | Email server; security is `starttls` (default), `ssl` or `none` |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TO` | No | Email credentials, sender and comma-separated recipients |
 | `OTX_API_KEY` | No | AlienVault OTX key for passive DNS discovery |
-| `DNS_BRUTEFORCE` | No | `false` disables DNS brute force and permutations (default `true`) |
+| `DNS_BRUTEFORCE` | No | `false` disables DNS brute force and permutations (default `true`); also editable in the dashboard |
 
 ## Authentication
 

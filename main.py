@@ -14,7 +14,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
-from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_config_for_ui, EDITABLE_KEYS
+from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_config_for_ui, EDITABLE_KEYS, KEY_DEFAULTS
 from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, get_changes, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
@@ -106,7 +106,8 @@ KEY_NAMES = {
     'SMTP_PASSWORD': 'SMTP Password',
     'SMTP_FROM': 'SMTP From',
     'SMTP_TO': 'SMTP Recipients',
-    'OTX_API_KEY': 'OTX Key'
+    'OTX_API_KEY': 'OTX Key',
+    'DNS_BRUTEFORCE': 'DNS Brute Force'
 }
 
 ACCESS_TOKEN_LIFETIME = datetime.timedelta(minutes=15)
@@ -637,7 +638,7 @@ def save_config():
         
         value = request.form.get(key, '').strip()
         
-        if not value or value == (get_env_key(key) or ''):
+        if not value or value == (get_env_key(key) or KEY_DEFAULTS.get(key, '')):
             continue
         
         success, error = set_env_key(key, value)

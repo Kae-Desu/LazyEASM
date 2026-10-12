@@ -404,6 +404,15 @@
                             <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-satellite-dish mr-1"></i>Discovery</summary>
                             <div class="space-y-3 pt-3">
                             <div class="space-y-1.5">
+                                <label for="dns_bruteforce" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">DNS Brute Force &amp; Permutations</label>
+                                <select id="dns_bruteforce" name="DNS_BRUTEFORCE" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                    {% set bruteforce = config.DNS_BRUTEFORCE.value or 'true' %}
+                                    <option value="true" {% if bruteforce == 'true' %}selected{% endif %}>Enabled</option>
+                                    <option value="false" {% if bruteforce == 'false' %}selected{% endif %}>Disabled</option>
+                                </select>
+                                <p class="text-[10px] text-slate-400 ml-1">Guesses common subdomain names and variations of known ones with DNS lookups. Skipped automatically on wildcard DNS. Applies from the next discovery run.</p>
+                            </div>
+                            <div class="space-y-1.5">
                                 <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AlienVault OTX Key (optional)</label>
                                 <div class="relative">
                                     <input type="password" name="OTX_API_KEY" value="" placeholder="{{ config.OTX_API_KEY.masked if config.OTX_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
