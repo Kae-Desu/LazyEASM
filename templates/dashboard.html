@@ -430,6 +430,30 @@
                             <i class="fas fa-save mr-2"></i>Save Engine Config
                         </button>
                     </form>
+                    <form action="/change_password" method="POST" class="px-6 pb-6 text-sm">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <details class="pt-2 border-t border-border dark:border-white/5">
+                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-key mr-1"></i>Change Admin Password</summary>
+                            <div class="space-y-3 pt-3">
+                                <div class="space-y-1.5">
+                                    <label for="current_password" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Current Password</label>
+                                    <input type="password" id="current_password" name="current_password" autocomplete="current-password" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label for="new_password" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">New Password (min. 12 characters)</label>
+                                    <input type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="12" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                </div>
+                                <div class="space-y-1.5">
+                                    <label for="confirm_password" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Confirm New Password</label>
+                                    <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" minlength="12" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
+                                </div>
+                                <p class="text-[10px] text-slate-400 ml-1">Other signed-in sessions are signed out. Lost the password? Add ADMIN_PASS=... to .env and restart LazyEASM.</p>
+                                <button type="submit" class="w-full bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-200 font-bold py-2.5 rounded-xl transition-all border border-border dark:border-white/10 hover:opacity-90">
+                                    <i class="fas fa-key mr-2"></i>Change Password
+                                </button>
+                            </div>
+                        </details>
+                    </form>
                 </div>
             </div>
 

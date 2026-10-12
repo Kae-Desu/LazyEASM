@@ -8,6 +8,8 @@ import json
 import os
 import tempfile
 import unittest
+
+from tests.helpers import access_token
 from unittest.mock import MagicMock, patch
 
 os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret')
@@ -134,8 +136,7 @@ class ExportTests(unittest.TestCase):
         import jwt
         import main
         self.client = main.app.test_client()
-        token = jwt.encode({'type': 'access', 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=5)},
-                           main.JWT_SECRET, algorithm='HS256')
+        token = access_token(main)
         self.client.set_cookie('access_token', token)
 
     def tearDown(self):

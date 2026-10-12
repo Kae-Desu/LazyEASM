@@ -39,8 +39,13 @@ def _stop(processes):
 
 
 def main() -> int:
+    import logging
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+
     from modules.InitDB import init_db
+    from utils.auth import bootstrap_admin_from_env
     init_db()
+    bootstrap_admin_from_env()
 
     processes = {
         'worker': _spawn('worker.py'),

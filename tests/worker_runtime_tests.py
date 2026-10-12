@@ -6,6 +6,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+from tests.helpers import access_token
 from unittest.mock import patch
 
 os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret')
@@ -231,8 +233,7 @@ class WebIntegrationTests(TempDbTestCase):
     def test_submitting_assets_queues_a_job_instead_of_a_thread(self):
         import jwt
         import datetime
-        token = jwt.encode({'type': 'access', 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=5)},
-                           self.main.JWT_SECRET, algorithm='HS256')
+        token = access_token(self.main)
         self.client.set_cookie('access_token', token)
         with patch('threading.Thread') as thread:
             self.client.post('/process_assets', data={'asset_input': 'example.com',
@@ -243,8 +244,7 @@ class WebIntegrationTests(TempDbTestCase):
     def test_toggle_only_flips_the_setting(self):
         import jwt
         import datetime
-        token = jwt.encode({'type': 'access', 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=5)},
-                           self.main.JWT_SECRET, algorithm='HS256')
+        token = access_token(self.main)
         self.client.set_cookie('access_token', token)
         with patch.object(phase3_worker, 'start_phase3_workers') as start:
             response = self.client.post('/api/phase3/toggle', json={'enabled': True})

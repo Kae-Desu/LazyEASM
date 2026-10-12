@@ -3,6 +3,8 @@ import io
 import os
 import tempfile
 import unittest
+
+from tests.helpers import access_token
 from unittest.mock import MagicMock, patch
 
 import dns.exception
@@ -135,16 +137,21 @@ class DashboardToggleTests(unittest.TestCase):
         import main
         from utils import env_manager
 
-        self.env_file = Path(tempfile.mkdtemp()) / '.env'
+        tmp = tempfile.mkdtemp()
+        self.env_file = Path(tmp) / '.env'
         self.env_file.write_text('')
-        patcher = patch.object(env_manager, 'ENV_FILE', self.env_file)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+        db_path = os.path.join(tmp, 'test.db')
+        for target, attr, value in ((env_manager, 'ENV_FILE', self.env_file),
+                                    (InitDB, 'DB_NAME', db_path), (db_utils, 'DB_PATH', db_path)):
+            patcher = patch.object(target, attr, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            InitDB.init_db()
 
         self.main = main
         self.client = main.app.test_client()
-        token = jwt.encode({'type': 'access', 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=5)},
-                           main.JWT_SECRET, algorithm='HS256')
+        token = access_token(main)
         self.client.set_cookie('access_token', token)
         self.csrf = main.generate_csrf_token(token)
 

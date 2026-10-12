@@ -459,6 +459,17 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_findings_host ON findings(host)')
 
+    # Single admin account; the password is stored hashed (see utils/auth.py)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS admin_user (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            username TEXT NOT NULL,
+            password_hash TEXT NOT NULL,
+            token_version INTEGER NOT NULL DEFAULT 1,
+            password_changed_at TEXT
+        )
+    ''')
+
     # Change history: one row per detected change on a host
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS asset_changes (

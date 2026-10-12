@@ -6,6 +6,8 @@ import tempfile
 import threading
 import time
 import unittest
+
+from tests.helpers import access_token
 from unittest.mock import patch
 
 os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret')
@@ -47,8 +49,7 @@ class ManualCheckTests(TempDbTestCase):
         import jwt
         import main
         self.client = main.app.test_client()
-        token = jwt.encode({'type': 'access', 'exp': datetime.datetime.utcnow() + datetime.timedelta(minutes=5)},
-                           main.JWT_SECRET, algorithm='HS256')
+        token = access_token(main)
         self.client.set_cookie('access_token', token)
 
     def test_route_queues_instead_of_running_in_the_request(self):

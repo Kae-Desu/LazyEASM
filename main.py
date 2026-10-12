@@ -22,6 +22,7 @@ from utils.pipeline import enqueue_input_discovery, enqueue_assets_for_phase1, e
 from utils.asset_repository import AssetQueryError, get_asset_detail, list_assets
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
+from utils import auth
 
 logger = logging.getLogger(__name__)
 
@@ -260,6 +261,12 @@ def token_required(f):
                 if request.path.startswith('/api/'):
                     return jsonify({'success': False, 'error': 'Invalid token type'}), 401
                 return redirect(url_for('login'))
+
+            if not token_is_current(payload):
+                if request.path.startswith('/api/'):
+                    return jsonify({'success': False, 'error': 'Session revoked'}), 401
+                flash("Session ended. Please login again.", "error")
+                return redirect(url_for('login'))
             
         except jwt.ExpiredSignatureError:
             if request.path.startswith('/api/'):
@@ -276,6 +283,27 @@ def token_required(f):
     return decorated
 
 
+def issue_session(resp, user: str, token_version: int):
+    """Set a new access + refresh token pair carrying the account's token version."""
+    now = datetime.datetime.utcnow()
+    for kind, lifetime in (('access', ACCESS_TOKEN_LIFETIME), ('refresh', REFRESH_TOKEN_LIFETIME)):
+        token = jwt.encode({
+            'user': user,
+            'type': kind,
+            'pv': token_version,
+            'jti': str(uuid.uuid4()),
+            'exp': now + lifetime
+        }, JWT_SECRET, algorithm="HS256")
+        resp.set_cookie(f'{kind}_token', token, **get_secure_cookie_kwargs())
+    return resp
+
+
+def token_is_current(payload: dict) -> bool:
+    """False for tokens issued before the last password change or session revocation."""
+    version = auth.current_token_version()
+    return version is not None and payload.get('pv') == version
+
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     client_ip = request.remote_addr or 'unknown'
@@ -289,31 +317,15 @@ def login():
             flash(f"Terlalu banyak percobaan login. Coba lagi dalam {remaining} detik.", "error")
             return redirect(url_for('login'))
         
-        if username == get_env('ADMIN_USER', 'lazymin') and password == get_env('ADMIN_PASS', ''):
+        if auth.get_admin() is None:
+            flash("Password admin belum diatur. Tambahkan ADMIN_PASS=... di file .env lalu restart LazyEASM.", "error")
+            return redirect(url_for('login'))
+        
+        admin = auth.verify_login(username, password)
+        if admin:
             reset_failed_login(client_ip)
-            
-            now = datetime.datetime.utcnow()
-            
-            access_payload = {
-                'user': username,
-                'type': 'access',
-                'jti': str(uuid.uuid4()),
-                'exp': now + ACCESS_TOKEN_LIFETIME
-            }
-            access_token = jwt.encode(access_payload, JWT_SECRET, algorithm="HS256")
-            
-            refresh_payload = {
-                'user': username,
-                'type': 'refresh',
-                'jti': str(uuid.uuid4()),
-                'exp': now + REFRESH_TOKEN_LIFETIME
-            }
-            refresh_token = jwt.encode(refresh_payload, JWT_SECRET, algorithm="HS256")
-            
             resp = make_response(redirect(url_for('dashboard')))
-            resp.set_cookie('access_token', access_token, **get_secure_cookie_kwargs())
-            resp.set_cookie('refresh_token', refresh_token, **get_secure_cookie_kwargs())
-            return resp
+            return issue_session(resp, admin['username'], admin['token_version'])
         
         record_failed_login(client_ip, username)
         flash("Username atau Password salah!", "error")
@@ -378,6 +390,12 @@ def refresh_token():
     
     if payload.get('type') != 'refresh':
         return jsonify({'success': False, 'error': 'Invalid token type'}), 401
+
+    if not token_is_current(payload):
+        resp = make_response(jsonify({'success': False, 'error': 'Session revoked'}), 401)
+        resp.set_cookie('access_token', '', expires=0, **get_secure_cookie_kwargs())
+        resp.set_cookie('refresh_token', '', expires=0, **get_secure_cookie_kwargs())
+        return resp
     
     jti = payload.get('jti')
     user = payload.get('user')
@@ -387,7 +405,8 @@ def refresh_token():
         # Token was already used - possible theft
         # Revoke ALL tokens for this user
         blacklist_all_user_tokens(user)
-        logger.warning(f"Refresh token reuse detected for user: {user}")
+        auth.revoke_all_sessions()
+        logger.warning(f"Refresh token reuse detected for user: {user}; all sessions revoked")
         
         resp = jsonify({'success': False, 'error': 'Token reuse detected. Please login again.'})
         resp = make_response(resp, 401)
@@ -401,28 +420,7 @@ def refresh_token():
     blacklist_token(jti, user, expires_at)
     
     # Generate new token pair
-    now = datetime.datetime.utcnow()
-    
-    access_payload = {
-        'user': user,
-        'type': 'access',
-        'jti': str(uuid.uuid4()),
-        'exp': now + ACCESS_TOKEN_LIFETIME
-    }
-    new_access = jwt.encode(access_payload, JWT_SECRET, algorithm="HS256")
-    
-    refresh_payload = {
-        'user': user,
-        'type': 'refresh',
-        'jti': str(uuid.uuid4()),
-        'exp': now + REFRESH_TOKEN_LIFETIME
-    }
-    new_refresh = jwt.encode(refresh_payload, JWT_SECRET, algorithm="HS256")
-    
-    resp = jsonify({'success': True})
-    resp.set_cookie('access_token', new_access, **get_secure_cookie_kwargs())
-    resp.set_cookie('refresh_token', new_refresh, **get_secure_cookie_kwargs())
-    return resp
+    return issue_session(jsonify({'success': True}), user, payload['pv'])
 
 
 @app.route('/health')
@@ -458,7 +456,8 @@ def health():
             return jsonify({'status': 'unhealthy', 'error': 'Authentication required'}), 401
         
         try:
-            jwt.decode(token, JWT_SECRET, algorithms=['HS256'])
+            if not token_is_current(jwt.decode(token, JWT_SECRET, algorithms=['HS256'])):
+                return jsonify({'status': 'unhealthy', 'error': 'Session revoked'}), 401
         except jwt.ExpiredSignatureError:
             return jsonify({'status': 'unhealthy', 'error': 'Token expired'}), 401
         except jwt.InvalidTokenError:
@@ -617,6 +616,44 @@ def delete_asset(asset_type, asset_id):
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         conn.close()
+
+
+@app.route('/change_password', methods=['POST'])
+@token_required
+@csrf_protected
+def change_password():
+    """Change the admin password; every other session is signed out."""
+    client_ip = request.remote_addr or 'unknown'
+    blocked, _, remaining = is_rate_limited(client_ip)
+    if blocked:
+        flash(f"Too many failed attempts. Try again in {remaining} seconds.", "error")
+        return redirect(url_for('dashboard'))
+
+    current = request.form.get('current_password', '')
+    new = request.form.get('new_password', '')
+    confirm = request.form.get('confirm_password', '')
+    admin = auth.get_admin()
+
+    if not admin or not auth.verify_login(admin['username'], current):
+        record_failed_login(client_ip, admin['username'] if admin else '')
+        flash("Current password is incorrect.", "error")
+        return redirect(url_for('dashboard'))
+    if new != confirm:
+        flash("New passwords do not match.", "error")
+        return redirect(url_for('dashboard'))
+    if new == current:
+        flash("New password must be different from the current one.", "error")
+        return redirect(url_for('dashboard'))
+    error = auth.validate_new_password(new, admin['username'])
+    if error:
+        flash(f"{error}.", "error")
+        return redirect(url_for('dashboard'))
+
+    reset_failed_login(client_ip)
+    version = auth.set_admin_password(admin['username'], new)
+    logger.info("Admin password changed; all other sessions revoked")
+    flash("Password changed. Other sessions have been signed out.", "success")
+    return issue_session(make_response(redirect(url_for('dashboard'))), admin['username'], version)
 
 
 @app.route('/save_config', methods=['POST'])
@@ -1290,6 +1327,7 @@ if __name__ == '__main__':
 
     from modules.InitDB import init_db
     init_db()
+    auth.bootstrap_admin_from_env()
 
     if get_env('LAZYEASM_ROLE', 'all') != 'web':
         from utils.worker_runtime import start_background_workers
