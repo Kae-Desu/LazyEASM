@@ -110,6 +110,33 @@ class LoginTests(AuthTestCase):
         self.assertEqual(self.client.get('/api/changes').status_code, 200)
 
 
+class CsrfSessionTests(AuthTestCase):
+    def test_open_forms_survive_token_refresh(self):
+        import re
+        auth.bootstrap_admin_from_env()
+        self.client.post('/login', data={'username': 'lazymin', 'password': 'generated-by-install-1'})
+        page = self.client.get('/').get_data(as_text=True)
+        csrf = re.search(r'name="csrf_token" value="([0-9a-f]+)"', page).group(1)
+        old_access = self.client.get_cookie('access_token').value
+
+        # the dashboard rotates tokens every 14 minutes and when the tab regains focus
+        self.assertEqual(self.client.post('/refresh-token').status_code, 200)
+        self.assertNotEqual(self.client.get_cookie('access_token').value, old_access)
+
+        response = self.client.post('/save_scanning_settings', data={'csrf_token': csrf, 'discovery_interval_hr': '12'})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(db_utils.get_setting('discovery_interval_hr'), '12')
+
+    def test_csrf_differs_between_login_sessions(self):
+        auth.bootstrap_admin_from_env()
+        tokens = []
+        for _ in range(2):
+            client = self.main.app.test_client()
+            client.post('/login', data={'username': 'lazymin', 'password': 'generated-by-install-1'})
+            tokens.append(self.main.generate_csrf_token(client.get_cookie('access_token').value))
+        self.assertNotEqual(tokens[0], tokens[1])
+
+
 class PasswordChangeTests(AuthTestCase):
     def setUp(self):
         super().setUp()

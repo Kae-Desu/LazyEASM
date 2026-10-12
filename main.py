@@ -5,6 +5,7 @@ import secrets
 import time
 import logging
 import hashlib
+import hmac
 import uuid
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, make_response, jsonify
@@ -170,8 +171,20 @@ def get_secure_cookie_kwargs():
 
 
 def generate_csrf_token(session_token: str) -> str:
+    """
+    CSRF token for the login session. It is derived from the session id ('sid'),
+    which survives access-token rotation, so forms stay valid after the
+    dashboard refreshes its tokens. Tokens without a sid (issued before this
+    scheme) fall back to the token itself.
+    """
     if not session_token:
         return secrets.token_hex(16)
+    try:
+        sid = jwt.decode(session_token, JWT_SECRET, algorithms=["HS256"], options={'verify_exp': False}).get('sid')
+    except jwt.InvalidTokenError:
+        sid = None
+    if sid:
+        return hmac.new(flask_secret.encode(), f"csrf:{sid}".encode(), hashlib.sha256).hexdigest()[:32]
     return hashlib.sha256(f"{session_token}{flask_secret}".encode()).hexdigest()[:32]
 
 
@@ -284,14 +297,21 @@ def token_required(f):
     return decorated
 
 
-def issue_session(resp, user: str, token_version: int):
-    """Set a new access + refresh token pair carrying the account's token version."""
+def issue_session(resp, user: str, token_version: int, sid: str = None):
+    """
+    Set a new access + refresh token pair carrying the account's token version.
+    
+    sid identifies the login session and is kept across refreshes (pass the
+    old one); the CSRF token is derived from it.
+    """
     now = datetime.datetime.utcnow()
+    sid = sid or uuid.uuid4().hex
     for kind, lifetime in (('access', ACCESS_TOKEN_LIFETIME), ('refresh', REFRESH_TOKEN_LIFETIME)):
         token = jwt.encode({
             'user': user,
             'type': kind,
             'pv': token_version,
+            'sid': sid,
             'jti': str(uuid.uuid4()),
             'exp': now + lifetime
         }, JWT_SECRET, algorithm="HS256")
@@ -421,7 +441,7 @@ def refresh_token():
     blacklist_token(jti, user, expires_at)
     
     # Generate new token pair
-    return issue_session(jsonify({'success': True}), user, payload['pv'])
+    return issue_session(jsonify({'success': True}), user, payload['pv'], sid=payload.get('sid'))
 
 
 @app.route('/health')
