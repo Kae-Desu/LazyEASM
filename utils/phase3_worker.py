@@ -304,29 +304,38 @@ def run_monitor(name: str):
         MONITORS[name][3]()
 
 
-def _monitor_loop(name: str, interval_seconds: int, run_once):
-    """
-    Run run_once() every interval_seconds while Phase 3 is enabled.
+def interval_seconds(name: str) -> int:
+    """Current interval for a check, read from settings (dashboard-editable)."""
+    from utils.scan_settings import SCHEDULE, interval_value
+    key, default, unit = MONITORS[name][:3]
+    bounds = next(((low, high) for n, _, _, _, _, low, high in SCHEDULE if n == name), (1, 10 ** 6))
+    return interval_value(key, default, *bounds) * unit
 
-    The enabled flag is re-read every few seconds, so toggling monitoring in
-    the dashboard (web process) takes effect in the worker process promptly.
-    A check that already ran is not repeated before its interval passes.
+
+def _monitor_loop(label: str, name: str):
+    """
+    Run check `name` on its interval while Phase 3 is enabled.
+
+    The enabled flag and the interval are re-read every few seconds, so
+    changes made in the dashboard (web process) apply in the worker process
+    without a restart. A check that already ran is not repeated before its
+    interval passes.
     """
     from utils.db_utils import get_setting
 
-    logger.info(f"{name} thread started")
+    logger.info(f"{label} thread started")
     last_run = None
     while _phase3_running:
         try:
-            due = last_run is None or time.monotonic() - last_run >= interval_seconds
+            due = last_run is None or time.monotonic() - last_run >= interval_seconds(name)
             if due and get_setting('phase3_enabled') == '1':
                 last_run = time.monotonic()
-                logger.info(f"Running {name}...")
-                run_once()
+                logger.info(f"Running {label}...")
+                run_monitor(name)
         except Exception as e:
-            logger.error(f"{name} error: {e}")
+            logger.error(f"{label} error: {e}")
         time.sleep(POLL_SECONDS)
-    logger.info(f"{name} thread stopped")
+    logger.info(f"{label} thread stopped")
 
 
 def _run_liveness():
@@ -406,11 +415,9 @@ def start_phase3_workers():
     Start all Phase 3 monitoring threads (worker process only).
 
     Threads always start; each one runs only while phase3_enabled is '1'.
-    Intervals are read at start, so changing one requires a worker restart.
+    Intervals are re-read every cycle, so dashboard changes apply live.
     """
     global _phase3_running
-
-    from utils.db_utils import get_setting
 
     if _phase3_running:
         logger.warning("Phase 3 workers already running")
@@ -418,18 +425,17 @@ def start_phase3_workers():
     _phase3_running = True
 
     intervals = {}
-    for name, (key, default, unit, run_once) in MONITORS.items():
-        value = int(get_setting(key) or default)
-        intervals[name] = value
+    for name in MONITORS:
+        intervals[name] = interval_seconds(name)
         _threads[name] = threading.Thread(
             target=_monitor_loop,
-            args=(f"Phase 3 {name}", value * unit, lambda name=name: run_monitor(name)),
+            args=(f"Phase 3 {name}", name),
             daemon=True,
             name=f'Phase3-{name}'
         )
         _threads[name].start()
 
-    logger.info(f"Phase 3 workers started (intervals: {intervals})")
+    logger.info(f"Phase 3 workers started (intervals in seconds: {intervals})")
 
 
 def stop_phase3_workers():

@@ -119,7 +119,8 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
     try:
         from modules.Wappalyzer import WappalyzerScanner
         
-        wappalyzer = WappalyzerScanner(enable_cve=True, cvss_min=5.0)
+        from utils.scan_settings import get_cve_min_cvss
+        wappalyzer = WappalyzerScanner(enable_cve=True, cvss_min=get_cve_min_cvss())
         
         tech_found = 0
         unique_cves = set()

@@ -23,6 +23,7 @@ from utils.asset_repository import AssetQueryError, get_asset_detail, list_asset
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
 from utils import auth
+from utils.scan_settings import get_schedule, get_cve_min_cvss
 
 logger = logging.getLogger(__name__)
 
@@ -185,7 +186,7 @@ def csrf_protected(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         session_token = request.cookies.get('access_token') or ''
-        csrf_token = request.form.get('csrf_token') or (request.get_json() or {}).get('csrf_token')
+        csrf_token = request.form.get('csrf_token') or (request.get_json(silent=True) or {}).get('csrf_token')
         
         if not csrf_token:
             return jsonify({'success': False, 'error': 'CSRF token required'}), 403
@@ -541,7 +542,8 @@ def dashboard():
     conn.close()
     
     return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue,
-                           changes=get_changes(limit=RECENT_CHANGES_LIMIT))
+                           changes=get_changes(limit=RECENT_CHANGES_LIMIT),
+                           schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss())
 
 
 @app.route('/api/assets', methods=['GET'])
@@ -616,6 +618,23 @@ def delete_asset(asset_type, asset_id):
         return jsonify({'success': False, 'error': str(e)}), 500
     finally:
         conn.close()
+
+
+@app.route('/save_scanning_settings', methods=['POST'])
+@token_required
+@csrf_protected
+def save_scanning_settings_route():
+    """Check intervals and minimum CVSS; the worker picks them up without a restart."""
+    from utils.scan_settings import save_scanning_settings
+
+    errors, changed = save_scanning_settings(request.form)
+    if errors:
+        flash(f"Scanning settings not saved: {'; '.join(errors)}", "error")
+    elif changed:
+        flash(f"Scanning settings updated: {', '.join(changed)}", "success")
+    else:
+        flash("No changes submitted.", "warning")
+    return redirect(url_for('dashboard'))
 
 
 @app.route('/change_password', methods=['POST'])

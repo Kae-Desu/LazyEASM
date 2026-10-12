@@ -128,7 +128,8 @@ def run_wappalyzer_scan() -> dict:
         existing_cves.add(row['cve_id'])
     conn.close()
 
-    scanner = WappalyzerScanner(enable_cve=True, cvss_min=5.0)
+    from utils.scan_settings import get_cve_min_cvss
+    scanner = WappalyzerScanner(enable_cve=True, cvss_min=get_cve_min_cvss())
 
     result = {
         'hosts_scanned': 0,

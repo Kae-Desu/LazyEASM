@@ -583,6 +583,28 @@
                         </div>
                     </div>
                 </div>
+                <form action="/save_scanning_settings" method="POST" class="mt-6 pt-4 border-t border-border dark:border-white/5 text-sm">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <details>
+                        <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider"><i class="fas fa-sliders-h mr-1"></i>Schedule &amp; Thresholds</summary>
+                        <div class="pt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                            {% for item in schedule %}
+                            <div class="space-y-1.5">
+                                <label for="{{ item.key }}" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">{{ item.label }} ({{ item.unit }})</label>
+                                <input type="number" id="{{ item.key }}" name="{{ item.key }}" value="{{ item.value }}" min="{{ item.min }}" max="{{ item.max }}" step="1" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-3 py-2 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white text-sm">
+                            </div>
+                            {% endfor %}
+                            <div class="space-y-1.5">
+                                <label for="cve_min_cvss" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Minimum CVSS for CVE findings</label>
+                                <input type="number" id="cve_min_cvss" name="cve_min_cvss" value="{{ cve_min_cvss }}" min="0" max="10" step="0.1" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-3 py-2 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white text-sm">
+                            </div>
+                        </div>
+                        <p class="text-[10px] text-slate-400 mt-3">Changes apply to the running worker within seconds; no restart needed. The CVSS minimum applies to the next scans; raising it does not close findings already recorded below it.</p>
+                        <button type="submit" class="mt-3 px-5 py-2 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold rounded-xl transition-all hover:opacity-90 text-xs">
+                            <i class="fas fa-save mr-2"></i>Save Schedule
+                        </button>
+                    </details>
+                </form>
             </div>
         </div>
 

@@ -34,6 +34,12 @@ DB_NAME = os.path.join(DB_DIR, "lazyeasm.db")
 
 def init_db():
     conn = sqlite3.connect(DB_NAME, timeout=30)
+    # Owner-only, like .env: the database holds the asset inventory, findings
+    # and the admin password hash. SQLite creates -wal/-shm with the same mode.
+    try:
+        os.chmod(DB_NAME, 0o600)
+    except OSError:
+        pass
     conn.execute("PRAGMA foreign_keys = ON;")
     # WAL lets the web process read while the worker writes. The setting is
     # stored in the database file, so it applies to every later connection.

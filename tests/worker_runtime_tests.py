@@ -192,22 +192,23 @@ class HeartbeatTests(TempDbTestCase):
 
 
 class MonitorLoopTests(unittest.TestCase):
-    def test_runs_only_when_enabled_and_respects_interval(self):
-        state = {'enabled': '0'}
+    def test_follows_enabled_flag_and_live_interval_changes(self):
+        settings = {'phase3_enabled': '0', 'test_interval': '3600'}
         calls = []
-        with patch.object(phase3_worker, 'POLL_SECONDS', 0.02), \
-             patch.object(phase3_worker, '_phase3_running', True), \
-             patch('utils.db_utils.get_setting', side_effect=lambda key: state['enabled']):
-            thread = threading.Thread(target=phase3_worker._monitor_loop,
-                                      args=('test', 3600, lambda: calls.append(1)), daemon=True)
+        monitors = {'testcheck': ('test_interval', 3600, 1, lambda: calls.append(1))}
+        with patch.object(phase3_worker, 'POLL_SECONDS', 0.02),              patch.object(phase3_worker, 'MONITORS', monitors),              patch.object(phase3_worker, '_phase3_running', True),              patch('utils.db_utils.get_setting', side_effect=lambda key: settings.get(key)):
+            thread = threading.Thread(target=phase3_worker._monitor_loop, args=('test', 'testcheck'), daemon=True)
             thread.start()
             time.sleep(0.2)
             self.assertEqual(calls, [])           # disabled: never runs
 
-            state['enabled'] = '1'
+            settings['phase3_enabled'] = '1'
             self.assertTrue(wait_for(lambda: len(calls) == 1, timeout=2))  # enabling runs promptly
             time.sleep(0.2)
-            self.assertEqual(len(calls), 1)       # not again before the interval
+            self.assertEqual(len(calls), 1)       # not again before the 3600s interval
+
+            settings['test_interval'] = '1'       # changed in the dashboard
+            self.assertTrue(wait_for(lambda: len(calls) == 2, timeout=3))  # new interval applies live
             phase3_worker._phase3_running = False
         thread.join(timeout=2)
 
