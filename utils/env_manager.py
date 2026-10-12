@@ -39,6 +39,7 @@ EDITABLE_KEYS = [
 KEY_DEFAULTS = {
     'AI_PROVIDER': 'gemini',
     'DNS_BRUTEFORCE': 'true',
+    'SMTP_SECURITY': 'starttls',
 }
 
 SENSITIVE_KEYS = [

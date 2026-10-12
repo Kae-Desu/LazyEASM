@@ -1,0 +1,183 @@
+{% extends 'base.html' %}
+{% from '_cards.html' import finding_card, cve_card, empty_state %}
+{% block title %}{{ asset.name }}{% endblock %}
+
+{% block content %}
+{% set open_findings = asset.security_findings|selectattr('status', 'equalto', 'open')|list %}
+{% set open_cves = asset.vulnerabilities|selectattr('status', 'equalto', 'open')|list %}
+{% set open_kev = open_cves|selectattr('in_kev')|list %}
+
+<nav class="text-xs text-slate-500 mb-3" aria-label="Breadcrumb">
+    <a href="/assets" class="hover:text-accent"><i class="fas fa-arrow-left mr-1"></i>Assets</a>
+</nav>
+
+<div class="flex flex-wrap items-start justify-between gap-4 mb-6">
+    <div class="min-w-0">
+        <h1 class="text-2xl font-bold font-mono break-all dark:text-white">{{ asset.name }}</h1>
+        <div class="flex flex-wrap items-center gap-2 mt-2 text-xs">
+            <span class="px-2 py-1 rounded font-bold uppercase bg-slate-500/10 text-slate-500">{{ asset.type }}</span>
+            <span class="px-2 py-1 rounded font-bold uppercase border {% if asset.status == 'up' %}bg-emerald-500/10 text-emerald-500 border-emerald-500/20{% else %}bg-amber-500/10 text-amber-500 border-amber-500/20{% endif %}">{{ asset.status or 'unknown' }}</span>
+            {% if open_kev %}<span class="px-2 py-1 rounded font-bold uppercase bg-red-600 text-white">KEV {{ open_kev|length }}</span>{% endif %}
+            {% if asset.root_domain and asset.root_domain != asset.name %}<span class="text-slate-500">in {{ asset.root_domain }}</span>{% endif %}
+        </div>
+    </div>
+    <div class="flex flex-wrap gap-2">
+        {% if asset.phase2_status == 'processing' %}
+        <button type="button" disabled class="px-4 py-2 text-xs font-bold bg-blue-500/10 text-blue-500 rounded-xl border border-blue-500/20 cursor-not-allowed"><i class="fas fa-spinner fa-spin mr-1"></i>Deep scan running</button>
+        {% elif asset.phase2_status == 'pending' %}
+        <button type="button" data-action="cancel_scan" data-asset-name="{{ asset.name }}" class="px-4 py-2 text-xs font-bold bg-amber-500/10 text-amber-500 rounded-xl border border-amber-500/20 hover:bg-amber-500/20"><i class="fas fa-times mr-1"></i>Cancel queued deep scan</button>
+        {% else %}
+        <button type="button" data-action="deep_scan" data-asset-id="{{ asset.id }}" data-asset-type="{{ asset.type }}" data-asset-name="{{ asset.name }}" class="px-4 py-2 text-xs font-bold bg-secondary/10 text-secondary rounded-xl border border-secondary/20 hover:bg-secondary/20"><i class="fas fa-search-plus mr-1"></i>Run deep scan</button>
+        {% endif %}
+        <button type="button" data-action="delete" data-asset-id="{{ asset.id }}" data-asset-type="{{ asset.type }}" data-asset-name="{{ asset.name }}" data-redirect="/assets" class="px-4 py-2 text-xs font-bold bg-red-500/10 text-red-500 rounded-xl border border-red-500/20 hover:bg-red-500/20"><i class="fas fa-trash-alt mr-1"></i>Delete</button>
+    </div>
+</div>
+
+<!-- Summary -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+    {% for label, value, tone in [
+        ('Open findings', open_findings|length, 'text-red-500' if open_findings else ''),
+        ('Open CVEs', open_cves|length, 'text-red-500' if open_cves else ''),
+        ('Technologies', asset.technologies|length, ''),
+        ('Open ports', asset.ports|length, ''),
+    ] %}
+    <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl p-4">
+        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500">{{ label }}</p>
+        <p class="text-2xl font-bold mt-1 {{ tone }}">{{ value }}</p>
+    </div>
+    {% endfor %}
+</div>
+
+<!-- Tabs -->
+{% set tabs = [
+    ('findings', 'Findings', open_findings|length + open_cves|length),
+    ('technologies', 'Technologies', asset.technologies|length),
+    ('ports', 'Ports & IPs', asset.ports|length),
+    ('directories', 'Directories', asset.directories|length),
+    ('history', 'History', asset.history|length),
+    ('details', 'Details', None),
+] %}
+<div class="border-b border-border dark:border-white/10 mb-6" role="tablist">
+    <div class="flex flex-wrap gap-1">
+        {% for key, label, count in tabs %}
+        <button type="button" role="tab" id="tab-{{ key }}" data-tab="{{ key }}" aria-controls="panel-{{ key }}"
+                class="tab-btn px-4 py-2.5 text-xs font-bold uppercase tracking-wider border-b-2 border-transparent text-slate-500 hover:text-accent">
+            {{ label }}{% if count is not none %} <span class="ml-1 px-1.5 rounded bg-slate-500/10">{{ count }}</span>{% endif %}
+        </button>
+        {% endfor %}
+    </div>
+</div>
+
+<section id="panel-findings" role="tabpanel" aria-labelledby="tab-findings" class="tab-panel space-y-8">
+    <div>
+        <h2 class="text-xs font-bold uppercase tracking-widest text-red-500 mb-3"><i class="fas fa-triangle-exclamation mr-2"></i>Security findings ({{ open_findings|length }} open / {{ asset.security_findings|length }} total)</h2>
+        <div class="grid lg:grid-cols-2 gap-4">
+            {% for f in asset.security_findings %}{{ finding_card(f, asset.name, csrf_token) }}{% else %}{{ empty_state('fa-check-circle', 'No security findings for this asset.') }}{% endfor %}
+        </div>
+    </div>
+    <div>
+        <h2 class="text-xs font-bold uppercase tracking-widest text-accent mb-3"><i class="fas fa-shield-virus mr-2"></i>CVEs & AI insights ({{ open_cves|length }} open / {{ asset.vulnerabilities|length }} total)</h2>
+        <div class="grid lg:grid-cols-2 gap-4">
+            {% for cve in asset.vulnerabilities %}{{ cve_card(cve, csrf_token) }}{% else %}{{ empty_state('fa-check-circle', 'No CVEs found for this asset.') }}{% endfor %}
+        </div>
+    </div>
+</section>
+
+<section id="panel-technologies" role="tabpanel" aria-labelledby="tab-technologies" class="tab-panel hidden">
+    {% if asset.technologies %}
+    <div class="rounded-2xl border border-border dark:border-white/10 overflow-hidden bg-white dark:bg-dark-card">
+        <table class="w-full text-left text-sm">
+            <thead class="bg-slate-100 dark:bg-white/5 text-[10px] uppercase tracking-wider text-slate-500"><tr><th class="px-4 py-3">Port</th><th class="px-4 py-3">Technology</th><th class="px-4 py-3">Version</th></tr></thead>
+            <tbody class="font-mono">
+                {% for tech in asset.technologies %}
+                <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 text-slate-500">{{ tech.port }}</td><td class="px-4 py-2 font-bold text-secondary">{{ tech.name }}</td><td class="px-4 py-2">{{ tech.version or '-' }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}{{ empty_state('fa-microchip', 'No technologies detected yet.') }}{% endif %}
+</section>
+
+<section id="panel-ports" role="tabpanel" aria-labelledby="tab-ports" class="tab-panel hidden space-y-6">
+    <div class="rounded-2xl border border-border dark:border-white/10 bg-white dark:bg-dark-card p-4">
+        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-500 mb-2">IP addresses</p>
+        <p class="font-mono text-sm">{{ asset.ips|join(', ') if asset.ips else 'None resolved' }}</p>
+    </div>
+    {% if asset.ports %}
+    <div class="rounded-2xl border border-border dark:border-white/10 overflow-hidden bg-white dark:bg-dark-card">
+        <table class="w-full text-left text-sm">
+            <thead class="bg-slate-100 dark:bg-white/5 text-[10px] uppercase tracking-wider text-slate-500"><tr><th class="px-4 py-3">Port</th><th class="px-4 py-3">Service</th><th class="px-4 py-3">IP</th></tr></thead>
+            <tbody class="font-mono">
+                {% for p in asset.ports %}
+                <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 font-bold text-secondary">{{ p.port }}</td><td class="px-4 py-2">{{ p.service or '-' }}</td><td class="px-4 py-2 text-slate-500">{{ p.ip or '' }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}{{ empty_state('fa-network-wired', 'No open ports recorded yet.') }}{% endif %}
+</section>
+
+<section id="panel-directories" role="tabpanel" aria-labelledby="tab-directories" class="tab-panel hidden">
+    {% if asset.directories %}
+    <div class="rounded-2xl border border-border dark:border-white/10 overflow-hidden bg-white dark:bg-dark-card">
+        <table class="w-full text-left text-sm">
+            <thead class="bg-slate-100 dark:bg-white/5 text-[10px] uppercase tracking-wider text-slate-500"><tr><th class="px-4 py-3">Path</th><th class="px-4 py-3">Status</th><th class="px-4 py-3">Size</th></tr></thead>
+            <tbody class="font-mono">
+                {% for d in asset.directories %}
+                <tr class="border-t border-border dark:border-white/5"><td class="px-4 py-2 font-bold text-secondary break-all">{{ d.path }}</td><td class="px-4 py-2 font-bold {% if d.status == 200 %}text-emerald-500{% elif d.status and d.status >= 400 %}text-red-500{% else %}text-amber-500{% endif %}">{{ d.status }}</td><td class="px-4 py-2 text-slate-500">{{ d.length or '-' }}</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+    {% else %}{{ empty_state('fa-folder-open', 'No directories found. Run a deep scan to enumerate them.') }}{% endif %}
+</section>
+
+<section id="panel-history" role="tabpanel" aria-labelledby="tab-history" class="tab-panel hidden">
+    {% if asset.history %}
+    <ol class="rounded-2xl border border-border dark:border-white/10 bg-white dark:bg-dark-card divide-y divide-slate-100 dark:divide-white/5">
+        {% for h in asset.history %}
+        <li class="px-5 py-3 text-sm"><span class="font-mono text-[11px] text-slate-400 mr-2">{{ h.detected_at }}</span>{{ h.summary }}</li>
+        {% endfor %}
+    </ol>
+    {% else %}{{ empty_state('fa-clock-rotate-left', 'No changes recorded yet. Changes appear after the asset is re-scanned.') }}{% endif %}
+</section>
+
+<section id="panel-details" role="tabpanel" aria-labelledby="tab-details" class="tab-panel hidden">
+    <dl class="rounded-2xl border border-border dark:border-white/10 bg-white dark:bg-dark-card divide-y divide-slate-100 dark:divide-white/5 text-sm">
+        {% for label, value in [
+            ('First seen', asset.first_seen), ('Last seen', asset.last_seen),
+            ('Last scanned', asset.last_scanned), ('Last technology scan', asset.last_wappalyzer_scan),
+            ('Last deep scan', asset.last_deep_scan),
+            ('TLS certificate', (asset.certificate.not_after ~ ' (' ~ asset.certificate.days_until_expiry ~ ' days, ' ~ (asset.certificate.issuer or 'unknown issuer') ~ ')') if asset.certificate else 'None found'),
+        ] %}
+        <div class="px-5 py-3 flex flex-wrap justify-between gap-2"><dt class="text-slate-500">{{ label }}</dt><dd class="font-mono text-right break-all">{{ value or '-' }}</dd></div>
+        {% endfor %}
+    </dl>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const buttons = document.querySelectorAll('.tab-btn');
+        function show(key) {
+            if (!document.getElementById(`panel-${key}`)) key = 'findings';
+            buttons.forEach(btn => {
+                const active = btn.dataset.tab === key;
+                btn.setAttribute('aria-selected', active);
+                btn.classList.toggle('border-accent', active);
+                btn.classList.toggle('text-accent', active);
+                btn.classList.toggle('text-slate-500', !active);
+            });
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.id !== `panel-${key}`));
+        }
+        buttons.forEach(btn => btn.addEventListener('click', () => {
+            show(btn.dataset.tab);
+            history.replaceState(null, '', `#${btn.dataset.tab}`);
+        }));
+        show(location.hash.slice(1) || 'findings');
+        // Deep scan / cancel change this page's state
+        window.onDataChanged = () => setTimeout(() => location.reload(), 600);
+    })();
+</script>
+{% endblock %}

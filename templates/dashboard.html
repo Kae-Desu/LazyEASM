@@ -1,464 +1,22 @@
-<!DOCTYPE html>
-<html lang="en" class="light" id="html-tag">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LazyEASM - Dashboard</title>
-    
-    <link rel="icon" href="/static/icons/light-icon.png" type="image/png">
-    <script>
-        // BLOCKING SCRIPT: Harus di paling atas
-        (function() {
-            const savedTheme = localStorage.getItem('theme') || 'light';
-            document.documentElement.classList.add(savedTheme);
-            // Hapus class satunya untuk jaga-jaga
-            document.documentElement.classList.remove(savedTheme === 'dark' ? 'light' : 'dark');
-        })();
-        
-        // XSS Protection: Escape HTML entities
-        function escapeHtml(text) {
-            if (!text) return '';
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        // XSS Protection: Escape quotes for JS strings
-        function escapeJs(str) {
-            if (!str) return '';
-            return String(str).replace(/[\\'"<>&\r\n]/g, function(c) {
-                return {
-                    '\\': '\\\\',
-                    "'": "\\'",
-                    '"': '\\"',
-                    '<': '\\x3c',
-                    '>': '\\x3e',
-                    '&': '\\x26',
-                    '\r': '\\r',
-                    '\n': '\\n'
-                }[c];
-            });
-        }
+{% extends 'base.html' %}
+{% block title %}Overview{% endblock %}
 
-        // Token refresh: automatically refresh tokens before expiry
-        (function() {
-            function refreshToken() {
-                fetch('/refresh-token', { method: 'POST', credentials: 'same-origin' })
-                    .then(resp => {
-                        if (!resp.ok) {
-                            window.location.href = '/login';
-                        }
-                    })
-                    .catch(() => {
-                        window.location.href = '/login';
-                    });
-            }
+{% block header_actions %}
+<div class="relative group">
+    <button type="button" onclick="cycleReload()" id="reload-btn" aria-label="Auto-refresh interval"
+            class="w-10 h-10 flex flex-col items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10 relative">
+        <i class="fas fa-sync-alt text-[10px]" id="reload-icon"></i>
+        <span id="reload-label" class="text-[8px] font-bold mt-0.5">OFF</span>
+        <span id="reload-indicator" class="absolute -top-1 -right-1 w-3 h-3 bg-secondary rounded-full border-2 border-lazy-dark hidden animate-pulse"></span>
+    </button>
+    <div class="absolute top-12 left-1/2 -translate-x-1/2 bg-lazy-dark text-[10px] text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-white/10">Set auto-refresh interval</div>
+</div>
+{% endblock %}
 
-            // Refresh every 14 minutes (token expires at 15 min)
-            setInterval(refreshToken, 14 * 60 * 1000);
+{% block content %}
+        <h1 class="text-2xl font-bold mb-6 dark:text-white"><i class="fas fa-gauge-high mr-2 text-accent"></i>Overview</h1>
 
-            // Also refresh on page focus (returning to tab)
-            document.addEventListener('visibilitychange', function() {
-                if (!document.hidden) {
-                    fetch('/refresh-token', { method: 'POST', credentials: 'same-origin' })
-                        .catch(() => {});
-                }
-            });
-        })();
-    </script>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
-    
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        'lazy-light': '#EAEAEA',
-                        'lazy-dark': '#3F3F3F',
-                        'dark-card': '#2F2F2F', 
-                        accent: '#CC9ACC',
-                        secondary: '#9AC3CC',
-                        border: '#D1D1D1',
-                    },
-                    fontFamily: {
-                        sans: ['Plus Jakarta Sans', 'sans-serif'],
-                        mono: ['JetBrains Mono', 'monospace'],
-                    },
-                }
-            }
-        }
-    </script>
-
-    <style>
-        :root {
-            --lazy-light: #EAEAEA;
-            --lazy-dark: #3F3F3F;
-        }
-
-        /* Memaksa background sedari awal */
-        html.dark { background-color: var(--lazy-dark) !important; }
-        html.light { background-color: var(--lazy-light) !important; }
-        html:not(.dark):not(.light) { background-color: var(--lazy-light) !important; }
-        .glass { backdrop-filter: blur(12px); }
-        /* Navbar Glass Effect - Consistent dark color for both modes */
-        .glass { background: rgba(47, 47, 47, 0.95); }
-        
-        .card-glow:hover { box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
-        body { transition: background-color 0.3s ease; }
-        /* Menghapus animasi putar saat baru load agar tidak pusing */
-        .no-transition {
-            transition: none !important;
-        }
-    </style>
-</head>
-<body class="bg-lazy-light dark:bg-lazy-dark text-slate-800 dark:text-slate-100 min-h-screen font-sans">
-
-    <nav class="fixed top-0 w-full z-50 glass border-b border-white/10">
-        <div class="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-            <div class="flex items-center space-x-3">
-                <div class="bg-accent p-1.5 rounded-xl w-10 h-10 flex items-center justify-center overflow-hidden shadow-lg shadow-accent/20">
-                    <img src="../static/images/lazyeasm-dark.png" alt="LazyEASM Dark" class="dark:hidden w-full h-full object-contain">
-                    <img src="../static/images/lazyeasm-light.png" alt="LazyEASM Light" class="hidden dark:block w-full h-full object-contain">
-                </div>
-                <span class="text-xl font-bold tracking-tight text-white">LazyEasm<span class="text-secondary">.</span></span>
-            </div>
-            
-            
-            <div class="flex items-center space-x-4">
-                <div class="relative group">
-                    <button onclick="cycleReload()" id="reload-btn" class="w-10 h-10 flex flex-col items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10 relative">
-                        <i class="fas fa-sync-alt text-[10px]" id="reload-icon"></i>
-                        <span id="reload-label" class="text-[8px] font-bold mt-0.5">OFF</span>
-                        
-                        <span id="reload-indicator" class="absolute -top-1 -right-1 w-3 h-3 bg-secondary rounded-full border-2 border-lazy-dark hidden animate-pulse"></span>
-                    </button>
-                    
-                    <div class="absolute top-12 left-1/2 -translate-x-1/2 bg-lazy-dark text-[10px] text-white px-2 py-1 rounded opacity-0 group-hover:opacity-100 pointer-events-none transition-opacity whitespace-nowrap border border-white/10">
-                        Set Auto-Reload Interval
-                    </div>
-                </div>
-
-                <button onclick="toggleDarkMode()" class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10">
-                    <i id="theme-icon" class="fas fa-moon"></i>
-                </button>
-
-                <a href="/logout" 
-                    onclick="event.preventDefault(); openConfirmModal('logout')" 
-                    title="Logout"
-                    class="w-10 h-10 flex items-center justify-center rounded-full bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all md:w-auto md:px-4 md:py-2">
-                    <i class="fas fa-power-off md:mr-2"></i>
-                    <span class="hidden md:inline">Logout</span>
-                </a>
-            </div>
-        </div>
-    </nav>
-
-    <main class="max-w-7xl mx-auto px-4 pt-24 pb-12">
-        
-        {% with messages = get_flashed_messages(with_categories=true) %}
-            {% if messages %}
-                {% for category, message in messages %}
-                <div class="mb-6 p-4 rounded-xl border flex items-center space-x-3 {% if category == 'success' %} bg-emerald-100 border-emerald-200 text-emerald-700 {% elif category == 'error' %} bg-red-100 border-red-200 text-red-700 {% elif category == 'warning' %} bg-amber-100 border-amber-200 text-amber-700 {% else %} bg-blue-100 border-blue-200 text-blue-700 {% endif %}">
-                    <i class="fas fa-circle-info"></i>
-                    <p class="flex-1 font-medium text-sm">{{ message }}</p>
-                    <button onclick="this.parentElement.remove()" class="opacity-50 hover:opacity-100"><i class="fas fa-xmark"></i></button>
-                </div>
-                {% endfor %}
-            {% endif %}
-        {% endwith %}
-
-        <div class="grid lg:grid-cols-12 gap-6">
-            <div class="lg:col-span-5 space-y-6">
-                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden card-glow transition-all">
-                    <div class="px-6 py-4 border-b border-border dark:border-white/5 bg-lazy-dark flex items-center justify-between text-white">
-                        <h2 class="font-bold flex items-center text-accent uppercase text-xs tracking-widest">
-                            <i class="fas fa-sliders-h mr-3"></i>Configuration
-                        </h2>
-                    </div>
-                    <form action="/save_config" method="POST" class="p-6 space-y-4 text-sm">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <input type="hidden" name="CLEAR_DISCORD_WEBHOOK_URL" value="0" id="clear_DISCORD_WEBHOOK_URL">
-                        <input type="hidden" name="CLEAR_DISCORD_USER_ID" value="0" id="clear_DISCORD_USER_ID">
-                        <input type="hidden" name="CLEAR_SECURITYTRAILS_API_KEY" value="0" id="clear_SECURITYTRAILS_API_KEY">
-                        <input type="hidden" name="CLEAR_NVD_API_KEY" value="0" id="clear_NVD_API_KEY">
-                        <input type="hidden" name="CLEAR_GEMINI_API_KEY" value="0" id="clear_GEMINI_API_KEY">
-                        <input type="hidden" name="CLEAR_OPENAI_API_KEY" value="0" id="clear_OPENAI_API_KEY">
-                        <input type="hidden" name="CLEAR_ANTHROPIC_API_KEY" value="0" id="clear_ANTHROPIC_API_KEY">
-                        <input type="hidden" name="CLEAR_AI_MODEL" value="0" id="clear_AI_MODEL">
-                        <input type="hidden" name="CLEAR_AI_BASE_URL" value="0" id="clear_AI_BASE_URL">
-                        <input type="hidden" name="CLEAR_SLACK_WEBHOOK_URL" value="0" id="clear_SLACK_WEBHOOK_URL">
-                        <input type="hidden" name="CLEAR_NOTIFY_WEBHOOK_URL" value="0" id="clear_NOTIFY_WEBHOOK_URL">
-                        <input type="hidden" name="CLEAR_NOTIFY_WEBHOOK_SECRET" value="0" id="clear_NOTIFY_WEBHOOK_SECRET">
-                        <input type="hidden" name="CLEAR_SMTP_HOST" value="0" id="clear_SMTP_HOST">
-                        <input type="hidden" name="CLEAR_SMTP_PORT" value="0" id="clear_SMTP_PORT">
-                        <input type="hidden" name="CLEAR_SMTP_SECURITY" value="0" id="clear_SMTP_SECURITY">
-                        <input type="hidden" name="CLEAR_SMTP_USERNAME" value="0" id="clear_SMTP_USERNAME">
-                        <input type="hidden" name="CLEAR_SMTP_PASSWORD" value="0" id="clear_SMTP_PASSWORD">
-                        <input type="hidden" name="CLEAR_SMTP_FROM" value="0" id="clear_SMTP_FROM">
-                        <input type="hidden" name="CLEAR_SMTP_TO" value="0" id="clear_SMTP_TO">
-                        <input type="hidden" name="CLEAR_OTX_API_KEY" value="0" id="clear_OTX_API_KEY">
-                        
-                        <div class="space-y-1.5">
-                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord Webhook URL</label>
-                            <div class="relative">
-                                <input type="text" name="DISCORD_WEBHOOK_URL" value="" placeholder="{{ config.DISCORD_WEBHOOK_URL.masked if config.DISCORD_WEBHOOK_URL.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                <button type="button" onclick="openConfirmModal('clear_field', 'DISCORD_WEBHOOK_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="space-y-1.5">
-                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Discord User ID (optional)</label>
-                            <div class="relative">
-                                <input type="text" name="DISCORD_USER_ID" value="" placeholder="{{ config.DISCORD_USER_ID.masked if config.DISCORD_USER_ID.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                <button type="button" onclick="openConfirmModal('clear_field', 'DISCORD_USER_ID')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                </button>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">SecurityTrails Key</label>
-                                <div class="relative">
-                                    <input type="password" name="SECURITYTRAILS_API_KEY" value="" placeholder="{{ config.SECURITYTRAILS_API_KEY.masked if config.SECURITYTRAILS_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SECURITYTRAILS_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">NVD API Key</label>
-                                <div class="relative">
-                                    <input type="password" name="NVD_API_KEY" value="" placeholder="{{ config.NVD_API_KEY.masked if config.NVD_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'NVD_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <details class="pt-2 border-t border-border dark:border-white/5">
-                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-robot mr-1"></i>AI Recommendations</summary>
-                            <div class="space-y-3 pt-3">
-                            <div class="space-y-1.5">
-                                <label for="ai_provider" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Provider</label>
-                                <select id="ai_provider" name="AI_PROVIDER" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    {% set current_provider = config.AI_PROVIDER.value or 'gemini' %}
-                                    {% for value, label in [('gemini', 'Google Gemini'), ('anthropic', 'Anthropic Claude'), ('openai', 'OpenAI'), ('openai_compatible', 'OpenAI-compatible (Ollama, vLLM, LM Studio...)')] %}
-                                    <option value="{{ value }}" {% if current_provider == value %}selected{% endif %}>{{ label }}</option>
-                                    {% endfor %}
-                                </select>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Model (optional for Gemini / Claude)</label>
-                                <div class="relative">
-                                    <input type="text" name="AI_MODEL" value="" placeholder="{{ config.AI_MODEL.value if config.AI_MODEL.value else 'Provider default' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'AI_MODEL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AI Base URL (OpenAI-compatible only)</label>
-                                <div class="relative">
-                                    <input type="text" name="AI_BASE_URL" value="" placeholder="{{ config.AI_BASE_URL.value if config.AI_BASE_URL.value else 'http://localhost:11434/v1' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'AI_BASE_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-4">
-                                <div class="space-y-1.5">
-                                    <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Gemini Key</label>
-                                    <div class="relative">
-                                        <input type="password" name="GEMINI_API_KEY" value="" placeholder="{{ config.GEMINI_API_KEY.masked if config.GEMINI_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                        <button type="button" onclick="openConfirmModal('clear_field', 'GEMINI_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="space-y-1.5">
-                                    <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">OpenAI Key</label>
-                                    <div class="relative">
-                                        <input type="password" name="OPENAI_API_KEY" value="" placeholder="{{ config.OPENAI_API_KEY.masked if config.OPENAI_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                        <button type="button" onclick="openConfirmModal('clear_field', 'OPENAI_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                        </button>
-                                    </div>
-                                </div>
-                                <div class="space-y-1.5">
-                                    <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Anthropic Key</label>
-                                    <div class="relative">
-                                        <input type="password" name="ANTHROPIC_API_KEY" value="" placeholder="{{ config.ANTHROPIC_API_KEY.masked if config.ANTHROPIC_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                        <button type="button" onclick="openConfirmModal('clear_field', 'ANTHROPIC_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                        </button>
-                                    </div>
-                                </div>
-                            </div>
-                            </div>
-                        </details>
-                        <details class="pt-2 border-t border-border dark:border-white/5">
-                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-bell mr-1"></i>More Notification Channels</summary>
-                            <div class="space-y-3 pt-3">
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Slack Webhook URL</label>
-                                <div class="relative">
-                                    <input type="password" name="SLACK_WEBHOOK_URL" value="" placeholder="{{ config.SLACK_WEBHOOK_URL.masked if config.SLACK_WEBHOOK_URL.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SLACK_WEBHOOK_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Generic Webhook URL (JSON POST)</label>
-                                <div class="relative">
-                                    <input type="text" name="NOTIFY_WEBHOOK_URL" value="" placeholder="{{ config.NOTIFY_WEBHOOK_URL.value if config.NOTIFY_WEBHOOK_URL.value else 'https://example.com/hooks/lazyeasm' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'NOTIFY_WEBHOOK_URL')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Webhook Signing Secret (optional)</label>
-                                <div class="relative">
-                                    <input type="password" name="NOTIFY_WEBHOOK_SECRET" value="" placeholder="{{ config.NOTIFY_WEBHOOK_SECRET.masked if config.NOTIFY_WEBHOOK_SECRET.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'NOTIFY_WEBHOOK_SECRET')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <details class="rounded-xl border border-border dark:border-white/10 px-4 py-2">
-                                <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider">Email (SMTP)</summary>
-                                <div class="space-y-3 pt-3">
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">SMTP Host</label>
-                                <div class="relative">
-                                    <input type="text" name="SMTP_HOST" value="" placeholder="{{ config.SMTP_HOST.value if config.SMTP_HOST.value else 'smtp.example.com' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_HOST')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">SMTP Port</label>
-                                <div class="relative">
-                                    <input type="text" name="SMTP_PORT" value="" placeholder="{{ config.SMTP_PORT.value if config.SMTP_PORT.value else '587' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_PORT')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Security (starttls / ssl / none)</label>
-                                <div class="relative">
-                                    <input type="text" name="SMTP_SECURITY" value="" placeholder="{{ config.SMTP_SECURITY.value if config.SMTP_SECURITY.value else 'starttls' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_SECURITY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Username</label>
-                                <div class="relative">
-                                    <input type="text" name="SMTP_USERNAME" value="" placeholder="{{ config.SMTP_USERNAME.value if config.SMTP_USERNAME.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_USERNAME')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Password</label>
-                                <div class="relative">
-                                    <input type="password" name="SMTP_PASSWORD" value="" placeholder="{{ config.SMTP_PASSWORD.masked if config.SMTP_PASSWORD.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_PASSWORD')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">From Address</label>
-                                <div class="relative">
-                                    <input type="text" name="SMTP_FROM" value="" placeholder="{{ config.SMTP_FROM.value if config.SMTP_FROM.value else 'lazyeasm@example.com' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_FROM')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Recipients (comma separated)</label>
-                                <div class="relative">
-                                    <input type="text" name="SMTP_TO" value="" placeholder="{{ config.SMTP_TO.value if config.SMTP_TO.value else 'secops@example.com' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'SMTP_TO')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                                </div>
-                            </details>
-                            </div>
-                        </details>
-                        <details class="pt-2 border-t border-border dark:border-white/5">
-                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-satellite-dish mr-1"></i>Discovery</summary>
-                            <div class="space-y-3 pt-3">
-                            <div class="space-y-1.5">
-                                <label for="dns_bruteforce" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">DNS Brute Force &amp; Permutations</label>
-                                <select id="dns_bruteforce" name="DNS_BRUTEFORCE" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    {% set bruteforce = config.DNS_BRUTEFORCE.value or 'true' %}
-                                    <option value="true" {% if bruteforce == 'true' %}selected{% endif %}>Enabled</option>
-                                    <option value="false" {% if bruteforce == 'false' %}selected{% endif %}>Disabled</option>
-                                </select>
-                                <p class="text-[10px] text-slate-400 ml-1">Guesses common subdomain names and variations of known ones with DNS lookups. Skipped automatically on wildcard DNS. Applies from the next discovery run.</p>
-                            </div>
-                            <div class="space-y-1.5">
-                                <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">AlienVault OTX Key (optional)</label>
-                                <div class="relative">
-                                    <input type="password" name="OTX_API_KEY" value="" placeholder="{{ config.OTX_API_KEY.masked if config.OTX_API_KEY.value else 'Leave empty' }}" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 pr-10 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                    <button type="button" onclick="openConfirmModal('clear_field', 'OTX_API_KEY')" class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1" title="Delete this configuration">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"/><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
-                                    </button>
-                                </div>
-                            </div>
-                            </div>
-                        </details>
-                        <button type="button" onclick="testWebhook()" class="w-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 rounded-xl transition-all border border-emerald-500/20 hover:bg-emerald-500/20">
-                            <i class="fas fa-paper-plane mr-2"></i>Send Test Notification
-                        </button>
-                        <button type="button" onclick="openConfirmModal('save')" class="w-full bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-3 rounded-xl transition-all shadow-lg hover:opacity-90">
-                            <i class="fas fa-save mr-2"></i>Save Engine Config
-                        </button>
-                    </form>
-                    <form action="/change_password" method="POST" class="px-6 pb-6 text-sm">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <details class="pt-2 border-t border-border dark:border-white/5">
-                            <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1 pt-2"><i class="fas fa-key mr-1"></i>Change Admin Password</summary>
-                            <div class="space-y-3 pt-3">
-                                <div class="space-y-1.5">
-                                    <label for="current_password" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Current Password</label>
-                                    <input type="password" id="current_password" name="current_password" autocomplete="current-password" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                </div>
-                                <div class="space-y-1.5">
-                                    <label for="new_password" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">New Password (min. 12 characters)</label>
-                                    <input type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="12" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                </div>
-                                <div class="space-y-1.5">
-                                    <label for="confirm_password" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Confirm New Password</label>
-                                    <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" minlength="12" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white">
-                                </div>
-                                <p class="text-[10px] text-slate-400 ml-1">Other signed-in sessions are signed out. Lost the password? Add ADMIN_PASS=... to .env and restart LazyEASM.</p>
-                                <button type="submit" class="w-full bg-slate-100 dark:bg-white/5 text-slate-700 dark:text-slate-200 font-bold py-2.5 rounded-xl transition-all border border-border dark:border-white/10 hover:opacity-90">
-                                    <i class="fas fa-key mr-2"></i>Change Password
-                                </button>
-                            </div>
-                        </details>
-                    </form>
-                </div>
-            </div>
-
-            <div class="lg:col-span-7">
-                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden h-full flex flex-col card-glow transition-all">
+                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden flex flex-col card-glow transition-all">
                     <div class="px-6 py-4 border-b border-border dark:border-white/5 bg-lazy-dark flex items-center justify-between text-white">
                         <h2 class="font-bold flex items-center text-secondary uppercase text-xs tracking-widest">
                             <i class="fas fa-crosshairs mr-3"></i>Target Assets
@@ -468,10 +26,10 @@
                         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <div class="flex-grow space-y-1.5">
                             <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Asset Queue (Newline separated)</label>
-                            <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-64 resize-none dark:text-white" placeholder="example.com"></textarea>
+                            <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-40 resize-y dark:text-white" placeholder="example.com"></textarea>
                         </div>
                         <button type="button" 
-                                onclick="openConfirmModal('scan')" 
+                                data-action="scan" 
                                 id="scanButton"
                                 {% if queue_active %}disabled{% endif %}
                                 class="mt-4 w-full font-bold py-3 rounded-xl transition-all shadow-lg 
@@ -484,11 +42,9 @@
                         </button>
                     </form>
                 </div>
-            </div>
-        </div>
 
         <!-- Phase 3 Continuous Monitoring -->
-        <div class="mt-10">
+        <div class="mt-8">
             <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
                 <i class="fas fa-heartbeat mr-2 text-accent"></i>Continuous Monitoring
             </h3>
@@ -583,59 +139,8 @@
                         </div>
                     </div>
                 </div>
-                <form action="/save_scanning_settings" method="POST" class="mt-6 pt-4 border-t border-border dark:border-white/5 text-sm">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                    <details>
-                        <summary class="cursor-pointer text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider"><i class="fas fa-sliders-h mr-1"></i>Schedule &amp; Thresholds</summary>
-                        <div class="pt-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                            {% for item in schedule %}
-                            <div class="space-y-1.5">
-                                <label for="{{ item.key }}" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">{{ item.label }} ({{ item.unit }})</label>
-                                <input type="number" id="{{ item.key }}" name="{{ item.key }}" value="{{ item.value }}" min="{{ item.min }}" max="{{ item.max }}" step="1" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-3 py-2 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white text-sm">
-                            </div>
-                            {% endfor %}
-                            <div class="space-y-1.5">
-                                <label for="cve_min_cvss" class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Minimum CVSS for CVE findings</label>
-                                <input type="number" id="cve_min_cvss" name="cve_min_cvss" value="{{ cve_min_cvss }}" min="0" max="10" step="0.1" required class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-3 py-2 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white text-sm">
-                            </div>
-                        </div>
-                        <p class="text-[10px] text-slate-400 mt-3">Changes apply to the running worker within seconds; no restart needed. The CVSS minimum applies to the next scans; raising it does not close findings already recorded below it.</p>
-                        <button type="submit" class="mt-3 px-5 py-2 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold rounded-xl transition-all hover:opacity-90 text-xs">
-                            <i class="fas fa-save mr-2"></i>Save Schedule
-                        </button>
-                    </details>
-                </form>
-            </div>
-        </div>
-
-        <div class="mt-6">
-            <div class="flex flex-wrap items-center justify-between gap-2 mb-4 px-2">
-                <h3 class="text-sm font-bold text-slate-500 uppercase tracking-widest flex items-center">
-                    <i class="fas fa-database mr-2 text-accent"></i>Monitored Assets
-                </h3>
-                <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
-                    <a href="/api/export/assets.csv" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent transition-colors"><i class="fas fa-file-csv mr-1"></i>Assets CSV</a>
-                    <a href="/api/export/findings.csv?status=open" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent transition-colors"><i class="fas fa-file-csv mr-1"></i>Open Findings CSV</a>
-                    <a href="/api/export/findings.json" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent transition-colors"><i class="fas fa-file-code mr-1"></i>All Findings JSON</a>
-                </div>
-            </div>
-            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
-                    <table class="min-w-[800px] w-full text-sm text-left">
-                        <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
-                            <tr>
-                                <th class="px-6 py-4 w-12 text-center"></th>
-                                <th class="px-6 py-4">Target Name</th>
-                                <th class="px-6 py-4">Status</th>
-                                <th class="px-6 py-4">Queue</th>
-                                <th class="px-6 py-4">SSL Expiry</th>
-                                <th class="px-6 py-4 text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="main-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
-                            {% include 'table_partial.html' %}
-                        </tbody>
-                    </table>
+                <div class="mt-6 pt-4 border-t border-border dark:border-white/5 text-xs">
+                    <a href="/settings#schedule" class="text-slate-500 hover:text-accent font-bold uppercase tracking-wider text-[10px]"><i class="fas fa-sliders-h mr-1"></i>Schedule &amp; thresholds</a>
                 </div>
             </div>
         </div>
@@ -651,6 +156,7 @@
                 </ul>
             </div>
         </div>
+
 
         <!-- Phase 2 Queue Status Panel -->
         <div class="mt-6">
@@ -671,738 +177,111 @@
                             </tr>
                         </thead>
                         <tbody id="queue-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
-                            {% if phase2_queue and phase2_queue|length > 0 %}
-                                {% for item in phase2_queue %}
-                                <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
-                                    <td class="px-6 py-4 font-mono text-xs dark:text-white">{{ item.target }}</td>
-                                    <td class="px-6 py-4">
-                                        {% if item.status == 'pending' %}
-                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-amber-500/10 text-amber-500 border border-amber-500/20">QUEUED</span>
-                                        {% elif item.status == 'processing' %}
-                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-blue-500/10 text-blue-500 border border-blue-500/20 animate-pulse">SCANNING</span>
-                                        {% elif item.status == 'completed' %}
-                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">COMPLETED</span>
-                                        {% elif item.status == 'failed' %}
-                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-red-500/10 text-red-500 border border-red-500/20">FAILED</span>
-                                        {% else %}
-                                        <span class="px-2 py-1 rounded text-[10px] font-bold uppercase bg-slate-500/10 text-slate-500 border border-slate-500/20">{{ item.status }}</span>
-                                        {% endif %}
-                                    </td>
-                                    <td class="px-6 py-4 text-xs text-slate-500">{{ item.queued_at or '-' }}</td>
-                                    <td class="px-6 py-4 text-xs text-slate-500">{{ item.started_at or '-' }}</td>
-                                    <td class="px-6 py-4 text-xs text-slate-400">
-                                        {% if item.status == 'completed' %}
-                                            {{ item.dirs_found or 0 }} dirs, {{ item.ports_found or 0 }} ports
-                                        {% elif item.status == 'failed' %}
-                                            <span class="text-red-500">{{ item.error_message or 'Error' }}</span>
-                                        {% else %}
-                                            -
-                                        {% endif %}
-                                    </td>
-                                    <td class="px-6 py-4 text-right">
-                                        {% if item.status == 'pending' %}
-                                        <button onclick="openConfirmModal('cancel_scan', {name: '{{ item.target }}'})" 
-                                                class="text-amber-500 hover:text-amber-700 transition-colors text-xs">
-                                            <i class="fas fa-times-circle mr-1"></i>Cancel
-                                        </button>
-                                        {% elif item.status == 'processing' %}
-                                        <span class="text-slate-400 text-xs italic">In progress...</span>
-                                        {% else %}
-                                        <span class="text-slate-400 text-xs">-</span>
-                                        {% endif %}
-                                    </td>
-                                </tr>
-                                {% endfor %}
-                            {% else %}
-                                <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
-                                    <td colspan="6" class="px-6 py-8 text-center text-slate-400">
-                                        <i class="fas fa-check-circle text-emerald-400 text-2xl mb-2"></i>
-                                        <p class="text-xs">No items in queue. Click "Run Deep Scan" on an asset to start.</p>
-                                    </td>
-                                </tr>
-                            {% endif %}
+                            {% include 'queue_partial.html' %}
                         </tbody>
                     </table>
                 </div>
             </div>
         </div>
-    </main>
+{% endblock %}
 
-    <div id="loadingOverlay" class="fixed inset-0 bg-lazy-dark/95 backdrop-blur-sm z-[100] hidden flex-col items-center justify-center">
-        <div class="relative">
-            <div class="w-20 h-20 border-4 border-secondary/20 border-t-secondary rounded-full animate-spin"></div>
-            <i class="fas fa-satellite absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-secondary text-xl"></i>
-        </div>
-        <h2 class="mt-6 text-xl font-bold tracking-widest uppercase text-white animate-pulse">Scanning Engine Active</h2>
-    </div>
+{% block scripts %}
+<script>
+    // --- Auto-refresh: queue, recent changes and monitoring status ---
+    let reloadInterval;
+    const reloadStates = [
+        { label: 'OFF', value: null }, { label: '5S', value: 5000 },
+        { label: '30S', value: 30000 }, { label: '60S', value: 60000 }
+    ];
 
-    <div id="actionModal" class="fixed inset-0 z-[200] hidden items-center justify-center p-4">
-        <div class="absolute inset-0 bg-brand/60 dark:bg-black/80 backdrop-blur-sm" onclick="closeActionModal()"></div>
-        
-        <div class="relative bg-white dark:bg-dark-card w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl border border-border dark:border-white/5 transform transition-all scale-95 opacity-0" id="actionModalContent">
-            <div class="p-8 text-center">
-                <div id="modalIconContainer" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
-                    <i id="modalIcon" class="fas fa-exclamation-triangle"></i>
-                </div>
-                <h3 id="modalTitle" class="text-xl font-bold text-slate-800 dark:text-white">Confirmation</h3>
-                <p id="modalDesc" class="text-slate-500 dark:text-slate-400 text-sm mt-2 leading-relaxed">
-                    Are you sure you want to perform this action?
-                </p>
-            </div>
-            
-            <div class="flex border-t border-border dark:border-white/5">
-                <button onclick="closeActionModal()" class="flex-1 py-4 text-sm font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-brand transition-colors border-r border-border dark:border-white/5">
-                    Cancel
-                </button>
-                <button id="modalConfirmBtn" class="flex-1 py-4 text-sm font-bold transition-colors text-center">
-                    Confirm
-                </button>
-            </div>
-        </div>
-    </div>
-
-    <div id="toastContainer" class="fixed top-20 left-1/2 -translate-x-1/2 z-[300] space-y-2 pointer-events-none"></div>
-
-    <script>
-        // --- 1. THEME MANAGEMENT ---
-        function initTheme() {
-            const savedTheme = localStorage.getItem('theme') || 'light';
-            const html = document.documentElement;
-            const icon = document.getElementById('theme-icon');
-            if (savedTheme === 'dark') {
-                html.classList.add('dark');
-                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
-            } else {
-                html.classList.remove('dark');
-                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
-            }
+    async function refreshOverview() {
+        if (isModalOpen()) return;
+        try {
+            const [queueResponse, changesResponse] = await Promise.all([fetch('/update_queue'), fetch('/update_changes')]);
+            const queueBody = document.getElementById('queue-table-body');
+            if (queueBody && queueResponse.ok) queueBody.innerHTML = await queueResponse.text();
+            const changesList = document.getElementById('changes-list');
+            if (changesList && changesResponse.ok) changesList.innerHTML = await changesResponse.text();
+            fetchPhase3Status();
+        } catch (err) {
+            console.error('Refresh failed:', err);
         }
+    }
+    window.onDataChanged = refreshOverview;
 
-        function toggleDarkMode() {
-            const html = document.documentElement;
-            const icon = document.getElementById('theme-icon');
-            if (html.classList.contains('dark')) {
-                html.classList.remove('dark');
-                if(icon) icon.classList.replace('fa-sun', 'fa-moon');
-                localStorage.setItem('theme', 'light');
-            } else {
-                html.classList.add('dark');
-                if(icon) icon.classList.replace('fa-moon', 'fa-sun');
-                localStorage.setItem('theme', 'dark');
-            }
-        }
+    function applyReload(index) {
+        const state = reloadStates[index] || reloadStates[0];
+        document.getElementById('reload-label').innerText = state.label;
+        if (reloadInterval) clearInterval(reloadInterval);
+        document.getElementById('reload-indicator').classList.toggle('hidden', !state.value);
+        document.getElementById('reload-icon').classList.toggle('fa-spin', !!state.value);
+        if (state.value) reloadInterval = setInterval(refreshOverview, state.value);
+    }
 
-        // --- 2. UI LOADING & MODALS ---
-        function showLoading() {
-            const l = document.getElementById('loadingOverlay');
-            l.classList.remove('hidden'); l.classList.add('flex');
-        }
+    function cycleReload() {
+        const next = (parseInt(localStorage.getItem('reloadStateIndex') || 0) + 1) % reloadStates.length;
+        localStorage.setItem('reloadStateIndex', next);
+        applyReload(next);
+    }
 
-        function testWebhook() {
-            const form = document.createElement('form');
-            form.method = 'POST';
-            form.action = '/test_webhook';
-            document.body.appendChild(form);
-            form.submit();
-        }
+    // --- Continuous monitoring panel ---
+    let phase3Interval = null;
 
-        let currentActionCallback = null;
+    async function fetchPhase3Status() {
+        try {
+            const response = await fetch('/api/phase3/status');
+            if (!response.ok) throw new Error('Failed to fetch monitoring status');
+            const data = await response.json();
+            const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
 
-        function openConfirmModal(type, extraData = null) {
-            const modal = document.getElementById('actionModal');
-            const content = document.getElementById('actionModalContent');
-            const iconCont = document.getElementById('modalIconContainer');
-            const icon = document.getElementById('modalIcon');
-            const title = document.getElementById('modalTitle');
-            const desc = document.getElementById('modalDesc');
-            const confirmBtn = document.getElementById('modalConfirmBtn');
-
-            iconCont.className = "w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl ";
-            confirmBtn.className = "flex-1 py-4 text-sm font-bold transition-colors text-center ";
-
-            const configs = {
-                'save': {
-                    icon: 'fa-save',
-                    color: 'bg-emerald-500/10 text-emerald-500',
-                    btn: 'text-emerald-500 hover:bg-emerald-50 dark:hover:bg-emerald-500/10',
-                    title: 'Update Configuration?',
-                    desc: 'This will modify the scanning engine behavior. Ensure all keys are valid.',
-                    action: () => document.querySelector('form[action="/save_config"]').submit()
-                },
-                'scan': {
-                    icon: 'fa-bolt',
-                    color: 'bg-secondary/10 text-secondary',
-                    btn: 'text-secondary hover:bg-blue-50 dark:hover:bg-secondary/10',
-                    title: 'Initiate Scanning?',
-                    desc: 'Process assets now? This might generate significant network traffic.',
-                    action: () => { showLoading(); document.querySelector('form[action="/process_assets"]').submit(); }
-                },
-                'delete': {
-                    icon: 'fa-trash-alt',
-                    color: 'bg-red-500/10 text-red-500',
-                    btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
-                    title: 'Remove Asset?',
-                    desc: 'Move this asset to trash? This action can be reversed from the Trash menu.',
-                    action: () => {
-                        fetch(`/delete_asset/${extraData.type}/${extraData.id}`, { method: 'DELETE' })
-                            .then(res => res.json())
-                            .then(data => {
-                                if (data.success) {
-                                    showToast('Asset deleted', 'success');
-                                    setTimeout(() => location.reload(), 500);
-                                } else {
-                                    showToast(data.error || 'Delete failed', 'error');
-                                }
-                            })
-                            .catch(() => showToast('Request failed', 'error'));
-                        closeActionModal();
-                    }
-                },
-                'clear_field': {
-                    icon: 'fa-trash-alt',
-                    color: 'bg-red-500/10 text-red-500',
-                    btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
-                    title: 'Delete Configuration?',
-                    desc: 'This will immediately delete this configuration. You can always add it again later.',
-                    action: () => {
-                        const hiddenField = document.getElementById(`clear_${extraData}`);
-                        const input = document.querySelector(`input[name="${extraData}"]`);
-                        
-                        if (hiddenField && input) {
-                            hiddenField.value = '1';
-                            input.value = '';
-                        }
-                        
-                        closeActionModal();
-                        document.querySelector('form[action="/save_config"]').submit();
-                    }
-                },
-                'logout': {
-                    icon: 'fa-sign-out-alt',
-                    color: 'bg-brand/10 text-brand dark:text-accent',
-                    btn: 'text-brand dark:text-accent hover:bg-slate-50 dark:hover:bg-brand/30',
-                    title: 'End Session?',
-                    desc: 'Are you sure you want to logout from the SecScan operator console?',
-                    action: () => window.location.href = '/logout'
-                },
-                'regenerate_ai': {
-                    icon: 'fa-sync-alt',
-                    color: 'bg-accent/10 text-accent',
-                    btn: 'text-accent hover:bg-accent/10',
-                    title: 'Regenerate AI Analysis?',
-                    desc: 'This will overwrite the current recommendation with a new one. Continue?',
-                    action: () => {
-                        queueGenerateAI(extraData.vulnId, extraData.cveId);
-                        closeActionModal();
-                    }
-                },
-                'deep_scan': {
-                    icon: 'fa-search-plus',
-                    color: 'bg-secondary/10 text-secondary',
-                    btn: 'text-secondary hover:bg-blue-50 dark:hover:bg-secondary/10',
-                    title: 'Run Phase 2 Deep Scan?',
-                    desc: `This will perform a full port scan (1-65535) and directory enumeration on ${extraData ? extraData.name : 'this asset'}.\n\nEstimated time: 5-15 minutes.\nThis task runs in the background.`,
-                    action: () => {
-                        const formData = new FormData();
-                        formData.append('asset_id', extraData.id);
-                        formData.append('asset_type', extraData.type);
-                        formData.append('asset_name', extraData.name);
-                        
-                        fetch('/api/phase2/scan', {
-                            method: 'POST',
-                            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                            body: formData
-                        })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                showToast('Deep scan queued', 'success');
-                                setTimeout(() => refreshTableData(), 500);
-                            } else {
-                                showToast(data.error || 'Failed to queue scan', 'error');
-                            }
-                        })
-                        .catch(() => showToast('Request failed', 'error'));
-                        closeActionModal();
-                    }
-                },
-                'cancel_scan': {
-                    icon: 'fa-times-circle',
-                    color: 'bg-amber-500/10 text-amber-500',
-                    btn: 'text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-500/10',
-                    title: 'Cancel Queued Scan?',
-                    desc: `This will remove ${extraData ? extraData.name : 'this asset'} from the scan queue.\n\nThe scan has not started yet and can be re-queued later.`,
-                    action: () => {
-                        const formData = new FormData();
-                        formData.append('asset_name', extraData.name);
-                        
-                        fetch('/api/phase2/cancel', {
-                            method: 'POST',
-                            headers: { 'X-Requested-With': 'XMLHttpRequest' },
-                            body: formData
-                        })
-                        .then(res => res.json())
-                        .then(data => {
-                            if (data.success) {
-                                showToast('Scan cancelled', 'success');
-                                setTimeout(() => refreshTableData(), 500);
-                            } else {
-                                showToast(data.error || 'Failed to cancel scan', 'error');
-                            }
-                        })
-                        .catch(() => showToast('Request failed', 'error'));
-                        closeActionModal();
-                    }
-                }
-            };
-
-            const config = configs[type];
-            icon.className = `fas ${config.icon}`;
-            iconCont.classList.add(...config.color.split(' '));
-            confirmBtn.classList.add(...config.btn.split(' '));
-            title.innerText = config.title;
-            desc.innerText = config.desc;
-            currentActionCallback = config.action;
-
-            modal.classList.remove('hidden');
-            modal.classList.add('flex');
-            setTimeout(() => {
-                content.classList.remove('scale-95', 'opacity-0');
-                content.classList.add('scale-100', 'opacity-100');
-            }, 10);
-        }
-
-        function closeActionModal() {
-            const modal = document.getElementById('actionModal');
-            const content = document.getElementById('actionModalContent');
-            content.classList.add('scale-95', 'opacity-0');
-            setTimeout(() => {
-                modal.classList.add('hidden');
-                modal.classList.remove('flex');
-            }, 200);
-        }
-
-        document.getElementById('modalConfirmBtn').onclick = () => {
-            if (currentActionCallback) currentActionCallback();
-        };
-
-        // --- 3. TABLE PERSISTENCE LOGIC ---
-        function toggleDetail(rowId, iconId) {
-            const row = document.getElementById(rowId);
-            const icon = document.getElementById(iconId);
-            const isHidden = row.classList.toggle('hidden');
-            icon.style.transform = isHidden ? 'rotate(0deg)' : 'rotate(90deg)';
-
-            let openedRows = JSON.parse(localStorage.getItem('openedRows') || '[]');
-            if (!isHidden) {
-                if (!openedRows.includes(rowId)) openedRows.push(rowId);
-            } else {
-                openedRows = openedRows.filter(id => id !== rowId);
-            }
-            localStorage.setItem('openedRows', JSON.stringify(openedRows));
-        }
-
-        function restoreOpenedRows() {
-            const openedRows = JSON.parse(localStorage.getItem('openedRows') || '[]');
-            openedRows.forEach(rowId => {
-                const row = document.getElementById(rowId);
-                const iconId = rowId.replace('row-', 'icon-');
-                const icon = document.getElementById(iconId);
-
-                if (row && icon) {
-                    row.classList.remove('hidden');
-                    icon.classList.add('no-transition');
-                    icon.style.transform = 'rotate(90deg)';
-                    setTimeout(() => icon.classList.remove('no-transition'), 100);
-                }
-            });
-        }
-
-        function toggleTable(type, assetId, totalCount) {
-            const btn = document.getElementById(`${type}-btn-${assetId}`);
-            const extraRows = document.querySelectorAll(`.${type}-extra-${assetId}`);
-            const isExpanded = btn.dataset.expanded === 'true';
-            
-            if (isExpanded) {
-                extraRows.forEach(row => row.classList.add('hidden'));
-                btn.innerHTML = `<i class="fas fa-chevron-down mr-1"></i>Show ${totalCount - 5} more`;
-                btn.dataset.expanded = 'false';
-            } else {
-                extraRows.forEach(row => row.classList.remove('hidden'));
-                btn.innerHTML = `<i class="fas fa-chevron-up mr-1"></i>Show less`;
-                btn.dataset.expanded = 'true';
-            }
-        }
-
-        const aiGenerationQueue = [];
-        let aiGenerationInProgress = false;
-
-        function showToast(message, type = 'info', duration = 4000) {
-            const container = document.getElementById('toastContainer');
-            const toast = document.createElement('div');
-            
-            const bgColor = {
-                'success': 'bg-emerald-500',
-                'error': 'bg-red-500',
-                'warning': 'bg-amber-500',
-                'info': 'bg-blue-500'
-            }[type] || 'bg-blue-500';
-            
-            toast.className = `${bgColor} text-white px-6 py-3 rounded-xl shadow-lg font-semibold text-sm pointer-events-auto transform transition-all duration-300 translate-y-[-20px] opacity-0`;
-            toast.innerText = message;
-            container.appendChild(toast);
-            
-            setTimeout(() => {
-                toast.classList.remove('translate-y-[-20px]', 'opacity-0');
-            }, 10);
-            
-            setTimeout(() => {
-                toast.classList.add('translate-y-[-20px]', 'opacity-0');
-                setTimeout(() => toast.remove(), 300);
-            }, duration);
-        }
-
-        function queueGenerateAI(vulnId, cveId) {
-            const btn = document.getElementById(`generate-btn-${vulnId}`);
-            if (btn) {
-                btn.disabled = true;
-                btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>Generating...';
-            }
-            
-            aiGenerationQueue.push({ vulnId, cveId });
-            showToast(`Queued (position ${aiGenerationQueue.length})`, 'info');
-            processAIQueue();
-        }
-
-        function processAIQueue() {
-            if (aiGenerationInProgress || aiGenerationQueue.length === 0) return;
-            
-            aiGenerationInProgress = true;
-            const request = aiGenerationQueue.shift();
-            
-            generateAIInternal(request.vulnId, request.cveId, () => {
-                aiGenerationInProgress = false;
-                if (aiGenerationQueue.length > 0) processAIQueue();
-            });
-        }
-
-        // Status dropdown for CVEs and security findings
-        async function updateStatus(url, select) {
-            const status = select.value;
-            select.disabled = true;
-            try {
-                const response = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status, csrf_token: select.dataset.csrf })
-                });
-                const data = await response.json();
-                if (!response.ok || !data.success) throw new Error(data.error || 'Failed to update status');
-
-                select.dataset.previous = status;
-                const card = select.closest('[data-status-card]');
-                if (card) card.classList.toggle('opacity-60', status !== 'open');
-                showToast('Finding status updated', 'success');
-            } catch (err) {
-                select.value = select.dataset.previous;
-                showToast(err.message || 'Network error. Please try again.', 'error');
-            } finally {
-                select.disabled = false;
-            }
-        }
-
-        async function generateAIInternal(vulnId, cveId, callback) {
-            try {
-                const response = await fetch('/generate_ai', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ vuln_id: vulnId })
-                });
-                
-                const data = await response.json();
-                
-                if (!response.ok || data.error) {
-                    showToast(data.error || 'AI generation failed. Check GEMINI_API_KEY.', 'error');
-                    const btn = document.getElementById(`generate-btn-${vulnId}`);
-                    if (btn) {
-                        btn.disabled = false;
-                        btn.innerHTML = '<i class="fas fa-magic mr-1"></i>Generate AI Analysis ✨';
-                    }
-                    return;
-                }
-                
-                const recoDiv = document.getElementById(`reco-${vulnId}`);
-                if (recoDiv) {
-                    const safeRecommendation = escapeHtml(data.recommendation);
-                    const safeCveId = escapeJs(cveId);
-                    recoDiv.innerHTML = `
-                        <div class="flex items-center space-x-2 mb-2">
-                            <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                            <span class="text-[10px] font-bold text-emerald-400 uppercase tracking-widest">AI Analysis</span>
-                        </div>
-                        <p class="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed whitespace-pre-line">${safeRecommendation}</p>
-                        <button onclick="event.stopPropagation(); showRegenerateConfirm(${vulnId}, '${safeCveId}')" class="mt-3 text-[10px] text-accent hover:text-secondary font-bold transition-colors">
-                            <i class="fas fa-sync-alt mr-1"></i>Regenerate Analysis
-                        </button>
-                    `;
-                }
-                
-                showToast('AI analysis generated!', 'success');
-            } catch (err) {
-                showToast('Network error. Please try again.', 'error');
-                const btn = document.getElementById(`generate-btn-${vulnId}`);
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerHTML = '<i class="fas fa-magic mr-1"></i>Generate AI Analysis ✨';
-                }
-            }
-            
-            if (callback) callback();
-        }
-
-        function showRegenerateConfirm(vulnId, cveId) {
-            openConfirmModal('regenerate_ai', { vulnId, cveId });
-        }
-
-        // --- 4. AJAX AUTO-RELOAD (ZERO FLASH) ---
-        let reloadInterval;
-        const reloadStates = [
-            { label: 'OFF', value: null },
-            { label: '5S', value: 5000 },
-            { label: '30S', value: 30000 },
-            { label: '60S', value: 60000 }
-        ];
-
-        async function refreshTableData() {
-            if (!document.getElementById('actionModal').classList.contains('hidden')) return;
-
-            try {
-                const [tableResponse, queueResponse, changesResponse] = await Promise.all([
-                    fetch('/update_table'),
-                    fetch('/update_queue'),
-                    fetch('/update_changes')
-                ]);
-                
-                if (!tableResponse.ok || !queueResponse.ok) throw new Error('Refresh Failed');
-                
-                const tableHtml = await tableResponse.text();
-                const queueHtml = await queueResponse.text();
-                
-                const tableBody = document.getElementById('main-table-body');
-                const queueBody = document.getElementById('queue-table-body');
-                
-                if (tableBody) {
-                    tableBody.innerHTML = tableHtml;
-                    restoreOpenedRows();
-                }
-                
-                if (queueBody) {
-                    queueBody.innerHTML = queueHtml;
-                }
-
-                const changesList = document.getElementById('changes-list');
-                if (changesList && changesResponse.ok) {
-                    changesList.innerHTML = await changesResponse.text();
-                }
-            } catch (err) {
-                console.error('Fetch error:', err);
-            }
-        }
-
-        function initReload() {
-            const savedStateIndex = localStorage.getItem('reloadStateIndex') || 0;
-            applyReload(parseInt(savedStateIndex));
-        }
-
-        function cycleReload() {
-            let currentIndex = parseInt(localStorage.getItem('reloadStateIndex') || 0);
-            let nextIndex = (currentIndex + 1) % reloadStates.length;
-            localStorage.setItem('reloadStateIndex', nextIndex);
-            applyReload(nextIndex);
-        }
-
-        function applyReload(index) {
-            const state = reloadStates[index];
-            const label = document.getElementById('reload-label');
-            const indicator = document.getElementById('reload-indicator');
-            const icon = document.getElementById('reload-icon');
-
-            label.innerText = state.label;
-            if (reloadInterval) clearInterval(reloadInterval);
-
-            if (state.value) {
-                indicator.classList.remove('hidden');
-                icon.classList.add('fa-spin');
-                // Ganti location.reload dengan refreshTableData
-                reloadInterval = setInterval(refreshTableData, state.value);
-            } else {
-                indicator.classList.add('hidden');
-                icon.classList.remove('fa-spin');
-            }
-        }
-
-        // --- 5. INITIALIZATION ---
-        document.addEventListener('DOMContentLoaded', () => {
-            initTheme();
-            initReload();
-            restoreOpenedRows();
-            initPhase3();
-        });
-
-        // --- 6. PHASE 3 MONITORING ---
-        
-        let phase3Interval = null;
-
-        function formatRelativeTime(timestamp) {
-            if (!timestamp || timestamp === '-') return '-';
-            
-            try {
-                const date = new Date(timestamp.replace(' ', 'T') + 'Z');
-                const now = new Date();
-                const diffMs = now - date;
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMins / 60);
-                const diffDays = Math.floor(diffHours / 24);
-                
-                // Format: DD-MM-YYYY HH:MM
-                const day = String(date.getDate()).padStart(2, '0');
-                const month = String(date.getMonth() + 1).padStart(2, '0');
-                const year = date.getFullYear();
-                const hours = String(date.getHours()).padStart(2, '0');
-                const mins = String(date.getMinutes()).padStart(2, '0');
-                const formattedDate = `${day}-${month}-${year} ${hours}:${mins}`;
-                
-                // Relative time
-                let relative = '';
-                if (diffMins < 1) relative = 'just now';
-                else if (diffMins < 60) relative = `${diffMins}m ago`;
-                else if (diffHours < 24) relative = `${diffHours}h ago`;
-                else if (diffDays < 7) relative = `${diffDays}d ago`;
-                
-                return relative ? `${formattedDate} (${relative})` : formattedDate;
-            } catch (e) {
-                return timestamp;
-            }
-        }
-
-        function startPhase3AutoRefresh() {
-            // Clear existing interval if any
-            if (phase3Interval) clearInterval(phase3Interval);
-            
-            // Refresh every 60 seconds
-            phase3Interval = setInterval(fetchPhase3Status, 60000);
-        }
-
-        function stopPhase3AutoRefresh() {
-            if (phase3Interval) {
-                clearInterval(phase3Interval);
-                phase3Interval = null;
-            }
-        }
-
-        async function initPhase3() {
-            await fetchPhase3Status();
-            
-            // Setup toggle handler
             const toggle = document.getElementById('phase3-toggle');
-            if (toggle) {
-                toggle.addEventListener('change', async (e) => {
-                    const enabled = e.target.checked;
-                    await togglePhase3(enabled);
-                });
-            }
-        }
+            if (toggle) toggle.checked = data.enabled;
+            set('phase3-status-label', data.enabled ? 'Enabled' : 'Disabled');
+            const runningBadge = document.getElementById('phase3-running-badge');
+            if (runningBadge) runningBadge.classList.toggle('hidden', !(data.running && data.enabled));
 
-        async function fetchPhase3Status() {
-            try {
-                const response = await fetch('/api/phase3/status');
-                if (!response.ok) throw new Error('Failed to fetch Phase 3 status');
-                
-                const data = await response.json();
-                
-                // Update toggle
-                const toggle = document.getElementById('phase3-toggle');
-                if (toggle) toggle.checked = data.enabled;
-                
-                // Update status label
-                const statusLabel = document.getElementById('phase3-status-label');
-                if (statusLabel) statusLabel.textContent = data.enabled ? 'Enabled' : 'Disabled';
-                
-                // Update running badge
-                const runningBadge = document.getElementById('phase3-running-badge');
-                if (runningBadge) {
-                    if (data.running && data.enabled) {
-                        runningBadge.classList.remove('hidden');
-                    } else {
-                        runningBadge.classList.add('hidden');
-                    }
-                }
-                
-                // Update assets
-                document.getElementById('assets-total').textContent = `${data.assets.total} total`;
-                document.getElementById('assets-up').textContent = data.assets.up;
-                document.getElementById('assets-down').textContent = data.assets.down;
-                
-                // Update certificates
-                document.getElementById('certs-total').textContent = data.certificates.total_certs;
-                const certExpired = document.getElementById('certs-expired');
-                if (data.certificates.expired > 0) {
-                    if (certExpired) certExpired.classList.remove('hidden');
-                    document.getElementById('certs-expired-count').textContent = `${data.certificates.expired} expired`;
-                } else if (certExpired) {
-                    certExpired.classList.add('hidden');
-                }
-                const certWarning = document.getElementById('certs-warning');
-                if (data.certificates.expiring_7_days > 0) {
-                    if (certWarning) certWarning.classList.remove('hidden');
-                    document.getElementById('certs-expiring').textContent = `${data.certificates.expiring_7_days} expiring ≤7d`;
-                } else if (certWarning) {
-                    certWarning.classList.add('hidden');
-                }
-                
-                // Update last checks with relative time
-                document.getElementById('last-liveness').textContent = formatRelativeTime(data.last_liveness_check);
-                document.getElementById('last-ctlogs').textContent = formatRelativeTime(data.last_ctlogs_check);
-                document.getElementById('last-wappalyzer').textContent = formatRelativeTime(data.last_wappalyzer_check);
-                document.getElementById('last-takeover').textContent = formatRelativeTime(data.last_takeover_check);
-                document.getElementById('last-intel').textContent = formatRelativeTime(data.last_intel_check);
-                document.getElementById('last-misconfig').textContent = formatRelativeTime(data.last_misconfig_check);
-                document.getElementById('last-discovery').textContent = formatRelativeTime(data.last_discovery_check);
-                
-                // Start or stop auto-refresh based on enabled status
-                if (data.enabled) {
-                    startPhase3AutoRefresh();
-                } else {
-                    stopPhase3AutoRefresh();
-                }
-                
-            } catch (err) {
-                console.error('Error fetching Phase 3 status:', err);
-            }
-        }
+            set('assets-total', `${data.assets.total} total`);
+            set('assets-up', data.assets.up);
+            set('assets-down', data.assets.down);
+            set('certs-total', data.certificates.total_certs);
+            const certExpired = document.getElementById('certs-expired');
+            if (certExpired) certExpired.classList.toggle('hidden', !(data.certificates.expired > 0));
+            set('certs-expired-count', `${data.certificates.expired} expired`);
+            const certWarning = document.getElementById('certs-warning');
+            if (certWarning) certWarning.classList.toggle('hidden', !(data.certificates.expiring_7_days > 0));
+            set('certs-expiring', `${data.certificates.expiring_7_days} expiring ≤7d`);
 
-        async function togglePhase3(enabled) {
-            try {
-                const response = await fetch('/api/phase3/toggle', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ enabled })
-                });
-                
-                if (!response.ok) throw new Error('Failed to toggle Phase 3');
-                
-                const data = await response.json();
-                
-                showToast(data.message, data.success ? 'success' : 'error');
-                
-                // Refresh status
-                await fetchPhase3Status();
-                
-            } catch (err) {
-                console.error('Error toggling Phase 3:', err);
-                showToast('Failed to update Phase 3 setting', 'error');
-            }
+            [['last-liveness', 'last_liveness_check'], ['last-ctlogs', 'last_ctlogs_check'],
+             ['last-wappalyzer', 'last_wappalyzer_check'], ['last-takeover', 'last_takeover_check'],
+             ['last-intel', 'last_intel_check'], ['last-misconfig', 'last_misconfig_check'],
+             ['last-discovery', 'last_discovery_check']].forEach(([id, key]) => set(id, formatRelativeTime(data[key])));
+
+            if (data.enabled && !phase3Interval) phase3Interval = setInterval(fetchPhase3Status, 60000);
+            if (!data.enabled && phase3Interval) { clearInterval(phase3Interval); phase3Interval = null; }
+        } catch (err) {
+            console.error('Error fetching monitoring status:', err);
         }
-    </script>
-</body>
-</html>
+    }
+
+    async function togglePhase3(enabled) {
+        try {
+            const response = await fetch('/api/phase3/toggle', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
+            });
+            if (!response.ok) throw new Error();
+            const data = await response.json();
+            showToast(data.message, data.success ? 'success' : 'error');
+            fetchPhase3Status();
+        } catch (err) {
+            showToast('Failed to update monitoring setting', 'error');
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        applyReload(parseInt(localStorage.getItem('reloadStateIndex') || 0));
+        fetchPhase3Status();
+        const toggle = document.getElementById('phase3-toggle');
+        if (toggle) toggle.addEventListener('change', e => togglePhase3(e.target.checked));
+    });
+</script>
+{% endblock %}

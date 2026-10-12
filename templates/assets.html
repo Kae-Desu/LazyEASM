@@ -1,0 +1,229 @@
+{% extends 'base.html' %}
+{% block title %}Assets{% endblock %}
+
+{% block content %}
+{% set input_cls = 'bg-white dark:bg-dark-card border border-border dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-accent outline-none dark:text-white' %}
+
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h1 class="text-2xl font-bold dark:text-white"><i class="fas fa-server mr-2 text-accent"></i>Assets</h1>
+    <div class="flex flex-wrap gap-2 text-[10px] font-bold uppercase tracking-wider">
+        <a href="/api/export/assets.csv" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent"><i class="fas fa-file-csv mr-1"></i>Assets CSV</a>
+        <a href="/api/export/findings.csv?status=open" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent"><i class="fas fa-file-csv mr-1"></i>Open Findings CSV</a>
+        <a href="/api/export/findings.json" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 text-slate-500 hover:text-accent"><i class="fas fa-file-code mr-1"></i>All Findings JSON</a>
+    </div>
+</div>
+
+<form id="asset-filters" class="flex flex-wrap gap-3 mb-4" role="search" onsubmit="return false">
+    <div class="flex-[2_1_260px]">
+        <label for="f-q" class="sr-only">Search</label>
+        <input id="f-q" name="q" type="search" placeholder="Search name, domain or IP" class="w-full {{ input_cls }}">
+    </div>
+    <div class="flex-[1_1_150px]">
+        <label for="f-type" class="sr-only">Type</label>
+        <select id="f-type" name="type" class="w-full {{ input_cls }}">
+            <option value="">All types</option><option value="domain">Domains</option><option value="subdomain">Subdomains</option><option value="ip">IPs</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_150px]">
+        <label for="f-status" class="sr-only">Status</label>
+        <select id="f-status" name="status" class="w-full {{ input_cls }}">
+            <option value="">Any status</option><option value="up">Up</option><option value="down">Down</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_150px]">
+        <label for="f-risk" class="sr-only">Risk</label>
+        <select id="f-risk" name="risk" class="w-full {{ input_cls }}">
+            <option value="">Any risk</option><option value="kev">KEV only</option><option value="7">CVSS ≥ 7</option><option value="9">CVSS ≥ 9</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_150px]">
+        <label for="f-cert" class="sr-only">Certificate</label>
+        <select id="f-cert" name="cert_state" class="w-full {{ input_cls }}">
+            <option value="">Any certificate</option><option value="expiring">Expiring ≤30d</option><option value="expired">Expired</option><option value="valid">Valid</option><option value="none">None</option>
+        </select>
+    </div>
+    <div class="flex-[1_1_150px]">
+        <label for="f-tech" class="sr-only">Technology</label>
+        <input id="f-tech" name="technology" type="search" placeholder="Technology" class="w-full {{ input_cls }}">
+    </div>
+    <div class="flex-[1_1_150px]">
+        <label for="f-sort" class="sr-only">Sort</label>
+        <select id="f-sort" name="sort" class="w-full {{ input_cls }}">
+            <option value="name:asc">Name A–Z</option>
+            <option value="kev_count:desc">Most KEV</option>
+            <option value="max_cvss:desc">Highest CVSS</option>
+            <option value="max_epss:desc">Highest EPSS</option>
+            <option value="finding_count:desc">Most findings</option>
+            <option value="last_scanned:desc">Recently scanned</option>
+            <option value="first_seen:desc">Newest</option>
+        </select>
+    </div>
+</form>
+
+<div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-xl">
+    <div class="overflow-x-auto">
+        <table class="min-w-[900px] w-full text-sm text-left">
+            <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.15em]">
+                <tr>
+                    <th scope="col" class="px-5 py-3">Asset</th>
+                    <th scope="col" class="px-5 py-3">Status</th>
+                    <th scope="col" class="px-5 py-3">Risk</th>
+                    <th scope="col" class="px-5 py-3 text-right">Findings</th>
+                    <th scope="col" class="px-5 py-3 text-right">CVEs</th>
+                    <th scope="col" class="px-5 py-3 text-right">Ports</th>
+                    <th scope="col" class="px-5 py-3">Certificate</th>
+                    <th scope="col" class="px-5 py-3">Last scanned</th>
+                </tr>
+            </thead>
+            <tbody id="asset-rows" class="divide-y divide-slate-100 dark:divide-white/5">
+                <tr><td colspan="8" class="px-5 py-10 text-center text-slate-400">Loading…</td></tr>
+            </tbody>
+        </table>
+    </div>
+    <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-border dark:border-white/5 text-xs text-slate-500">
+        <span id="page-info" aria-live="polite"></span>
+        <div class="flex items-center gap-2">
+            <label for="f-size">Per page</label>
+            <select id="f-size" class="{{ input_cls }} py-1">
+                <option>25</option><option>50</option><option>100</option>
+            </select>
+            <button type="button" id="prev-page" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 disabled:opacity-40" aria-label="Previous page"><i class="fas fa-chevron-left"></i></button>
+            <button type="button" id="next-page" class="px-3 py-1.5 rounded-lg border border-border dark:border-white/10 disabled:opacity-40" aria-label="Next page"><i class="fas fa-chevron-right"></i></button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const fields = {
+        q: document.getElementById('f-q'), type: document.getElementById('f-type'),
+        status: document.getElementById('f-status'), risk: document.getElementById('f-risk'),
+        cert_state: document.getElementById('f-cert'), technology: document.getElementById('f-tech'),
+        sort: document.getElementById('f-sort'), page_size: document.getElementById('f-size'),
+    };
+    let page = 1;
+    let requestSeq = 0;
+
+    // Filters live in the URL so a view can be bookmarked and Back works
+    function readUrl() {
+        const params = new URLSearchParams(location.search);
+        Object.entries(fields).forEach(([key, el]) => { if (params.has(key)) el.value = params.get(key); });
+        page = Math.max(1, parseInt(params.get('page') || '1', 10) || 1);
+    }
+
+    function stateParams() {
+        const params = new URLSearchParams();
+        Object.entries(fields).forEach(([key, el]) => { if (el.value) params.set(key, el.value); });
+        if (page > 1) params.set('page', page);
+        return params;
+    }
+
+    function apiParams() {
+        const s = stateParams();
+        const api = new URLSearchParams();
+        ['q', 'type', 'status', 'cert_state', 'technology'].forEach(k => { if (s.get(k)) api.set(k, s.get(k)); });
+        const risk = s.get('risk');
+        if (risk === 'kev') api.set('kev', '1');
+        else if (risk) api.set('min_cvss', risk);
+        const [sort, order] = (s.get('sort') || 'name:asc').split(':');
+        api.set('sort', sort); api.set('order', order);
+        api.set('page', page);
+        api.set('page_size', s.get('page_size') || '25');
+        return api;
+    }
+
+    const statusBadge = status => {
+        const up = status === 'up';
+        return `<span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border ${up ? 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20' : 'bg-amber-500/10 text-amber-500 border-amber-500/20'}">${escapeHtml(status || 'unknown')}</span>`;
+    };
+
+    function riskCell(a) {
+        const parts = [];
+        if (a.kev_count) parts.push(`<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-red-600 text-white whitespace-nowrap" title="Open CVEs known to be exploited (CISA KEV)">KEV ${a.kev_count}</span>`);
+        if (a.max_cvss) {
+            const tone = a.max_cvss >= 9 ? 'text-red-500' : a.max_cvss >= 7 ? 'text-orange-500' : 'text-amber-500';
+            parts.push(`<span class="font-mono text-xs font-bold ${tone}" title="Highest CVSS of open CVEs">${Number(a.max_cvss).toFixed(1)}</span>`);
+        }
+        if (a.max_epss !== null && a.max_epss !== undefined) parts.push(`<span class="font-mono text-[10px] text-slate-500 whitespace-nowrap" title="Highest EPSS">EPSS ${(a.max_epss * 100).toFixed(0)}%</span>`);
+        return parts.length ? `<div class="flex items-center gap-2">${parts.join('')}</div>` : '<span class="text-slate-400">-</span>';
+    }
+
+    function findingsCell(a) {
+        if (!a.finding_count) return '<span class="text-slate-400">0</span>';
+        const tone = ['critical', 'high'].includes(a.max_finding_severity) ? 'text-red-500' : a.max_finding_severity === 'medium' ? 'text-amber-500' : 'text-slate-500';
+        return `<span class="font-bold ${tone}" title="Open findings, highest severity: ${escapeHtml(a.max_finding_severity || '')}">${a.finding_count}</span>`;
+    }
+
+    function certCell(c) {
+        if (!c || c.state === 'none') return '<span class="text-slate-400 text-xs">N/A</span>';
+        if (c.state === 'expired') return '<span class="text-red-500 text-xs font-bold"><i class="fas fa-times-circle mr-1"></i>Expired</span>';
+        const days = c.days_remaining;
+        const tone = days <= 7 ? 'text-red-500 font-bold' : days <= 30 ? 'text-amber-500 font-bold' : 'text-emerald-500';
+        return `<span class="${tone} text-xs"><i class="fas fa-lock mr-1"></i>${escapeHtml(String(days))}d</span>`;
+    }
+
+    function render(data) {
+        const rows = document.getElementById('asset-rows');
+        if (!data.items.length) {
+            rows.innerHTML = '<tr><td colspan="8" class="px-5 py-10 text-center text-slate-400">No assets match these filters.</td></tr>';
+        } else {
+            rows.innerHTML = data.items.map(a => {
+                const href = `/assets/${encodeURIComponent(a.type)}/${encodeURIComponent(a.id)}`;
+                const ips = a.type !== 'ip' && a.ips.length ? `<div class="text-[10px] text-slate-400 mt-0.5 font-mono truncate max-w-xs">${escapeHtml(a.ips.join(', '))}</div>` : '';
+                return `<tr class="hover:bg-slate-50 dark:hover:bg-white/5 cursor-pointer" data-href="${href}">
+                    <td class="px-5 py-3"><a href="${href}" class="font-mono text-xs font-semibold dark:text-white hover:text-accent">${escapeHtml(a.name)}</a>
+                        <span class="ml-2 text-[9px] uppercase text-slate-400">${escapeHtml(a.type)}</span>${ips}</td>
+                    <td class="px-5 py-3">${statusBadge(a.status)}${a.phase2_status === 'pending' || a.phase2_status === 'processing' ? `<span class="ml-1 text-[9px] uppercase font-bold text-blue-500">${a.phase2_status === 'pending' ? 'queued' : 'scanning'}</span>` : ''}</td>
+                    <td class="px-5 py-3">${riskCell(a)}</td>
+                    <td class="px-5 py-3 text-right">${findingsCell(a)}</td>
+                    <td class="px-5 py-3 text-right ${a.vulnerability_count ? 'font-bold' : 'text-slate-400'}">${a.vulnerability_count}</td>
+                    <td class="px-5 py-3 text-right text-slate-500">${a.open_port_count}</td>
+                    <td class="px-5 py-3">${certCell(a.certificate)}</td>
+                    <td class="px-5 py-3 text-xs text-slate-500 font-mono">${escapeHtml(a.last_scanned || '-')}</td>
+                </tr>`;
+            }).join('');
+        }
+        const p = data.pagination;
+        const from = p.total ? (p.page - 1) * p.page_size + 1 : 0;
+        const to = Math.min(p.page * p.page_size, p.total);
+        document.getElementById('page-info').textContent = `${from}–${to} of ${p.total} assets`;
+        document.getElementById('prev-page').disabled = !p.has_previous;
+        document.getElementById('next-page').disabled = !p.has_next;
+    }
+
+    async function load(pushState = true) {
+        const seq = ++requestSeq;
+        if (pushState) history.replaceState(null, '', `${location.pathname}?${stateParams()}`);
+        try {
+            const response = await fetch(`/api/assets?${apiParams()}`);
+            const data = await response.json();
+            if (seq !== requestSeq) return;  // a newer request superseded this one
+            if (!response.ok || !data.success) throw new Error(data.error || 'Failed to load assets');
+            render(data);
+        } catch (err) {
+            if (seq !== requestSeq) return;
+            document.getElementById('asset-rows').innerHTML = `<tr><td colspan="8" class="px-5 py-10 text-center text-red-500">${escapeHtml(err.message)}</td></tr>`;
+        }
+    }
+
+    let debounce;
+    Object.values(fields).forEach(el => {
+        el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', () => {
+            clearTimeout(debounce);
+            debounce = setTimeout(() => { page = 1; load(); }, el.tagName === 'INPUT' ? 300 : 0);
+        });
+    });
+    document.getElementById('prev-page').addEventListener('click', () => { page = Math.max(1, page - 1); load(); });
+    document.getElementById('next-page').addEventListener('click', () => { page += 1; load(); });
+    document.getElementById('asset-rows').addEventListener('click', (event) => {
+        const row = event.target.closest('tr[data-href]');
+        if (row && !event.target.closest('a')) window.location.href = row.dataset.href;
+    });
+
+    readUrl();
+    load(false);
+})();
+</script>
+{% endblock %}

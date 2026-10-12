@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en" class="light" id="html-tag">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LazyEASM - {% block title %}Dashboard{% endblock %}</title>
+
+    <script>
+        // Blocking: apply the saved theme before first paint
+        (function() {
+            const savedTheme = localStorage.getItem('theme') || 'light';
+            document.documentElement.classList.add(savedTheme);
+            document.documentElement.classList.remove(savedTheme === 'dark' ? 'light' : 'dark');
+        })();
+
+        // XSS protection helpers
+        function escapeHtml(text) {
+            if (text === null || text === undefined) return '';
+            const div = document.createElement('div');
+            div.textContent = String(text);
+            return div.innerHTML.replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function escapeJs(str) {
+            if (!str) return '';
+            return String(str).replace(/[\\'"<>&\r\n]/g, c => ({
+                '\\': '\\\\', "'": "\\'", '"': '\\"', '<': '\\x3c', '>': '\\x3e', '&': '\\x26', '\r': '\\r', '\n': '\\n'
+            }[c]));
+        }
+
+        // Refresh tokens before the 15-minute access token expires
+        (function() {
+            function refreshToken() {
+                fetch('/refresh-token', { method: 'POST', credentials: 'same-origin' })
+                    .then(resp => { if (!resp.ok) window.location.href = '/login'; })
+                    .catch(() => { window.location.href = '/login'; });
+            }
+            setInterval(refreshToken, 14 * 60 * 1000);
+            document.addEventListener('visibilitychange', function() {
+                if (!document.hidden) fetch('/refresh-token', { method: 'POST', credentials: 'same-origin' }).catch(() => {});
+            });
+        })();
+    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        'lazy-light': '#EAEAEA',
+                        'lazy-dark': '#3F3F3F',
+                        'dark-card': '#2F2F2F',
+                        accent: '#CC9ACC',
+                        secondary: '#9AC3CC',
+                        border: '#D1D1D1',
+                    },
+                    fontFamily: {
+                        sans: ['Plus Jakarta Sans', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                }
+            }
+        }
+    </script>
+    <style>
+        :root { --lazy-light: #EAEAEA; --lazy-dark: #3F3F3F; }
+        html.dark { background-color: var(--lazy-dark) !important; }
+        html.light { background-color: var(--lazy-light) !important; }
+        html:not(.dark):not(.light) { background-color: var(--lazy-light) !important; }
+        .glass { backdrop-filter: blur(12px); background: rgba(47, 47, 47, 0.95); }
+        .card-glow:hover { box-shadow: 0 10px 25px rgba(0, 0, 0, 0.1); }
+        body { transition: background-color 0.3s ease; }
+        .no-transition { transition: none !important; }
+    </style>
+    {% block head %}{% endblock %}
+</head>
+<body class="bg-lazy-light dark:bg-lazy-dark text-slate-800 dark:text-slate-100 min-h-screen font-sans">
+
+    {% set nav_items = [
+        ('overview', '/', 'fa-gauge-high', 'Overview'),
+        ('assets', '/assets', 'fa-server', 'Assets'),
+        ('settings', '/settings', 'fa-sliders-h', 'Settings'),
+    ] %}
+
+    <header class="fixed top-0 w-full z-50 glass border-b border-white/10">
+        <div class="px-4 h-16 flex items-center justify-between">
+            <a href="/" class="flex items-center space-x-3">
+                <div class="bg-accent p-1.5 rounded-xl w-10 h-10 flex items-center justify-center overflow-hidden shadow-lg shadow-accent/20">
+                    <img src="/static/images/lazyeasm-dark.png" alt="LazyEASM" class="dark:hidden w-full h-full object-contain">
+                    <img src="/static/images/lazyeasm-light.png" alt="LazyEASM" class="hidden dark:block w-full h-full object-contain">
+                </div>
+                <span class="text-xl font-bold tracking-tight text-white">LazyEasm<span class="text-secondary">.</span></span>
+            </a>
+            <div class="flex items-center space-x-3">
+                {% block header_actions %}{% endblock %}
+                <button type="button" onclick="toggleDarkMode()" aria-label="Toggle dark mode"
+                        class="w-10 h-10 flex items-center justify-center rounded-full bg-white/10 text-white hover:bg-white/20 transition-all border border-white/10">
+                    <i id="theme-icon" class="fas fa-moon"></i>
+                </button>
+                <a href="/logout" data-action="logout" title="Logout"
+                   class="w-10 h-10 flex items-center justify-center rounded-full bg-red-500/10 text-red-400 border border-red-500/20 hover:bg-red-500 hover:text-white transition-all md:w-auto md:px-4 md:py-2">
+                    <i class="fas fa-power-off md:mr-2"></i><span class="hidden md:inline">Logout</span>
+                </a>
+            </div>
+        </div>
+        <!-- Small screens: navigation as tabs under the header -->
+        <nav class="lg:hidden flex overflow-x-auto border-t border-white/10 px-2" aria-label="Main">
+            {% for key, href, icon, label in nav_items %}
+            <a href="{{ href }}" class="px-4 py-2.5 text-xs font-bold uppercase tracking-wider whitespace-nowrap {% if active_page == key %}text-accent border-b-2 border-accent{% else %}text-slate-300 hover:text-white{% endif %}"
+               {% if active_page == key %}aria-current="page"{% endif %}><i class="fas {{ icon }} mr-1.5"></i>{{ label }}</a>
+            {% endfor %}
+        </nav>
+    </header>
+
+    <!-- Large screens: sidebar -->
+    <aside class="hidden lg:flex fixed top-16 left-0 bottom-0 w-56 flex-col border-r border-border dark:border-white/5 bg-white/60 dark:bg-dark-card/60 backdrop-blur" aria-label="Main">
+        <nav class="p-4 space-y-1">
+            {% for key, href, icon, label in nav_items %}
+            <a href="{{ href }}" class="flex items-center px-4 py-2.5 rounded-xl text-sm font-semibold transition-colors {% if active_page == key %}bg-accent/15 text-accent{% else %}text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5{% endif %}"
+               {% if active_page == key %}aria-current="page"{% endif %}>
+                <i class="fas {{ icon }} w-5 mr-3 text-center"></i>{{ label }}
+            </a>
+            {% endfor %}
+        </nav>
+    </aside>
+
+    <main class="lg:pl-56 pt-28 lg:pt-16">
+        <div class="max-w-7xl mx-auto px-4 py-8">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                    <div class="mb-6 p-4 rounded-xl border flex items-center space-x-3 {% if category == 'success' %} bg-emerald-100 border-emerald-200 text-emerald-700 {% elif category == 'error' %} bg-red-100 border-red-200 text-red-700 {% elif category == 'warning' %} bg-amber-100 border-amber-200 text-amber-700 {% else %} bg-blue-100 border-blue-200 text-blue-700 {% endif %}" role="status">
+                        <i class="fas fa-circle-info"></i>
+                        <p class="flex-1 font-medium text-sm">{{ message }}</p>
+                        <button type="button" onclick="this.parentElement.remove()" class="opacity-50 hover:opacity-100" aria-label="Dismiss"><i class="fas fa-xmark"></i></button>
+                    </div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+
+            {% block content %}{% endblock %}
+        </div>
+    </main>
+
+    <div id="loadingOverlay" class="fixed inset-0 bg-lazy-dark/95 backdrop-blur-sm z-[100] hidden flex-col items-center justify-center">
+        <div class="relative">
+            <div class="w-20 h-20 border-4 border-secondary/20 border-t-secondary rounded-full animate-spin"></div>
+            <i class="fas fa-satellite absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 text-secondary text-xl"></i>
+        </div>
+        <h2 class="mt-6 text-xl font-bold tracking-widest uppercase text-white animate-pulse">Scanning Engine Active</h2>
+    </div>
+
+    <div id="actionModal" class="fixed inset-0 z-[200] hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="absolute inset-0 bg-black/60 dark:bg-black/80 backdrop-blur-sm" onclick="closeActionModal()"></div>
+        <div class="relative bg-white dark:bg-dark-card w-full max-w-sm rounded-3xl overflow-hidden shadow-2xl border border-border dark:border-white/5 transform transition-all scale-95 opacity-0" id="actionModalContent">
+            <div class="p-8 text-center">
+                <div id="modalIconContainer" class="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 text-2xl">
+                    <i id="modalIcon" class="fas fa-exclamation-triangle"></i>
+                </div>
+                <h3 id="modalTitle" class="text-xl font-bold text-slate-800 dark:text-white">Confirmation</h3>
+                <p id="modalDesc" class="text-slate-500 dark:text-slate-400 text-sm mt-2 leading-relaxed whitespace-pre-line">Are you sure?</p>
+            </div>
+            <div class="flex border-t border-border dark:border-white/5">
+                <button type="button" onclick="closeActionModal()" class="flex-1 py-4 text-sm font-bold text-slate-500 dark:text-slate-400 hover:bg-slate-50 dark:hover:bg-white/5 transition-colors border-r border-border dark:border-white/5">Cancel</button>
+                <button type="button" id="modalConfirmBtn" class="flex-1 py-4 text-sm font-bold transition-colors text-center">Confirm</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="toastContainer" class="fixed top-20 left-1/2 -translate-x-1/2 z-[300] space-y-2 pointer-events-none" aria-live="polite"></div>
+
+    <script src="/static/js/app.js"></script>
+    {% block scripts %}{% endblock %}
+</body>
+</html>

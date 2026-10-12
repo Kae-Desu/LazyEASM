@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.config import get_env
 from utils.env_manager import set_env_key, delete_env_key, get_env_key, get_config_for_ui, EDITABLE_KEYS, KEY_DEFAULTS
-from utils.db_utils import get_all_assets_for_display, get_db_connection, set_vulnerability_status, set_finding_status, get_changes, VULN_STATUSES
+from utils.db_utils import get_db_connection, set_vulnerability_status, set_finding_status, get_changes, VULN_STATUSES
 from utils.parsing import parse_input
 from utils.queue_manager import task_queue
 from utils.pipeline import enqueue_input_discovery, enqueue_assets_for_phase1, enqueue_single_asset_for_phase1
@@ -542,8 +542,6 @@ def inject_csrf_token():
 @app.route('/')
 @token_required
 def dashboard():
-    config = get_config_for_ui()
-    assets = get_all_assets_for_display()
     queue_status = task_queue.get_status()
     queue_active = task_queue.is_active()
     
@@ -561,8 +559,34 @@ def dashboard():
     phase2_queue = [dict(row) for row in cursor.fetchall()]
     conn.close()
     
-    return render_template('dashboard.html', assets=assets, config=config, queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue,
-                           changes=get_changes(limit=RECENT_CHANGES_LIMIT),
+    return render_template('dashboard.html', active_page='overview', queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue,
+                           changes=get_changes(limit=RECENT_CHANGES_LIMIT))
+
+
+@app.route('/assets')
+@token_required
+def assets_page():
+    """Paginated, filterable asset list (data from /api/assets)."""
+    return render_template('assets.html', active_page='assets')
+
+
+@app.route('/assets/<asset_type>/<int:asset_id>')
+@token_required
+def asset_detail_page(asset_type, asset_id):
+    try:
+        asset = get_asset_detail(asset_type, asset_id)
+    except AssetQueryError:
+        asset = None
+    if not asset:
+        flash("Asset not found.", "error")
+        return redirect(url_for('assets_page'))
+    return render_template('asset_detail.html', active_page='assets', asset=asset)
+
+
+@app.route('/settings')
+@token_required
+def settings_page():
+    return render_template('settings.html', active_page='settings', config=get_config_for_ui(),
                            schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss())
 
 
@@ -654,7 +678,7 @@ def save_scanning_settings_route():
         flash(f"Scanning settings updated: {', '.join(changed)}", "success")
     else:
         flash("No changes submitted.", "warning")
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('settings_page', _anchor='schedule'))
 
 
 @app.route('/change_password', methods=['POST'])
@@ -666,7 +690,7 @@ def change_password():
     blocked, _, remaining = is_rate_limited(client_ip)
     if blocked:
         flash(f"Too many failed attempts. Try again in {remaining} seconds.", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('settings_page', _anchor='account'))
 
     current = request.form.get('current_password', '')
     new = request.form.get('new_password', '')
@@ -676,23 +700,23 @@ def change_password():
     if not admin or not auth.verify_login(admin['username'], current):
         record_failed_login(client_ip, admin['username'] if admin else '')
         flash("Current password is incorrect.", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('settings_page', _anchor='account'))
     if new != confirm:
         flash("New passwords do not match.", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('settings_page', _anchor='account'))
     if new == current:
         flash("New password must be different from the current one.", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('settings_page', _anchor='account'))
     error = auth.validate_new_password(new, admin['username'])
     if error:
         flash(f"{error}.", "error")
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('settings_page', _anchor='account'))
 
     reset_failed_login(client_ip)
     version = auth.set_admin_password(admin['username'], new)
     logger.info("Admin password changed; all other sessions revoked")
     flash("Password changed. Other sessions have been signed out.", "success")
-    return issue_session(make_response(redirect(url_for('dashboard'))), admin['username'], version)
+    return issue_session(make_response(redirect(url_for('settings_page', _anchor='account'))), admin['username'], version)
 
 
 @app.route('/save_config', methods=['POST'])
@@ -739,7 +763,7 @@ def save_config():
     else:
         flash("No changes submitted.", "warning")
     
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('settings_page'))
 
 
 @app.route('/test_webhook', methods=['POST'])
@@ -752,7 +776,7 @@ def test_webhook_endpoint():
     else:
         flash(f"✗ {message}", "error")
     
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('settings_page', _anchor='notifications'))
 
 
 RECENT_CHANGES_LIMIT = 30
@@ -812,13 +836,6 @@ def export_data(dataset, fmt):
     response.headers['Content-Type'] = 'text/csv; charset=utf-8' if fmt == 'csv' else 'application/json'
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
-
-
-@app.route('/update_table')
-@token_required
-def update_table():
-    assets = get_all_assets_for_display()
-    return render_template('table_partial.html', assets=assets)
 
 
 @app.route('/update_queue')

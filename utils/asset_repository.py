@@ -14,6 +14,8 @@ from utils.db_utils import (
     _get_cves_for_host,
     _get_cves_for_ip,
     _get_directories_for_host,
+    _get_findings_for_host,
+    _get_recent_changes_for_host,
     _get_ips_for_domain,
     _get_ips_for_subdomain,
     _get_ports_for_domain,
@@ -40,6 +42,7 @@ SORT_COLUMNS = {
     "max_cvss": "max_cvss",
     "max_epss": "max_epss",
     "kev_count": "kev_count",
+    "finding_count": "finding_count",
 }
 
 
@@ -151,6 +154,13 @@ vuln_rollup AS (
     WHERE v.status = 'open'
     GROUP BY services.type, services.asset_id
 ),
+finding_rollup AS (
+    SELECT host, COUNT(*) AS finding_count,
+           MAX(CASE severity WHEN 'critical' THEN 4 WHEN 'high' THEN 3 WHEN 'medium' THEN 2
+                             WHEN 'low' THEN 1 ELSE 0 END) AS max_finding_severity
+    FROM findings WHERE status = 'open'
+    GROUP BY host
+),
 cert_rollup AS (
     SELECT hostname,
            MIN(CASE WHEN julianday(not_after) > julianday('now') THEN not_after END) AS active_not_after,
@@ -179,6 +189,9 @@ enriched AS (
            COALESCE(vr.max_cvss, 0) AS max_cvss,
            vr.max_epss AS max_epss,
            COALESCE(vr.kev_count, 0) AS kev_count,
+           COALESCE(fr.finding_count, 0) AS finding_count,
+           CASE fr.max_finding_severity WHEN 4 THEN 'critical' WHEN 3 THEN 'high' WHEN 2 THEN 'medium'
+                                        WHEN 1 THEN 'low' END AS max_finding_severity,
            cr.active_not_after AS certificate_not_after,
            CASE
              WHEN cr.active_not_after IS NOT NULL
@@ -199,6 +212,7 @@ enriched AS (
     LEFT JOIN service_rollup sr ON sr.type = a.type AND sr.asset_id = a.id
     LEFT JOIN tech_rollup tr ON tr.type = a.type AND tr.asset_id = a.id
     LEFT JOIN vuln_rollup vr ON vr.type = a.type AND vr.asset_id = a.id
+    LEFT JOIN finding_rollup fr ON fr.host = a.name
     LEFT JOIN cert_rollup cr ON cr.hostname = a.name
     LEFT JOIN latest_phase2 lp ON lp.target = a.name
 )
@@ -378,6 +392,13 @@ def get_asset_detail(asset_type: str, asset_id: int) -> Optional[dict]:
 
         asset["directories"] = _get_directories_for_host(cursor, asset["name"])
         asset["certificate"] = _get_cert_expiry(cursor, asset["name"])
+        asset["security_findings"] = _get_findings_for_host(cursor, asset["name"])
+        asset["history"] = _get_recent_changes_for_host(cursor, asset["name"], limit=200)
+        row = cursor.execute(
+            "SELECT status FROM scan_queue WHERE target = ? AND scan_type = 'phase2_deep_scan' "
+            "ORDER BY queued_at DESC, queue_id DESC LIMIT 1", (asset["name"],)
+        ).fetchone()
+        asset["phase2_status"] = row["status"] if row else None
         return asset
     finally:
         conn.close()

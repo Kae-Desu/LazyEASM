@@ -1,0 +1,202 @@
+{% extends 'base.html' %}
+{% block title %}Settings{% endblock %}
+
+{% set input_cls = 'w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-2.5 focus:ring-2 focus:ring-accent outline-none transition-all dark:text-white' %}
+{% set label_cls = 'text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1' %}
+
+{% macro field(key, label, hint='', placeholder='Leave empty') %}
+{% set item = config[key] %}
+<div class="space-y-1.5">
+    <label for="cfg-{{ key }}" class="{{ label_cls }}">{{ label }}</label>
+    <div class="relative">
+        <input id="cfg-{{ key }}" type="{{ item.type }}" name="{{ key }}" value="" autocomplete="off"
+               placeholder="{{ (item.masked if item.type == 'password' else item.value) if item.value else placeholder }}"
+               class="{{ input_cls }} pr-10">
+        {% if item.value %}
+        <button type="button" data-action="clear_field" data-field="{{ key }}" title="Delete this setting" aria-label="Delete {{ label }}"
+                class="absolute right-2 top-1/2 -translate-y-1/2 text-red-500 hover:text-red-700 transition-colors p-1"><i class="fas fa-trash-alt text-sm"></i></button>
+        {% endif %}
+    </div>
+    {% if hint %}<p class="text-[10px] text-slate-400 ml-1">{{ hint }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro choice(key, label, options, default, hint='') %}
+{% set current = config[key].value or default %}
+<div class="space-y-1.5">
+    <label for="cfg-{{ key }}" class="{{ label_cls }}">{{ label }}</label>
+    <select id="cfg-{{ key }}" name="{{ key }}" class="{{ input_cls }}">
+        {% for value, text in options %}
+        <option value="{{ value }}" {% if current == value %}selected{% endif %}>{{ text }}</option>
+        {% endfor %}
+    </select>
+    {% if hint %}<p class="text-[10px] text-slate-400 ml-1">{{ hint }}</p>{% endif %}
+</div>
+{% endmacro %}
+
+{% macro save_button() %}
+<button type="button" data-action="save" class="w-full sm:w-auto px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl transition-all shadow-lg hover:opacity-90">
+    <i class="fas fa-save mr-2"></i>Save
+</button>
+{% endmacro %}
+
+{% block content %}
+{% set tabs = [
+    ('general', 'fa-plug', 'General'),
+    ('ai', 'fa-robot', 'AI'),
+    ('notifications', 'fa-bell', 'Notifications'),
+    ('discovery', 'fa-satellite-dish', 'Discovery'),
+    ('schedule', 'fa-clock', 'Schedule & Thresholds'),
+    ('account', 'fa-key', 'Account'),
+] %}
+
+<h1 class="text-2xl font-bold mb-6 dark:text-white"><i class="fas fa-sliders-h mr-2 text-accent"></i>Settings</h1>
+
+<div class="grid lg:grid-cols-[200px_1fr] gap-6">
+    <div class="flex lg:flex-col gap-1 overflow-x-auto" role="tablist" aria-orientation="vertical">
+        {% for key, icon, label in tabs %}
+        <button type="button" role="tab" id="tab-{{ key }}" data-tab="{{ key }}" aria-controls="panel-{{ key }}"
+                class="tab-btn text-left whitespace-nowrap px-4 py-2.5 rounded-xl text-sm font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-white/5">
+            <i class="fas {{ icon }} w-5 mr-2 text-center"></i>{{ label }}
+        </button>
+        {% endfor %}
+    </div>
+
+    <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl p-6 min-w-0">
+        <!-- One form for every .env-backed setting; hidden panels still submit, empty fields are ignored -->
+        <form action="/save_config" method="POST" class="text-sm">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            {% for key in config %}
+            <input type="hidden" name="CLEAR_{{ key }}" value="0" id="clear_{{ key }}">
+            {% endfor %}
+
+            <section id="panel-general" role="tabpanel" aria-labelledby="tab-general" class="tab-panel space-y-4">
+                <h2 class="font-bold dark:text-white">General</h2>
+                {{ field('DISCORD_WEBHOOK_URL', 'Discord webhook URL') }}
+                {{ field('DISCORD_USER_ID', 'Discord user ID to ping (optional)') }}
+                <div class="grid sm:grid-cols-2 gap-4">
+                    {{ field('SECURITYTRAILS_API_KEY', 'SecurityTrails API key', 'Adds subdomain discovery results.') }}
+                    {{ field('NVD_API_KEY', 'NVD API key', 'Raises the NVD rate limit for CVE lookups.') }}
+                </div>
+                {{ save_button() }}
+            </section>
+
+            <section id="panel-ai" role="tabpanel" aria-labelledby="tab-ai" class="tab-panel hidden space-y-4">
+                <h2 class="font-bold dark:text-white">AI recommendations</h2>
+                {{ choice('AI_PROVIDER', 'AI provider', [('gemini', 'Google Gemini'), ('anthropic', 'Anthropic Claude'), ('openai', 'OpenAI'), ('openai_compatible', 'OpenAI-compatible (Ollama, vLLM, LM Studio...)')], 'gemini') }}
+                {{ field('AI_MODEL', 'Model (optional for Gemini / Claude)', 'Required for OpenAI and OpenAI-compatible endpoints.', 'Provider default') }}
+                {{ field('AI_BASE_URL', 'Base URL (OpenAI-compatible only)', 'Use a local model to keep findings on your network.', 'http://localhost:11434/v1') }}
+                <div class="grid sm:grid-cols-2 gap-4">
+                    {{ field('GEMINI_API_KEY', 'Gemini API key') }}
+                    {{ field('ANTHROPIC_API_KEY', 'Anthropic API key') }}
+                    {{ field('OPENAI_API_KEY', 'OpenAI API key') }}
+                </div>
+                {{ save_button() }}
+            </section>
+
+            <section id="panel-notifications" role="tabpanel" aria-labelledby="tab-notifications" class="tab-panel hidden space-y-4">
+                <h2 class="font-bold dark:text-white">Notifications</h2>
+                <p class="text-xs text-slate-500">Every configured channel receives every alert. Discord is set under General.</p>
+                {{ field('SLACK_WEBHOOK_URL', 'Slack webhook URL') }}
+                {{ field('NOTIFY_WEBHOOK_URL', 'Generic webhook URL (JSON POST)', '', 'https://example.com/hooks/lazyeasm') }}
+                {{ field('NOTIFY_WEBHOOK_SECRET', 'Webhook signing secret (optional)', 'Signs each body: X-LazyEASM-Signature: sha256=<HMAC>.') }}
+                <fieldset class="rounded-xl border border-border dark:border-white/10 p-4 space-y-4">
+                    <legend class="{{ label_cls }} px-1">Email (SMTP)</legend>
+                    <div class="grid sm:grid-cols-3 gap-4">
+                        <div class="sm:col-span-2">{{ field('SMTP_HOST', 'Host', '', 'smtp.example.com') }}</div>
+                        {{ field('SMTP_PORT', 'Port', '', '587') }}
+                    </div>
+                    {{ choice('SMTP_SECURITY', 'Security', [('starttls', 'STARTTLS'), ('ssl', 'SSL/TLS'), ('none', 'None')], 'starttls') }}
+                    <div class="grid sm:grid-cols-2 gap-4">
+                        {{ field('SMTP_USERNAME', 'Username') }}
+                        {{ field('SMTP_PASSWORD', 'Password') }}
+                    </div>
+                    {{ field('SMTP_FROM', 'From address', '', 'lazyeasm@example.com') }}
+                    {{ field('SMTP_TO', 'Recipients (comma separated)', '', 'secops@example.com') }}
+                </fieldset>
+                <div class="flex flex-wrap gap-3">
+                    {{ save_button() }}
+                    <button type="button" data-action="test_notification" class="px-6 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-bold py-2.5 rounded-xl border border-emerald-500/20 hover:bg-emerald-500/20">
+                        <i class="fas fa-paper-plane mr-2"></i>Send test notification
+                    </button>
+                </div>
+            </section>
+
+            <section id="panel-discovery" role="tabpanel" aria-labelledby="tab-discovery" class="tab-panel hidden space-y-4">
+                <h2 class="font-bold dark:text-white">Discovery</h2>
+                {{ choice('DNS_BRUTEFORCE', 'DNS brute force & permutations', [('true', 'Enabled'), ('false', 'Disabled')], 'true', 'Guesses common subdomain names and variations of known ones with DNS lookups. Skipped automatically on wildcard DNS. Applies from the next discovery run.') }}
+                {{ field('OTX_API_KEY', 'AlienVault OTX API key (optional)', 'Adds a passive DNS source.') }}
+                {{ save_button() }}
+            </section>
+        </form>
+
+        <section id="panel-schedule" role="tabpanel" aria-labelledby="tab-schedule" class="tab-panel hidden">
+            <form action="/save_scanning_settings" method="POST" class="space-y-4 text-sm">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <h2 class="font-bold dark:text-white">Schedule & thresholds</h2>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    {% for item in schedule %}
+                    <div class="space-y-1.5">
+                        <label for="{{ item.key }}" class="{{ label_cls }}">{{ item.label }} ({{ item.unit }})</label>
+                        <input type="number" id="{{ item.key }}" name="{{ item.key }}" value="{{ item.value }}" min="{{ item.min }}" max="{{ item.max }}" step="1" required class="{{ input_cls }}">
+                    </div>
+                    {% endfor %}
+                    <div class="space-y-1.5">
+                        <label for="cve_min_cvss" class="{{ label_cls }}">Minimum CVSS for CVE findings</label>
+                        <input type="number" id="cve_min_cvss" name="cve_min_cvss" value="{{ cve_min_cvss }}" min="0" max="10" step="0.1" required class="{{ input_cls }}">
+                    </div>
+                </div>
+                <p class="text-xs text-slate-400">Changes apply to the running worker within seconds; no restart needed. The CVSS minimum applies to the next scans; raising it does not close findings already recorded below it.</p>
+                <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-save mr-2"></i>Save schedule</button>
+            </form>
+        </section>
+
+        <section id="panel-account" role="tabpanel" aria-labelledby="tab-account" class="tab-panel hidden">
+            <form action="/change_password" method="POST" class="space-y-4 text-sm max-w-md">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <h2 class="font-bold dark:text-white">Change admin password</h2>
+                <div class="space-y-1.5">
+                    <label for="current_password" class="{{ label_cls }}">Current password</label>
+                    <input type="password" id="current_password" name="current_password" autocomplete="current-password" required class="{{ input_cls }}">
+                </div>
+                <div class="space-y-1.5">
+                    <label for="new_password" class="{{ label_cls }}">New password (min. 12 characters)</label>
+                    <input type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="12" required class="{{ input_cls }}">
+                </div>
+                <div class="space-y-1.5">
+                    <label for="confirm_password" class="{{ label_cls }}">Confirm new password</label>
+                    <input type="password" id="confirm_password" name="confirm_password" autocomplete="new-password" minlength="12" required class="{{ input_cls }}">
+                </div>
+                <p class="text-xs text-slate-400">Other signed-in sessions are signed out. Lost the password? Add ADMIN_PASS=... to .env and restart LazyEASM.</p>
+                <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-key mr-2"></i>Change password</button>
+            </form>
+        </section>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    (function () {
+        const buttons = document.querySelectorAll('.tab-btn');
+        function show(key) {
+            if (!document.getElementById(`panel-${key}`)) key = 'general';
+            buttons.forEach(btn => {
+                const active = btn.dataset.tab === key;
+                btn.setAttribute('aria-selected', active);
+                btn.classList.toggle('bg-accent/15', active);
+                btn.classList.toggle('text-accent', active);
+            });
+            document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('hidden', p.id !== `panel-${key}`));
+            try { localStorage.setItem('settingsTab', key); } catch (e) {}
+        }
+        buttons.forEach(btn => btn.addEventListener('click', () => {
+            show(btn.dataset.tab);
+            history.replaceState(null, '', `#${btn.dataset.tab}`);
+        }));
+        let saved = null;
+        try { saved = localStorage.getItem('settingsTab'); } catch (e) {}
+        show(location.hash.slice(1) || saved || 'general');
+    })();
+</script>
+{% endblock %}

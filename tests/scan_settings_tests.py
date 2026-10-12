@@ -93,12 +93,12 @@ class DashboardTests(ScanSettingsTestCase):
             return session.pop('_flashes', [])[0]
 
     def test_form_round_trip(self):
-        html = self.client.get('/').get_data(as_text=True)
+        html = self.client.get('/settings').get_data(as_text=True)
         self.assertIn('name="liveness_interval_min" value="5"', html)
         self.assertIn('name="cve_min_cvss" value="5.0"', html)
 
         self.assertEqual(self.post(discovery_interval_hr='12'), ('success', 'Scanning settings updated: Subdomain discovery'))
-        self.assertIn('name="discovery_interval_hr" value="12"', self.client.get('/').get_data(as_text=True))
+        self.assertIn('name="discovery_interval_hr" value="12"', self.client.get('/settings').get_data(as_text=True))
         self.assertEqual(self.post(discovery_interval_hr='12'), ('warning', 'No changes submitted.'))
         self.assertEqual(self.post(discovery_interval_hr='0')[0], 'error')
 

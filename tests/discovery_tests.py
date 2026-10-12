@@ -174,15 +174,9 @@ class DashboardToggleTests(unittest.TestCase):
         with patch.object(sd, 'make_resolver', return_value=FakeResolver(wildcard=True)):
             self.assertEqual(sd.active_subdomains('example.com')[1], {'active': 'skipped (wildcard DNS)'})
 
-    def test_dashboard_shows_current_value(self):
+    def test_settings_page_shows_current_value(self):
         self.env_file.write_text('DNS_BRUTEFORCE=false\n')
-        with patch.object(self.main, 'get_all_assets_for_display', return_value=[]), \
-             patch.object(self.main, 'get_changes', return_value=[]), \
-             patch.object(self.main.task_queue, 'get_status', return_value={'active': False}), \
-             patch.object(self.main.task_queue, 'is_active', return_value=False), \
-             patch.object(self.main, 'get_db_connection') as db:
-            db.return_value.cursor.return_value.fetchall.return_value = []
-            html = self.client.get('/').get_data(as_text=True)
+        html = self.client.get('/settings').get_data(as_text=True)
         self.assertRegex(html, r'<option value="false" selected>Disabled</option>')
 
 
