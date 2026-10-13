@@ -3,8 +3,9 @@
  *
  * Buttons declare what they do with data attributes instead of inline
  * JavaScript built from server data:
- *   data-action="deep_scan|cancel_scan|delete|clear_field|save|scan|logout|generate_ai|regenerate_ai"
+ *   data-action="deep_scan|cancel_scan|delete|clear_field|save|scan|logout|generate_ai|regenerate_ai|expand_domain"
  *   data-asset-id, data-asset-type, data-asset-name, data-redirect (after delete)
+ *   data-domain-id + data-csrf (expand_domain)
  *   data-field (clear_field), data-vuln-id + data-cve-id (AI)
  * Status selects use data-status-url and data-csrf.
  */
@@ -157,6 +158,26 @@ function openConfirmModal(type, extraData = null) {
                         if (!data.success) return showToast(data.error || 'Failed to queue scan', 'error');
                         showToast('Deep scan queued', 'success');
                         notifyDataChanged();
+                    })
+                    .catch(() => showToast('Request failed', 'error'));
+                closeActionModal();
+            }
+        },
+        expand_domain: {
+            icon: 'fa-up-right-and-down-left-from-center', color: 'bg-sky-500/10 text-sky-500',
+            btn: 'text-sky-500 hover:bg-sky-50 dark:hover:bg-sky-500/10',
+            title: 'Expand the whole domain?',
+            desc: `Every subdomain of ${name} found in certificate logs, passive DNS and DNS brute force will be scanned, and the domain monitored from now on.\n\nOnly continue if you are authorized to test all of ${name}.`,
+            action: () => {
+                fetch(`/api/domains/${encodeURIComponent(extraData.domainId)}/expand`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ csrf_token: extraData.csrf })
+                })
+                    .then(res => res.json())
+                    .then(data => {
+                        if (!data.success) return showToast(data.error || 'Failed to expand domain', 'error');
+                        showToast(`${name} queued for discovery`, 'success');
+                        setTimeout(() => { window.location.href = '/scans'; }, 800);
                     })
                     .catch(() => showToast('Request failed', 'error'));
                 closeActionModal();
@@ -328,6 +349,10 @@ document.addEventListener('click', (event) => {
         case 'delete':
             event.preventDefault(); event.stopPropagation();
             openConfirmModal(d.action, asset);
+            break;
+        case 'expand_domain':
+            event.preventDefault(); event.stopPropagation();
+            openConfirmModal('expand_domain', { ...asset, domainId: d.domainId, csrf: d.csrf });
             break;
         case 'clear_field':
             event.preventDefault();

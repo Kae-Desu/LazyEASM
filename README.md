@@ -89,6 +89,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 ## Features
 
 ### Phase 0: Asset Discovery
+- **Scope** - A submitted domain (`example.com`) is expanded: its subdomains are discovered, scanned and monitored. A submitted subdomain, IP or CIDR is scanned on its own; the parent of a subdomain is stored but not expanded, so access to one host never turns into scanning the whole organization. Expand it later from the subdomain's page (with a confirmation) or by submitting the domain
 - **Domain/Subdomain Discovery** - Passive: certificate transparency (CertSpotter first, crt.sh only as a fallback with a 30-minute cooldown after errors; optional `CERTSPOTTER_API_KEY` raises the quota), HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; toggle it in the dashboard (Configuration > Discovery) or with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
 - **IP/CIDR Handling** - Automatic expansion and liveness detection
 - **DNS Resolution** - Parallel resolution with configurable workers
@@ -450,6 +451,7 @@ All endpoints require authentication via JWT access token (cookie) unless noted.
 | `/api/assets/<type>/<id>` | GET | Required | Full details for one asset, loaded on demand |
 | `/api/findings` | GET | Required | CVEs (one row per host and CVE) and security findings across all assets, most urgent first. Params: `q`, `kind` (cve/finding), `severity`, `status` (open by default, or fixed/accepted/false_positive/all), `kev=1`, `identifier`, `host`, `sort` (urgency/newest/last_seen/host), `page`, `page_size` (max 100) |
 | `/api/findings/bulk_status` | POST | Required + CSRF | `{"items": [{"kind": "cve"\|"finding", "id": 1}], "status": "accepted", "note": "..."}`; up to 500 items, applied in one transaction |
+| `/api/domains/<id>/expand` | POST | Required + CSRF | Expand a domain stored only as the parent of a single submitted subdomain (queues discovery, `202`) |
 | `/api/vulnerabilities/<id>/status`, `/api/findings/<id>/status` | POST | Required + CSRF | Set the status of one CVE (all ports on that host) or finding |
 | `/process_assets` | POST | Required | Start Phase 0 processing |
 | `/delete_asset/<type>/<id>` | DELETE | Required | Delete an asset |

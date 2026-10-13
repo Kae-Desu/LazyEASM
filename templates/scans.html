@@ -21,7 +21,7 @@
         <div class="px-5 py-3 border-b border-border dark:border-white/5"><h2 class="{{ label }}"><i class="fas fa-crosshairs mr-2 text-accent"></i>Add targets</h2></div>
         <form action="/process_assets" method="POST" class="p-5 flex-grow flex flex-col gap-3">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <label for="asset-input" class="text-xs text-slate-500">Domains, subdomains, IPs or CIDRs, one per line. Discovery, scanning and monitoring start automatically.</label>
+            <label for="asset-input" class="text-xs text-slate-500">One target per line. A domain (<span class="font-mono">example.com</span>) is expanded: everything under it is discovered, scanned and monitored. A subdomain, IP or CIDR is scanned on its own.</label>
             <textarea id="asset-input" name="asset_input" class="w-full flex-grow min-h-[7rem] bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-secondary outline-none font-mono text-sm resize-y dark:text-white" placeholder="example.com"></textarea>
             {% if queue_status.active %}
             <p class="text-xs text-blue-500"><i class="fas fa-spinner fa-spin mr-1"></i>Scanning batch: {{ queue_status.running }} running, {{ queue_status.pending }} queued, {{ queue_status.completed }} done{% if queue_status.failed %}, {{ queue_status.failed }} failed{% endif %}</p>

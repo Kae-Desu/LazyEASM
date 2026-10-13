@@ -140,7 +140,7 @@ def enqueue_assets_for_phase1():
         rows = []
         rows += [(r['dom_id'], 'domain', r['domain_name']) for r in conn.execute('''
             SELECT dom_id, domain_name FROM domain_asset
-            WHERE status='up' AND last_scanned IS NULL
+            WHERE status='up' AND last_scanned IS NULL AND expand = 1
         ''')]
         rows += [(r['sub_id'], 'subdomain', r['subdomain_name']) for r in conn.execute('''
             SELECT sub_id, subdomain_name FROM subdomain_asset

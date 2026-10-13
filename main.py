@@ -769,6 +769,27 @@ def bulk_finding_status():
     return jsonify({'success': True, 'status': status, 'updated': updated})
 
 
+@app.route('/api/domains/<int:dom_id>/expand', methods=['POST'])
+@token_required
+@csrf_protected
+def expand_domain(dom_id):
+    """
+    Expand a domain that was only stored as the parent of a subdomain submitted
+    on its own: queue it for discovery like a submitted domain (202, job_id).
+    """
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT domain_name, expand FROM domain_asset WHERE dom_id = ?', (dom_id,)).fetchone()
+    finally:
+        conn.close()
+    if not row:
+        return jsonify({'success': False, 'error': 'Domain not found'}), 404
+    if row['expand']:
+        return jsonify({'success': False, 'error': f"{row['domain_name']} is already expanded"}), 409
+    job_id = enqueue_input_discovery({'domains': [row['domain_name']], 'subdomains': [], 'ips': [], 'cidrs': []})
+    return jsonify({'success': True, 'job_id': job_id, 'domain': row['domain_name']}), 202
+
+
 @app.route('/api/assets/<asset_type>/<int:asset_id>', methods=['GET'])
 @token_required
 def api_asset_detail(asset_type, asset_id):

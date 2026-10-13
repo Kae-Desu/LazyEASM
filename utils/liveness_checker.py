@@ -204,7 +204,7 @@ def get_liveness_summary() -> dict:
     summary = {'total': 0, 'up': 0, 'down': 0, 'unknown': 0}
     
     # Count domains
-    cursor.execute("SELECT status FROM domain_asset")
+    cursor.execute("SELECT status FROM domain_asset WHERE expand = 1")
     for row in cursor.fetchall():
         summary['total'] += 1
         status = row['status'] or 'unknown'

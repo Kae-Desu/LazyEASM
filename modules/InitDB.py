@@ -412,6 +412,12 @@ def init_db():
     if 'last_liveness_check' not in [col[1] for col in cursor.fetchall()]:
         cursor.execute("ALTER TABLE ip_asset ADD COLUMN last_liveness_check TEXT")
 
+    # Scope: a domain added only as the parent of a submitted subdomain is a
+    # container (expand = 0): not scanned, monitored or used for discovery
+    cursor.execute("PRAGMA table_info(domain_asset)")
+    if 'expand' not in [col[1] for col in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE domain_asset ADD COLUMN expand INTEGER DEFAULT 1")
+
     # Certificates are read from the services themselves (source 'tls'); rows
     # from CT logs were never accurate for expiry (renewed certificates stay
     # listed) and are no longer read, so they are removed

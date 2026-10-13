@@ -88,6 +88,7 @@ WITH asset_base AS (
            d.domain_name AS root_domain, d.status, d.first_seen, d.last_seen,
            d.last_scanned, d.last_deep_scan, d.last_wappalyzer_scan
     FROM domain_asset d
+    WHERE d.expand = 1          -- containers of single submitted subdomains are not assets
     UNION ALL
     SELECT s.sub_id AS id, s.subdomain_name AS name, 'subdomain' AS type,
            d.domain_name AS root_domain, s.status, s.first_seen, s.last_seen,
@@ -370,9 +371,9 @@ def get_asset_detail(asset_type: str, asset_id: int) -> Optional[dict]:
     try:
         cursor = conn.cursor()
         if asset_type == "domain":
-            cursor.execute("SELECT d.*, d.dom_id AS id, d.domain_name AS name, d.domain_name AS root_domain FROM domain_asset d WHERE d.dom_id = ?", (asset_id,))
+            cursor.execute("SELECT d.*, d.dom_id AS id, d.domain_name AS name, d.domain_name AS root_domain FROM domain_asset d WHERE d.dom_id = ? AND d.expand = 1", (asset_id,))
         elif asset_type == "subdomain":
-            cursor.execute("SELECT s.*, s.sub_id AS id, s.subdomain_name AS name, d.domain_name AS root_domain FROM subdomain_asset s LEFT JOIN domain_asset d ON d.dom_id = s.dom_id WHERE s.sub_id = ?", (asset_id,))
+            cursor.execute("SELECT s.*, s.sub_id AS id, s.subdomain_name AS name, d.domain_name AS root_domain, d.dom_id AS root_dom_id, d.expand AS root_expanded FROM subdomain_asset s LEFT JOIN domain_asset d ON d.dom_id = s.dom_id WHERE s.sub_id = ?", (asset_id,))
         else:
             cursor.execute("SELECT i.*, i.ip_id AS id, i.ip_value AS name, NULL AS root_domain FROM ip_asset i WHERE i.ip_id = ?", (asset_id,))
 

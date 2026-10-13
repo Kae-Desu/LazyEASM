@@ -93,23 +93,24 @@ class ManualCheckTests(TempDbTestCase):
 
 class MonitorLockTests(unittest.TestCase):
     def test_manual_and_scheduled_runs_do_not_overlap(self):
-        active, overlaps = [0], []
+        active, overlaps, runs = [0], [], []
 
         def slow():
             active[0] += 1
+            runs.append(1)
             if active[0] > 1:
                 overlaps.append(True)
             time.sleep(0.1)
             active[0] -= 1
 
         monitors = {'intel': ('intel_interval_hr', 24, 3600, slow)}
-        with patch.object(phase3_worker, 'MONITORS', monitors):
+        with patch.object(phase3_worker, 'MONITORS', monitors), patch('utils.db_utils.set_setting'):
             threads = [threading.Thread(target=phase3_worker.run_monitor, args=('intel',)) for _ in range(3)]
             for t in threads:
                 t.start()
             for t in threads:
                 t.join()
-        self.assertEqual(overlaps, [])
+        self.assertEqual((len(runs), overlaps), (3, []))
         with self.assertRaises(ValueError):
             phase3_worker.run_monitor('bogus')
 

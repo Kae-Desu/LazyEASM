@@ -287,6 +287,44 @@ def upsert_domain(domain_name: str, is_wildcard: int = 0, wildcard_ip: str = Non
         conn.close()
 
 
+def add_container_domain(domain_name: str) -> int:
+    """
+    The parent of a subdomain submitted on its own: stored so the subdomain
+    has a parent, but not expanded (no discovery, scans or monitoring of the
+    domain itself). Returns dom_id; an existing domain is left as it is.
+    """
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (domain_name,)).fetchone()
+        if row:
+            return row['dom_id']
+        cursor = conn.execute('''
+            INSERT INTO domain_asset (domain_name, first_seen, status, expand) VALUES (?, ?, 'up', 0)
+        ''', (domain_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def is_domain_expanded(domain_name: str) -> bool:
+    conn = get_db_connection()
+    try:
+        row = conn.execute('SELECT expand FROM domain_asset WHERE domain_name = ?', (domain_name,)).fetchone()
+        return bool(row and row['expand'])
+    finally:
+        conn.close()
+
+
+def set_domain_expanded(dom_id: int) -> None:
+    conn = get_db_connection()
+    try:
+        conn.execute('UPDATE domain_asset SET expand = 1 WHERE dom_id = ?', (dom_id,))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def upsert_subdomain(subdomain_name: str, dom_id: int, status: str = 'up') -> int:
     """
     Insert new subdomain or update existing. Returns sub_id.
@@ -1146,11 +1184,11 @@ def set_finding_status(finding_id: int, status: str, note: str = None) -> int:
 
 
 def get_hostnames_for_takeover_check() -> list:
-    """All domain and subdomain names, regardless of liveness status."""
+    """All expanded domain and subdomain names, regardless of liveness status."""
     conn = get_db_connection()
     try:
         rows = conn.execute('''
-            SELECT domain_name AS name FROM domain_asset
+            SELECT domain_name AS name FROM domain_asset WHERE expand = 1
             UNION
             SELECT subdomain_name AS name FROM subdomain_asset
         ''').fetchall()
@@ -2593,7 +2631,7 @@ def get_all_assets_for_liveness() -> list:
     # Get domains
     cursor.execute('''
         SELECT dom_id as asset_id, 'domain' as asset_type, domain_name as name, status, last_liveness_check
-        FROM domain_asset
+        FROM domain_asset WHERE expand = 1
     ''')
     assets.extend([dict(row) for row in cursor.fetchall()])
     
@@ -2659,7 +2697,8 @@ def get_all_monitored_domains() -> list:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    cursor.execute('SELECT domain_name FROM domain_asset')
+    # Containers (parents of subdomains submitted on their own) are not expanded
+    cursor.execute('SELECT domain_name FROM domain_asset WHERE expand = 1')
     domains = [row['domain_name'] for row in cursor.fetchall()]
     
     conn.close()

@@ -46,6 +46,7 @@ from utils.db_utils import (
     upsert_domain, upsert_subdomain, upsert_ip,
     create_subdomain_resolution, create_domain_resolution,
     update_domain_status, update_subdomain_status, update_ip_status,
+    add_container_domain, is_domain_expanded, set_domain_expanded,
     log_scan
 )
 from utils.utility import (
@@ -249,8 +250,9 @@ class Phase1Expander:
             stats['subdomains_discovered'] = len(subdomains)
             stats['subdomains_new'] = len(new_subdomains)
             
-            # 3. Add root domain to DB
+            # 3. Add root domain to DB (or expand an existing container)
             dom_id = upsert_domain(domain, status='pending')
+            set_domain_expanded(dom_id)
             self.stats['domains_added'] += 1
             
             # 4. DNS resolve root domain itself
@@ -528,6 +530,12 @@ class Phase1Expander:
         logger.info(f"CIDRs: {len(targets.get('cidrs', []))}")
         logger.info("=" * 60)
         
+        # Scope: a submitted domain is expanded (everything under it is
+        # discovered, scanned and monitored); a submitted subdomain is scanned
+        # on its own. Its parent is only stored as a container, so access to
+        # one host never turns into scanning the whole organization.
+        single_hosts = list(targets.get('subdomains', []))
+        
         # 1. Process domains
         for domain in targets.get('domains', []):
             domain = normalize_hostname(domain)
@@ -535,42 +543,32 @@ class Phase1Expander:
                 continue
             
             root = extract_root_domain(domain)
+            if domain != root:
+                single_hosts.append(domain)   # a subdomain typed as a domain
+                continue
             
-            if domain_exists(root):
-                # Root exists, just add domain as new entry
-                if domain == root:
-                    logger.info(f"Domain {domain} already exists, skipping")
-                else:
-                    # It's a subdomain being added as domain
-                    logger.info(f"Root domain {root} exists, skipping expansion")
-                    # Could add domain to domain_asset if needed
+            if is_domain_expanded(root):
+                logger.info(f"Domain {domain} already exists, skipping")
             else:
-                # New root domain - expand via CTLogs + SecurityTrails
+                # New domain, or the container of an earlier single subdomain
                 result = self.process_domain(root)
                 self.stats['subdomains_discovered'] += result.get('subdomains_discovered', 0)
                 self.stats['subdomains_new'] += result.get('subdomains_new', 0)
                 self.stats['ips_resolved'] += result.get('ips_resolved', 0)
                 time.sleep(self.rate_limit_delay)
         
-        # 2. Process subdomains (when root exists)
-        for subdomain in targets.get('subdomains', []):
+        # 2. Process subdomains: only the host itself
+        for subdomain in single_hosts:
             subdomain = normalize_hostname(subdomain)
             if not subdomain:
                 continue
             
             root = extract_root_domain(subdomain)
-            
-            if domain_exists(root):
-                # Root exists, add subdomain only
-                result = self.process_subdomain(subdomain, root)
-                self.stats['subdomains_new'] += 1
-                self.stats['ips_resolved'] += result.get('ips_resolved', 0)
-            else:
-                # Root doesn't exist, add root and expand
-                result = self.process_domain(root)
-                self.stats['subdomains_discovered'] += result.get('subdomains_discovered', 0)
-                self.stats['subdomains_new'] += result.get('subdomains_new', 0)
-                self.stats['ips_resolved'] += result.get('ips_resolved', 0)
+            if not domain_exists(root):
+                add_container_domain(root)
+            result = self.process_subdomain(subdomain, root)
+            self.stats['subdomains_new'] += 1
+            self.stats['ips_resolved'] += result.get('ips_resolved', 0)
         
         # 3. Process IPs
         for ip in targets.get('ips', []):
