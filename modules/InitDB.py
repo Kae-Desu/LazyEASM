@@ -294,7 +294,7 @@ def init_db():
     # Insert default settings
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('phase3_enabled', '1', 'Enable Phase 3 continuous monitoring')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('liveness_interval_min', '5', 'Liveness check interval in minutes')")
-    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('ctlogs_interval_hr', '1', 'CT logs polling interval in hours')")
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('ctlogs_interval_hr', '6', 'Certificates & CT logs interval in hours')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_liveness_check', NULL, 'Last liveness check timestamp')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('last_ctlogs_check', NULL, 'Last CT logs check timestamp')")
     cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES ('wappalyzer_interval_hr', '24', 'Wappalyzer re-scan interval in hours')")
@@ -411,6 +411,23 @@ def init_db():
     cursor.execute("PRAGMA table_info(ip_asset)")
     if 'last_liveness_check' not in [col[1] for col in cursor.fetchall()]:
         cursor.execute("ALTER TABLE ip_asset ADD COLUMN last_liveness_check TEXT")
+
+    # Certificates are read from the services themselves (source 'tls'); rows
+    # from CT logs were never accurate for expiry (renewed certificates stay
+    # listed) and are no longer read, so they are removed
+    cursor.execute("PRAGMA table_info(certificates)")
+    cert_columns = [col[1] for col in cursor.fetchall()]
+    for column in ('port INTEGER', 'last_seen TEXT', 'replaced_at TEXT'):
+        if column.split()[0] not in cert_columns:
+            cursor.execute(f"ALTER TABLE certificates ADD COLUMN {column}")
+    cursor.execute("DELETE FROM certificates WHERE source = 'ctlogs'")
+    # The CT poll default moved from 1 to 6 hours (hourly polling is what makes
+    # crt.sh return 502s); move installs still on the old default, once
+    if not cursor.execute("SELECT 1 FROM settings WHERE key = 'ctlogs_default_moved_to_6h'").fetchone():
+        cursor.execute("UPDATE settings SET value = '6' WHERE key = 'ctlogs_interval_hr' AND value = '1'")
+        cursor.execute("INSERT INTO settings (key, value, description) VALUES ('ctlogs_default_moved_to_6h', '1', 'Migration marker')")
+    cursor.execute("DELETE FROM cert_notifications WHERE cert_id NOT IN (SELECT cert_id FROM certificates)")
+    cursor.execute("CREATE INDEX IF NOT EXISTS idx_certificates_served ON certificates(hostname, port, source, replaced_at)")
 
     # Add last_wappalyzer_scan column to domain_asset and subdomain_asset
     if 'last_wappalyzer_scan' not in domain_columns:

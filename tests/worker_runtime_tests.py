@@ -196,7 +196,7 @@ class MonitorLoopTests(unittest.TestCase):
         settings = {'phase3_enabled': '0', 'test_interval': '3600'}
         calls = []
         monitors = {'testcheck': ('test_interval', 3600, 1, lambda: calls.append(1))}
-        with patch.object(phase3_worker, 'POLL_SECONDS', 0.02),              patch.object(phase3_worker, 'MONITORS', monitors),              patch.object(phase3_worker, '_phase3_running', True),              patch('utils.db_utils.get_setting', side_effect=lambda key: settings.get(key)):
+        with patch.object(phase3_worker, 'POLL_SECONDS', 0.02),              patch.object(phase3_worker, 'MONITORS', monitors),              patch.object(phase3_worker, '_phase3_running', True),              patch('utils.db_utils.get_setting', side_effect=lambda key: settings.get(key)),              patch('utils.db_utils.set_setting', side_effect=settings.__setitem__):
             thread = threading.Thread(target=phase3_worker._monitor_loop, args=('test', 'testcheck'), daemon=True)
             thread.start()
             time.sleep(0.2)
@@ -209,6 +209,23 @@ class MonitorLoopTests(unittest.TestCase):
 
             settings['test_interval'] = '1'       # changed in the dashboard
             self.assertTrue(wait_for(lambda: len(calls) == 2, timeout=3))  # new interval applies live
+            phase3_worker._phase3_running = False
+        thread.join(timeout=2)
+
+    def test_restart_does_not_rerun_checks_that_ran_recently(self):
+        settings = {'phase3_enabled': '1', 'test_interval': '3600',
+                    'monitor_last_run_testcheck': str(int(time.time()) - 60)}   # ran a minute ago
+        calls = []
+        monitors = {'testcheck': ('test_interval', 3600, 1, lambda: calls.append(1))}
+        with patch.object(phase3_worker, 'POLL_SECONDS', 0.02), patch.object(phase3_worker, 'MONITORS', monitors),              patch.object(phase3_worker, '_phase3_running', True),              patch('utils.db_utils.get_setting', side_effect=lambda key: settings.get(key)),              patch('utils.db_utils.set_setting', side_effect=settings.__setitem__):
+            thread = threading.Thread(target=phase3_worker._monitor_loop, args=('test', 'testcheck'), daemon=True)
+            thread.start()
+            time.sleep(0.2)
+            self.assertEqual(calls, [])           # a fresh worker waits for the interval
+
+            settings['monitor_last_run_testcheck'] = str(int(time.time()) - 4000)
+            self.assertTrue(wait_for(lambda: len(calls) == 1, timeout=2))
+            self.assertGreater(float(settings['monitor_last_run_testcheck']), time.time() - 5)
             phase3_worker._phase3_running = False
         thread.join(timeout=2)
 

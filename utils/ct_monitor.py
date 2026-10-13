@@ -1,8 +1,11 @@
 """
-CT Logs Monitor - Poll crt.sh for new certificates/subdomains.
+Certificates & CT logs monitor (Phase 3, default every 6 hours).
 
-Phase 3 continuous monitoring component.
-Runs every 1 hour to check for new subdomains and certificate expiry.
+    1. CT logs: new subdomains of every monitored domain (CertSpotter, crt.sh
+       as fallback; see utils/subdomain_discovery.py), queued for discovery
+    2. Served certificates: the certificate every HTTPS service presents
+       (utils/tls_certs.py); a replaced certificate is a 'certificate_changed'
+    3. Expiry alerts at 7, 5, 3 and 1 days, from served certificates only
 
 Exports:
     - poll_all_domains() -> dict summary for notification
@@ -10,472 +13,164 @@ Exports:
 
 import logging
 import time
-import requests
-from datetime import datetime, timedelta, timezone
-from typing import List, Dict, Set
-from utils.db_utils import is_cert_notified, get_db_connection
+from datetime import datetime, timezone
+from typing import Dict, List
+
+from utils.db_utils import SERVED_CERT, get_db_connection, is_cert_notified
 
 logger = logging.getLogger(__name__)
 
-CTLOGS_URL = "https://crt.sh/json?q={domain}"
+EXPIRY_THRESHOLDS = (7, 5, 3, 1)
 
 
-def _cleanup_expired_certs(days_expired: int = 90) -> int:
-    """
-    Delete certificates that expired more than days_expired days ago.
-    Also removes associated cert_notifications entries.
-    
-    Args:
-        days_expired: Delete certs expired more than this many days (default 90)
-    
-    Returns:
-        Number of certificates deleted
-    """
+def _days_left(not_after: str, now: datetime) -> int:
+    expires = datetime.strptime(not_after[:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+    return int((expires - now).total_seconds() // 86400)
+
+
+def _cleanup_old_certs(days_expired: int = 90) -> int:
+    """Delete replaced certificates that expired more than days_expired days ago."""
     conn = get_db_connection()
-    cursor = conn.cursor()
     try:
-        cursor.execute('''
+        cursor = conn.execute('''
             DELETE FROM certificates
-            WHERE julianday('now') - julianday(not_after) > ?
+            WHERE replaced_at IS NOT NULL AND julianday('now') - julianday(not_after) > ?
         ''', (days_expired,))
         deleted = cursor.rowcount
-        
-        if deleted > 0:
-            cursor.execute('''
-                DELETE FROM cert_notifications
-                WHERE cert_id NOT IN (SELECT cert_id FROM certificates)
-            ''')
-            conn.commit()
-            logger.info(f"Cleaned up {deleted} certificates expired more than {days_expired} days ago")
-        else:
-            conn.commit()
-        
+        if deleted:
+            conn.execute('DELETE FROM cert_notifications WHERE cert_id NOT IN (SELECT cert_id FROM certificates)')
+            logger.info(f"Cleaned up {deleted} replaced certificates expired more than {days_expired} days ago")
+        conn.commit()
         return deleted
-    except Exception as e:
-        logger.error(f"Failed to cleanup expired certs: {e}")
-        conn.rollback()
-        return 0
     finally:
         conn.close()
 
 
-def fetch_ctlogs(domain: str) -> tuple:
-    """
-    Fetch CT logs from crt.sh for a domain.
-    
-    Reuses logic from modules/ExpandAsset.py.
-    
-    Args:
-        domain: Root domain (e.g., 'example.com')
-    
-    Returns:
-        (subdomains list, certificates list)
-    """
-    url = CTLOGS_URL.format(domain=domain)
-    domain_lower = domain.lower()
-    subdomains = set()
-    certificates = []
-    
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            response = requests.get(url, timeout=60)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                for entry in data:
-                    # Common name
-                    if 'common_name' in entry:
-                        cn = entry['common_name'].lower()
-                        if cn.endswith('.' + domain_lower) or cn == domain_lower:
-                            subdomains.add(cn)
-                    
-                    # Subject Alternative Names
-                    if 'name_value' in entry:
-                        for name in entry['name_value'].split('\n'):
-                            name = name.strip().lower()
-                            if name.endswith('.' + domain_lower) or name == domain_lower:
-                                subdomains.add(name)
-                    
-                    # Certificate info
-                    hostname = entry.get('common_name', '').lower()
-                    not_after = entry.get('not_after')
-                    
-                    if hostname and not_after:
-                        if hostname.endswith('.' + domain_lower) or hostname == domain_lower:
-                            certificates.append({
-                                'hostname': hostname,
-                                'issuer': entry.get('issuer_name', ''),
-                                'not_before': entry.get('not_before'),
-                                'not_after': not_after,
-                                'serial_number': entry.get('serial_number')
-                            })
-                
-                break
-            
-            elif response.status_code == 503:
-                logger.warning(f"crt.sh returned 503 for {domain}, retrying...")
-                time.sleep(2 ** attempt)
-            else:
-                logger.warning(f"crt.sh returned {response.status_code} for {domain}")
-                break
-        
-        except requests.exceptions.Timeout:
-            logger.warning(f"crt.sh timeout for {domain} (attempt {attempt + 1}/{max_retries})")
-            if attempt < max_retries - 1:
-                time.sleep(2 ** attempt)
-        except requests.exceptions.RequestException as e:
-            logger.error(f"crt.sh request error for {domain}: {e}")
-            break
-    
-    return list(subdomains), certificates
-
-
 def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
     """
-    Check certs at 7, 5, 3, 1 day thresholds.
-    Excludes certs already notified at each threshold.
-    
+    Served certificates exactly 7, 5, 3 or 1 days from expiry that were not
+    yet notified at that threshold.
+
     Returns:
-        {
-            7: [{'cert_id': int, 'hostname': str}, ...],
-            5: [...],
-            3: [...],
-            1: [...]
-        }
+        {7: [{'cert_id': int, 'hostname': str}, ...], 5: [...], 3: [...], 1: [...]}
     """
-    from utils.db_utils import get_db_connection
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
     now = datetime.now(timezone.utc)
-    thresholds = [7, 5, 3, 1]
-    results = {t: [] for t in thresholds}
-    
-    cursor.execute('''
-        SELECT cert_id, hostname, not_after
-        FROM certificates
-        ORDER BY not_after ASC
-    ''')
-    
-    for row in cursor.fetchall():
-        try:
-            not_after_str = row['not_after']
-            
-            if 'T' in not_after_str:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
-            else:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-            
-            days_remaining = int((not_after - now).total_seconds() / 86400)
-            
-            if days_remaining < 0:
-                continue
-            
-            for threshold in thresholds:
-                if days_remaining == threshold and not is_cert_notified(row['cert_id'], threshold):
-                    results[threshold].append({
-                        'cert_id': row['cert_id'],
-                        'hostname': row['hostname']
-                    })
-        except Exception:
-            continue
-    
-    conn.close()
-    return results
-
-
-def check_cert_signature_changes(certificates: List[Dict]) -> List[Dict]:
-    """
-    Check for certificate signature changes by comparing with DB.
-    
-    Args:
-        certificates: List of certificates from CT logs
-    
-    Returns:
-        List of signature changes [{'hostname', 'old_serial', 'new_serial', 'not_after'}, ...]
-    """
-    from utils.db_utils import get_db_connection
-    
-    signature_changes = []
+    results = {t: [] for t in EXPIRY_THRESHOLDS}
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    for cert in certificates:
-        hostname = cert.get('hostname', '')
-        not_after = cert.get('not_after', '')
-        new_serial = cert.get('serial_number', '')
-        
-        if not hostname or not not_after:
+    try:
+        rows = conn.execute(f'SELECT cert_id, hostname, not_after FROM certificates WHERE {SERVED_CERT}').fetchall()
+    finally:
+        conn.close()
+    for row in rows:
+        try:
+            days = _days_left(row['not_after'], now)
+        except (TypeError, ValueError):
             continue
-        
-        # Find existing cert in DB with same hostname and not_after
-        cursor.execute('''
-            SELECT serial_number, fingerprint FROM certificates 
-            WHERE hostname = ? AND not_after = ?
-        ''', (hostname, not_after))
-        
-        existing = cursor.fetchone()
-        
-        if existing:
-            old_serial = existing['serial_number']
-            old_fingerprint = existing['fingerprint']
-            new_fingerprint = cert.get('fingerprint', '')
-            
-            # Check if signature changed
-            if old_serial and new_serial and old_serial != new_serial:
-                signature_changes.append({
-                    'hostname': hostname,
-                    'old_serial': old_serial,
-                    'new_serial': new_serial,
-                    'not_after': not_after
-                })
-                logger.info(f"Certificate signature changed for {hostname}: {old_serial[:16]}... -> {new_serial[:16]}...")
-            elif old_fingerprint and new_fingerprint and old_fingerprint != new_fingerprint:
-                signature_changes.append({
-                    'hostname': hostname,
-                    'old_serial': old_serial or 'N/A',
-                    'new_serial': new_serial or 'N/A',
-                    'not_after': not_after
-                })
-                logger.info(f"Certificate fingerprint changed for {hostname}")
-    
-    conn.close()
-    return signature_changes
+        if days in results and not is_cert_notified(row['cert_id'], days):
+            results[days].append({'cert_id': row['cert_id'], 'hostname': row['hostname']})
+    return results
 
 
 def poll_all_domains() -> Dict:
     """
-    Poll all monitored domains for new subdomains, cert expiry, and signature changes.
-    
+    Run all three steps.
+
     Returns:
         {
             'new_subdomains': [(domain, subdomain), ...],
             'expiry_alerts': {7: [{cert_id, hostname}, ...], 5: [...], 3: [...], 1: [...]},
-            'signature_changes': [{'hostname', 'old_serial', 'new_serial'}, ...]
+            'certificate_changes': [{'hostname', 'port', 'summary'}, ...],
+            'ct_errors': {domain: error}
         }
     """
-    from utils.db_utils import (
-        get_all_monitored_domains,
-        get_known_subdomains,
-        queue_subdomain_discovery,
-        set_setting
-    )
-    
+    from utils.db_utils import get_all_monitored_domains, get_known_subdomains, queue_subdomain_discovery, set_setting
+    from utils.subdomain_discovery import SourceError, from_ct_logs, in_scope
+    from utils.tls_certs import refresh_served_certificates
+
+    new_subdomains, ct_errors = [], {}
     domains = get_all_monitored_domains()
-    
-    if not domains:
-        logger.info("No domains to monitor")
-        return {'new_subdomains': [], 'expiry_alerts': {}, 'signature_changes': []}
-    
-    logger.info(f"Polling CT logs for {len(domains)} domains")
-    
-    known_subdomains = get_known_subdomains()
-    new_subdomains = []
-    all_certificates = []
-    
-    for domain in domains:
-        logger.debug(f"Fetching CT logs for {domain}")
-        
-        subdomains, certificates = fetch_ctlogs(domain)
-        all_certificates.extend(certificates)
-        
-        # Find new subdomains
-        for subdomain in subdomains:
-            # Skip wildcards (*.example.com)
-            if subdomain.startswith('*.'):
-                logger.debug(f"Skipping wildcard: {subdomain}")
+    if domains:
+        logger.info(f"Polling CT logs for {len(domains)} domains")
+        known = get_known_subdomains()
+        for domain in domains:
+            try:
+                names = {n for n in (in_scope(raw, domain) for raw in from_ct_logs(domain)) if n}
+            except (SourceError, ValueError) as e:
+                ct_errors[domain] = str(e)
+                logger.warning(f"CT logs unavailable for {domain}: {e}")
                 continue
-            
-            # Skip if it's the root domain itself
-            if subdomain == domain:
-                logger.debug(f"Skipping root domain: {subdomain}")
-                continue
-            
-            if subdomain not in known_subdomains:
-                # Queue for Phase 0
-                queue_subdomain_discovery(subdomain, domain)
-                new_subdomains.append((domain, subdomain))
-                known_subdomains.add(subdomain)  # Avoid duplicates
-        
-        time.sleep(1)  # Rate limiting
-    
-    # Store certificates in database
-    from utils.db_utils import upsert_certificate
-    
-    certs_stored = 0
-    for cert in all_certificates:
-        try:
-            result = upsert_certificate(
-                hostname=cert.get('hostname', ''),
-                issuer=cert.get('issuer'),
-                not_before=cert.get('not_before'),
-                not_after=cert.get('not_after'),
-                serial_number=cert.get('serial_number'),
-                source='ctlogs'
-            )
-            if result.get('is_new'):
-                certs_stored += 1
-        except Exception as e:
-            logger.warning(f"Failed to store certificate for {cert.get('hostname')}: {e}")
-    
-    if certs_stored > 0:
-        logger.info(f"Stored {certs_stored} new certificates")
-    
-    # Clean up long-expired certificates (expired > 90 days)
-    _cleanup_expired_certs()
-    
-    # Check certificate expiry
+            for name in sorted(names - known):
+                queue_subdomain_discovery(name, domain)
+                new_subdomains.append((domain, name))
+                known.add(name)
+            time.sleep(1)  # be gentle with the CT services
+
+    certificates = refresh_served_certificates()
+    _cleanup_old_certs()
     expiry_alerts = check_certificate_expiry_thresholds()
-    
-    # Check certificate signature changes
-    signature_changes = check_cert_signature_changes(all_certificates)
-    from utils.db_utils import record_change
-    for change in signature_changes:
-        record_change(change['hostname'], 'certificate_changed', 'Certificate replaced (new serial number)',
-                      {'old_serial': change.get('old_serial'), 'new_serial': change.get('new_serial'),
-                       'not_after': change.get('not_after')})
-    
-    # Update last check timestamp
+
     set_setting('last_ctlogs_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
-    
-    total_alerts = sum(len(certs) for certs in expiry_alerts.values())
     logger.info(
-        f"CT logs poll complete: "
-        f"{len(new_subdomains)} new subdomains, "
-        f"{total_alerts} cert expiry alerts, "
-        f"{len(signature_changes)} signature changes"
+        f"Certificates & CT logs: {len(new_subdomains)} new subdomains, "
+        f"{len(certificates['changed'])} certificates replaced, "
+        f"{sum(len(c) for c in expiry_alerts.values())} expiry alerts, "
+        f"CT logs failed for {len(ct_errors)} of {len(domains)} domains"
     )
-    
     return {
         'new_subdomains': new_subdomains,
         'expiry_alerts': expiry_alerts,
-        'signature_changes': signature_changes
+        'certificate_changes': certificates['changed'],
+        'ct_errors': ct_errors,
     }
 
 
 def get_cert_expiry_summary() -> Dict:
     """
-    Get summary of certificate expiry status (per unique hostname).
-    
-    For each hostname, uses the soonest-expiring active cert to determine bucket.
-    
+    Served certificates per hostname (soonest-expiring if its ports differ).
+
     Returns:
-        {
-            'expired': int,
-            'expiring_3_days': int,
-            'expiring_7_days': int,
-            'expiring_30_days': int,
-            'total_certs': int
-        }
+        {'expired', 'expiring_3_days', 'expiring_7_days', 'expiring_30_days', 'total_certs'}
+        (the expiring buckets are cumulative)
     """
-    from utils.db_utils import get_db_connection
-    
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
     now = datetime.now(timezone.utc)
-    
-    cursor.execute('''
-        SELECT hostname, MIN(not_after) as soonest
-        FROM certificates
-        WHERE julianday(not_after) > julianday('now')
-          AND hostname IN (
-            SELECT domain_name FROM domain_asset
-            UNION
-            SELECT subdomain_name FROM subdomain_asset
-          )
-        GROUP BY hostname
-    ''')
-    
-    expired = 0
-    expiring_3_days = 0
-    expiring_7_days = 0
-    expiring_30_days = 0
-    
-    for row in cursor.fetchall():
-        try:
-            not_after_str = row['soonest']
-            
-            if 'T' in not_after_str:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
-            else:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-            
-            days_remaining = int((not_after - now).total_seconds() / 86400)
-            
-            if days_remaining <= 0:
-                expired += 1
-            elif days_remaining <= 3:
-                expiring_3_days += 1
-            elif days_remaining <= 7:
-                expiring_7_days += 1
-            elif days_remaining <= 30:
-                expiring_30_days += 1
-        except Exception:
-            continue
-    
-    active_total = expired + expiring_3_days + expiring_7_days + expiring_30_days
-    
-    # Count hostnames whose soonest cert is beyond 30 days
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM (
-            SELECT hostname
-            FROM certificates
-            WHERE julianday(not_after) > julianday('now')
-              AND hostname IN (
-                SELECT domain_name FROM domain_asset
-                UNION
-                SELECT subdomain_name FROM subdomain_asset
-              )
+    conn = get_db_connection()
+    try:
+        rows = conn.execute(f'''
+            SELECT hostname, MIN(not_after) AS soonest FROM certificates
+            WHERE {SERVED_CERT}
             GROUP BY hostname
-            HAVING MIN(CAST(julianday(not_after) - julianday('now') AS INTEGER)) > 30
-        )
-    ''')
-    beyond_30 = cursor.fetchone()['count']
-    active_total += beyond_30
-    
-    conn.close()
-    
-    return {
-        'expired': expired,
-        'expiring_3_days': expiring_3_days,
-        'expiring_7_days': expiring_3_days + expiring_7_days,
-        'expiring_30_days': expiring_3_days + expiring_7_days + expiring_30_days,
-        'total_certs': active_total
-    }
+        ''').fetchall()
+    finally:
+        conn.close()
+
+    summary = {'expired': 0, 'expiring_3_days': 0, 'expiring_7_days': 0, 'expiring_30_days': 0, 'total_certs': 0}
+    for row in rows:
+        try:
+            days = _days_left(row['soonest'], now)
+        except (TypeError, ValueError):
+            continue
+        summary['total_certs'] += 1
+        if days < 0:
+            summary['expired'] += 1
+            continue
+        for bucket, limit in (('expiring_3_days', 3), ('expiring_7_days', 7), ('expiring_30_days', 30)):
+            if days <= limit:
+                summary[bucket] += 1
+    return summary
 
 
 if __name__ == '__main__':
     import argparse
     logging.basicConfig(level=logging.INFO)
-    
-    parser = argparse.ArgumentParser(description='CT Logs monitor')
-    parser.add_argument('--poll', action='store_true', help='Poll all domains')
-    parser.add_argument('--check-expiry', action='store_true', help='Check certificate expiry thresholds')
-    parser.add_argument('--summary', action='store_true', help='Get cert expiry summary')
-    
+
+    parser = argparse.ArgumentParser(description='Certificates & CT logs monitor')
+    parser.add_argument('--poll', action='store_true', help='Run the monitor once')
+    parser.add_argument('--summary', action='store_true', help='Certificate expiry summary')
     args = parser.parse_args()
-    
+
     if args.poll:
-        result = poll_all_domains()
-        print(f"New subdomains: {result['new_subdomains']}")
-        print(f"Expiry alerts: {result['expiry_alerts']}")
-    elif args.check_expiry:
-        alerts = check_certificate_expiry_thresholds()
-        for threshold in [1, 3, 5, 7]:
-            certs = alerts.get(threshold, [])
-            if certs:
-                print(f"\n{threshold} day(s) until expiry:")
-                for cert in certs:
-                    print(f"  - {cert['hostname']}")
+        print(poll_all_domains())
     elif args.summary:
-        summary = get_cert_expiry_summary()
-        print(f"Total certs: {summary['total_certs']}")
-        print(f"Expiring in 3 days: {summary['expiring_3_days']}")
-        print(f"Expiring in 7 days: {summary['expiring_7_days']}")
-        print(f"Expiring in 30 days: {summary['expiring_30_days']}")
+        print(get_cert_expiry_summary())
     else:
         parser.print_help()

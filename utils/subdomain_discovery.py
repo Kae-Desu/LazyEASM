@@ -1,8 +1,12 @@
 """
-Additional subdomain discovery beyond crt.sh / SecurityTrails.
+Subdomain discovery from third-party sources and DNS (SecurityTrails, when
+configured, is queried separately in modules/ExpandAsset.py).
 
 Passive (third-party databases; no traffic to the target):
-    - Certspotter     certificate transparency, no key needed
+    - CT logs         certificate transparency: CertSpotter (optional
+                      CERTSPOTTER_API_KEY raises its quota), crt.sh only when
+                      CertSpotter fails, with a 30-minute cooldown after
+                      crt.sh errors (it returns 502s under load)
     - HackerTarget    passive DNS, no key needed (small daily quota)
     - Wayback Machine hostnames from archived URLs
     - AlienVault OTX  passive DNS, needs OTX_API_KEY
@@ -23,6 +27,7 @@ import os
 import random
 import string
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Dict, Iterable, Optional, Set, Tuple
 from urllib.parse import urlsplit
 
@@ -41,6 +46,9 @@ WORDLIST_PATH = os.path.join(PROJECT_ROOT, 'data', 'subdomain_wordlist.txt')
 HTTP_TIMEOUT = 45
 USER_AGENT = 'LazyEASM subdomain-discovery'
 CERTSPOTTER_MAX_PAGES = 5
+CRTSH_TIMEOUT = 60
+CRTSH_COOLDOWN = timedelta(minutes=30)
+CRTSH_COOLDOWN_KEY = 'crtsh_cooldown_until'   # settings table, shared by web and worker
 WAYBACK_MAX_ROWS = 5000
 WAYBACK_TIMEOUT = 90  # the CDX API is slow for large sites
 DNS_WORKERS = 50
@@ -89,19 +97,67 @@ def _get(url: str, timeout: float = HTTP_TIMEOUT, **kwargs) -> requests.Response
 # ---------------------------------------------------------------------------
 
 def from_certspotter(domain: str) -> Set[str]:
+    key = get_env('CERTSPOTTER_API_KEY')
+    headers = {'Authorization': f'Bearer {key}'} if key else {}
     names = set()
     after = None
-    for _ in range(CERTSPOTTER_MAX_PAGES):
+    for page in range(CERTSPOTTER_MAX_PAGES):
         params = {'domain': domain, 'include_subdomains': 'true', 'expand': 'dns_names'}
         if after:
             params['after'] = after
-        issuances = _get('https://api.certspotter.com/v1/issuances', params=params).json()
+        try:
+            issuances = _get('https://api.certspotter.com/v1/issuances', params=params, headers=headers).json()
+        except SourceError as e:
+            if page == 0:
+                raise
+            logger.warning(f"[Discovery] CertSpotter stopped after {page} pages for {domain}: {e}")
+            break
         if not issuances:
             break
         for issuance in issuances:
             names.update(issuance.get('dns_names') or [])
         after = issuances[-1].get('id')
     return names
+
+
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+
+
+def from_crtsh(domain: str) -> Set[str]:
+    """
+    One query per domain, current certificates only. After an error crt.sh is
+    left alone for CRTSH_COOLDOWN, since retrying a struggling crt.sh is what
+    keeps it returning 502s.
+    """
+    from utils.db_utils import get_setting, set_setting
+
+    until = get_setting(CRTSH_COOLDOWN_KEY)
+    if until and until > _utc_now():
+        raise SourceError(f'skipped, cooling down until {until} UTC after an earlier error')
+    try:
+        rows = _get('https://crt.sh/', timeout=CRTSH_TIMEOUT,
+                    params={'q': f'%.{domain}', 'output': 'json', 'exclude': 'expired', 'deduplicate': 'Y'}).json()
+    except (SourceError, ValueError):
+        set_setting(CRTSH_COOLDOWN_KEY, (datetime.now(timezone.utc) + CRTSH_COOLDOWN).strftime('%Y-%m-%d %H:%M:%S'))
+        raise
+    names = set()
+    for row in rows:
+        names.add(row.get('common_name') or '')
+        names.update((row.get('name_value') or '').splitlines())
+    return names
+
+
+def from_ct_logs(domain: str) -> Set[str]:
+    """Certificate transparency: CertSpotter, falling back to crt.sh."""
+    try:
+        return from_certspotter(domain)
+    except (SourceError, ValueError) as first:
+        logger.info(f"[Discovery] CertSpotter failed for {domain} ({first}); trying crt.sh")
+        try:
+            return from_crtsh(domain)
+        except (SourceError, ValueError) as second:
+            raise SourceError(f'CertSpotter: {first}; crt.sh: {second}') from second
 
 
 def from_hackertarget(domain: str) -> Set[str]:
@@ -136,7 +192,7 @@ def from_otx(domain: str) -> Set[str]:
 
 
 PASSIVE_SOURCES: Dict[str, Callable[[str], Set[str]]] = {
-    'certspotter': from_certspotter,
+    'ct_logs': from_ct_logs,
     'hackertarget': from_hackertarget,
     'wayback': from_wayback,
     'otx': from_otx,

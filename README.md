@@ -89,11 +89,11 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 ## Features
 
 ### Phase 0: Asset Discovery
-- **Domain/Subdomain Discovery** - Passive: crt.sh, Certspotter, HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; toggle it in the dashboard (Configuration > Discovery) or with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
+- **Domain/Subdomain Discovery** - Passive: certificate transparency (CertSpotter first, crt.sh only as a fallback with a 30-minute cooldown after errors; optional `CERTSPOTTER_API_KEY` raises the quota), HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; toggle it in the dashboard (Configuration > Discovery) or with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
 - **IP/CIDR Handling** - Automatic expansion and liveness detection
 - **DNS Resolution** - Parallel resolution with configurable workers
 - **Liveness Detection** - ICMP ping + TCP fallback (ports 80/443)
-- **SSL Certificate Tracking** - Extract and store certificates from CT logs with expiry monitoring
+- **TLS Certificate Tracking** - The certificate each HTTPS service actually presents is read directly (right after a scan and on the Certificates & CT logs schedule): issuer, validity, fingerprint
 - **Shared Hosting Detection** - Auto-detect Cloudflare and other CDNs
 
 ### Phase 1: Active Scanning
@@ -120,7 +120,7 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 
 ### Phase 3: Continuous Monitoring
 - **Liveness Monitoring** - ICMP/TCP checks every 5 minutes
-- **CT Logs Monitoring** - Poll for new subdomains every hour
+- **Certificates & CT Logs** - Default every 6 hours: new subdomains from certificate transparency logs (queued for discovery), the served certificate of every HTTPS service (a replaced certificate is recorded as a change, noting an issuer change), and expiry alerts. CT logs are used for discovery only: they keep listing certificates a renewal already replaced, which would raise false expiry alerts. Manual trigger: `/api/phase3/ctlogs/check`
 - **Wappalyzer Re-scanning** - Periodic technology re-fingerprinting (default: every 24 hours)
 - **Subdomain Takeover Detection** - Follows CNAME chains for every domain/subdomain (default: every 24 hours); flags services known to allow takeover (NXDOMAIN or unclaimed-page fingerprint) and dangling CNAMEs. Findings use the open / fixed / accepted / false positive lifecycle. Manual trigger: `/api/phase3/takeover/check`
 - **Exploit Intel Refresh** - Updates CISA KEV and EPSS data for all CVEs (default: every 24 hours) and right after scans that find new CVEs. Sends a Discord alert when a CVE with an open finding is (or becomes) known exploited. Manual trigger: `/api/phase3/intel/check`
@@ -149,9 +149,9 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
   - Each threshold notified exactly once per certificate
   - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)
-- **Certificate Storage** - All certificates from CT logs stored in database
-- **Expired Certificate Cleanup** - Auto-deletes certificates expired >90 days with cascading notification cleanup
-- **Signature Change Detection** - Detects serial/fingerprint changes
+- **Certificate History** - Replaced certificates are kept, so the change history shows when and how a certificate changed
+- **Expired Certificate Cleanup** - Replaced certificates expired more than 90 days are deleted with their notification records
+- **Certificate Change Detection** - A different certificate on the same host and port (fingerprint) is a `certificate_changed` event
 - **Stuck Queue Recovery** - Auto-resets items stuck in processing state
 - **Duplicate Prevention** - Tracks known subdomains across scan queue
 - **New Asset Classification** - Distinguishes new assets from recovered assets in notifications
@@ -410,6 +410,7 @@ SMTP_TO=secops@example.com         # SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` | No | Email server; security is `starttls` (default), `ssl` or `none` |
 | `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TO` | No | Email credentials, sender and comma-separated recipients |
 | `OTX_API_KEY` | No | AlienVault OTX key for passive DNS discovery |
+| `CERTSPOTTER_API_KEY` | No | CertSpotter key; raises the quota for certificate transparency lookups (works without one); also editable in the dashboard |
 | `DNS_BRUTEFORCE` | No | `false` disables DNS brute force and permutations (default `true`); also editable in the dashboard |
 | `SCREENSHOTS_ENABLED` | No | `false` disables web screenshots (default `true`); also editable in the dashboard |
 
@@ -510,7 +511,7 @@ graph.
 | `/api/phase3/status` | GET | Required | Get monitoring status and stats |
 | `/api/phase3/toggle` | POST | Required | Enable/disable Phase 3 |
 | `/api/phase3/liveness/check` | POST | Required | Trigger immediate liveness check |
-| `/api/phase3/ctlogs/check` | POST | Required | Trigger immediate CT logs poll |
+| `/api/phase3/ctlogs/check` | POST | Required | Run the Certificates & CT logs check now |
 | `/api/phase3/wappalyzer/check` | POST | Required | Trigger immediate Wappalyzer re-scan |
 | `/api/phase3/screenshots/check` | POST | Required | Trigger immediate web screenshot run |
 | `/screenshots/<id>/full` or `/thumb` | GET | Required | Stored screenshot image (JPEG) |
@@ -586,7 +587,8 @@ LazyEASM/
 │   ├── findings_repository.py # Cross-asset findings and Overview numbers
 │   ├── activity_repository.py # Change history and scan queue pages
 │   ├── process_utils.py       # Process detection utilities
-│   └── ct_monitor.py         # CT logs polling + cert tracking
+│   ├── tls_certs.py           # Reads the certificate each HTTPS service presents
+│   └── ct_monitor.py          # Certificates & CT logs monitor (discovery, expiry alerts)
 ├── templates/
 │   ├── base.html              # Layout: header, sidebar, dialogs, toasts
 │   ├── dashboard.html         # Overview page
@@ -669,13 +671,13 @@ phase_status ─── Current phase tracking
 
 ## Known Limitations
 
-- CTLogs API (crt.sh) may return 503 when overloaded
+- Certificate transparency lookups depend on CertSpotter (free quota; set `CERTSPOTTER_API_KEY` for more) and crt.sh, which often returns 502/503 under load. Discovery continues with the other sources when both are unavailable
 - Shared/CDN IPs skipped for port scanning
 - CVE matching requires version detection
 - Access tokens remain valid for up to 15 minutes after logout (stateless by design); changing the password revokes every session immediately
 - Browser must support cookies for authentication (no API key auth)
 - Gemini API free tier has rate limits (may need paid plan for heavy use)
-- SSL notifications run hourly with CT logs (not real-time)
+- Certificate expiry alerts run with the Certificates & CT logs check (default every 6 hours), not in real time
 
 ## Roadmap
 
@@ -698,7 +700,7 @@ Releases published before this change remain available under the MIT License.
 ## Acknowledgments
 
 - SecurityTrails API for subdomain enumeration
-- crt.sh (Certificate Transparency Logs) for certificate discovery
+- CertSpotter (SSLMate) and crt.sh for certificate transparency lookups
 - NVD (National Vulnerability Database) for CVE information
 - Wappalyzer for technology fingerprinting patterns
 - [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) for exploited-in-the-wild CVEs

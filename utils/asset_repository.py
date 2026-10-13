@@ -167,11 +167,12 @@ screenshot_rollup AS (
     FROM screenshots GROUP BY host
 ),
 cert_rollup AS (
+    -- certificates the hosts currently serve (utils/tls_certs.py)
     SELECT hostname,
            MIN(CASE WHEN julianday(not_after) > julianday('now') THEN not_after END) AS active_not_after,
            MAX(not_after) AS latest_not_after
     FROM certificates
-    WHERE hostname NOT LIKE '*.%'
+    WHERE source = 'tls' AND replaced_at IS NULL
     GROUP BY hostname
 ),
 latest_phase2 AS (

@@ -77,7 +77,7 @@ class Phase1Expander:
     Phase 1: Asset Discovery and Initialization
     
     Handles:
-        - CTLogs subdomain discovery (free, no API key)
+        - CT logs, passive DNS and DNS brute force (utils/subdomain_discovery.py)
         - SecurityTrails subdomain discovery (requires API key)
         - DNS resolution (parallel)
         - Ping check (parallel)
@@ -85,7 +85,6 @@ class Phase1Expander:
         - Database storage
     """
     
-    CTLOGS_URL = "https://crt.sh/json?q={domain}"
     SECURITYTRAILS_URL = "https://api.securitytrails.com/v1"
     
     def __init__(self, 
@@ -126,94 +125,6 @@ class Phase1Expander:
             'errors': [],
             'time_elapsed': 0
         }
-    
-    # ============================================
-    # CTLOGS
-    # ============================================
-    
-    def get_ctlogs_subdomains(self, domain: str) -> tuple:
-        """
-        Query CRT.sh for subdomains from SSL certificates.
-        
-        Args:
-            domain: Root domain (e.g., 'example.com')
-        
-        Returns:
-            Tuple of (subdomains list, certificates list)
-            certificates: [{'hostname': str, 'issuer': str, 'not_before': str, 'not_after': str, 'serial_number': str}, ...]
-        """
-        url = self.CTLOGS_URL.format(domain=domain)
-        domain_lower = domain.lower()
-        subdomains = set()
-        certificates = []
-        seen_certs = set()
-        
-        max_retries = 3
-        for attempt in range(max_retries):
-            try:
-                response = self.session.get(url, timeout=60)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    logger.debug(f"CTLogs returned {len(data)} entries for {domain}")
-                    
-                    for entry in data:
-                        # Common name
-                        if 'common_name' in entry:
-                            cn = entry['common_name'].lower()
-                            if cn.endswith('.' + domain_lower) or cn == domain_lower:
-                                subdomains.add(cn)
-                        
-                        # Subject Alternative Names
-                        if 'name_value' in entry:
-                            for name in entry['name_value'].split('\n'):
-                                name = name.strip().lower()
-                                if name.endswith('.' + domain_lower) or name == domain_lower:
-                                    subdomains.add(name)
-                        
-                        # Extract certificate info for expiry tracking
-                        hostname = entry.get('common_name', '').lower()
-                        not_after = entry.get('not_after')
-                        
-                        if hostname and not_after:
-                            # Match wildcard certs (*.domain) and direct matches
-                            if hostname.endswith('.' + domain_lower) or hostname == domain_lower:
-                                cert_key = f"{hostname}|{not_after}"
-                                if cert_key not in seen_certs:
-                                    seen_certs.add(cert_key)
-                                    certificates.append({
-                                        'hostname': hostname,
-                                        'issuer': entry.get('issuer_name', ''),
-                                        'not_before': entry.get('not_before'),
-                                        'not_after': not_after,
-                                        'serial_number': entry.get('serial_number')
-                                    })
-                    
-                    logger.info(f"CTLogs found {len(subdomains)} subdomains and {len(certificates)} certificates for {domain}")
-                    break
-                
-                else:
-                    logger.warning(f"CTLogs returned status {response.status_code} for {domain}")
-                    if attempt < max_retries - 1:
-                        time.sleep(2 ** attempt)
-            
-            except requests.exceptions.Timeout:
-                logger.warning(f"CTLogs timeout for {domain} (attempt {attempt + 1}/{max_retries})")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    logger.error(f"CTLogs failed after {max_retries} attempts for {domain}")
-            except requests.exceptions.RequestException as e:
-                logger.error(f"CTLogs request error for {domain}: {e}")
-                if attempt < max_retries - 1:
-                    time.sleep(2 ** attempt)
-                else:
-                    break
-            except Exception as e:
-                logger.error(f"CTLogs unexpected error for {domain}: {e}")
-                break
-        
-        return list(subdomains), certificates
     
     # ============================================
     # SECURITYTRAILS
@@ -267,30 +178,27 @@ class Phase1Expander:
     # SUBDOMAIN DISCOVERY
     # ============================================
     
-    def discover_subdomains(self, domain: str) -> tuple:
+    def discover_subdomains(self, domain: str) -> List[str]:
         """
-        Discover subdomains from CTLogs, SecurityTrails and the extra passive
-        and DNS sources in utils/subdomain_discovery.py.
+        Discover subdomains from SecurityTrails and the sources in
+        utils/subdomain_discovery.py (CT logs, passive DNS, DNS brute force).
+
+        Certificates are not taken from CT logs: expiry and changes come from
+        the certificate each HTTPS service presents (utils/tls_certs.py).
         
         Args:
             domain: Root domain
         
         Returns:
-            Tuple of (subdomains list, certificates list)
+            Subdomain names
         """
         subdomains = set()
-        certificates = []
         
-        # Source 1: CTLogs (free)
-        ctlogs_subs, ctlogs_certs = self.get_ctlogs_subdomains(domain)
-        subdomains.update(ctlogs_subs)
-        certificates.extend(ctlogs_certs)
-        
-        # Source 2: SecurityTrails (requires API key)
+        # SecurityTrails (requires API key)
         st_subs = self.get_securitytrails_subdomains(domain)
         subdomains.update(st_subs)
         
-        # Sources 3+: Certspotter, HackerTarget, Wayback, OTX, DNS brute force/permutations
+        # CT logs, HackerTarget, Wayback, OTX, DNS brute force/permutations
         try:
             from utils.subdomain_discovery import discover
             extra, stats = discover(domain, {s.lower() for s in subdomains})
@@ -308,34 +216,8 @@ class Phase1Expander:
         # Deduplicate
         parsed = list(set(parsed))
         
-        logger.info(f"Discovered {len(parsed)} unique subdomains and {len(certificates)} certificates for {domain}")
-        return parsed, certificates
-    
-    def store_certificates(self, certificates: List[Dict], sub_id_map: Dict[str, int] = None):
-        """
-        Store certificates in database.
-        
-        Args:
-            certificates: List of certificate dicts
-            sub_id_map: Optional mapping of hostname to subdomain ID
-        """
-        from utils.db_utils import upsert_certificate
-        
-        for cert in certificates:
-            hostname = cert.get('hostname', '')
-            sub_id = None
-            if sub_id_map:
-                sub_id = sub_id_map.get(hostname)
-            
-            upsert_certificate(
-                hostname=hostname,
-                issuer=cert.get('issuer'),
-                not_before=cert.get('not_before'),
-                not_after=cert.get('not_after'),
-                serial_number=cert.get('serial_number'),
-                sub_id=sub_id,
-                source='ctlogs'
-            )
+        logger.info(f"Discovered {len(parsed)} unique subdomains for {domain}")
+        return parsed
     
     # ============================================
     # PROCESSING FUNCTIONS
@@ -359,8 +241,8 @@ class Phase1Expander:
         }
         
         try:
-            # 1. Discover subdomains and certificates
-            subdomains, certificates = self.discover_subdomains(domain)
+            # 1. Discover subdomains
+            subdomains = self.discover_subdomains(domain)
             
             # 2. Filter duplicates (already in DB)
             new_subdomains = filter_new_subdomains(subdomains)
@@ -398,7 +280,6 @@ class Phase1Expander:
             stats['ips_resolved'] += len(root_ips)
             
             # 6. DNS resolve + Ping check subdomains (parallel)
-            sub_id_map = {}
             if new_subdomains:
                 logger.info(f"Resolving DNS for {len(new_subdomains)} subdomains of {domain}...")
                 results = resolve_and_ping_batch(
@@ -412,16 +293,10 @@ class Phase1Expander:
                 # 7. Store subdomains and IPs
                 logger.info(f"Storing {len(new_subdomains)} subdomains in database...")
                 for idx, subdomain in enumerate(new_subdomains):
-                    sub_id = self._store_subdomain(subdomain, domain, dom_id, results)
-                    if sub_id:
-                        sub_id_map[subdomain] = sub_id
+                    self._store_subdomain(subdomain, domain, dom_id, results)
                     stats['ips_resolved'] += len(results.get(subdomain, {}).get('ips', []))
                     if (idx + 1) % 50 == 0:
                         logger.info(f"Stored {idx + 1}/{len(new_subdomains)} subdomains for {domain}")
-            
-            # 8. Store certificates from CTLogs
-            if certificates:
-                self.store_certificates(certificates, sub_id_map if sub_id_map else None)
             
             # 9. Update domain status
             update_domain_status(dom_id, 'up')

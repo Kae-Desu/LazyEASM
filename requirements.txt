@@ -12,5 +12,6 @@ setuptools<70
 google-genai
 playwright>=1.40
 pillow>=10.0
+cryptography>=42
 anthropic>=1.13.0
 openai>=1.0.0

@@ -11,7 +11,7 @@ from typing import Dict, List, Tuple
 # name, label, setting key, default, unit, min, max
 SCHEDULE = [
     ('liveness', 'Liveness check', 'liveness_interval_min', 5, 'minutes', 1, 1440),
-    ('ctlogs', 'CT logs poll', 'ctlogs_interval_hr', 1, 'hours', 1, 168),
+    ('ctlogs', 'Certificates & CT logs', 'ctlogs_interval_hr', 6, 'hours', 1, 168),
     ('wappalyzer', 'Technology re-scan', 'wappalyzer_interval_hr', 24, 'hours', 1, 720),
     ('takeover', 'Subdomain takeover check', 'takeover_interval_hr', 24, 'hours', 1, 720),
     ('intel', 'Exploit intel (KEV / EPSS)', 'intel_interval_hr', 24, 'hours', 1, 720),

@@ -42,8 +42,8 @@ class AssetRepositoryTests(unittest.TestCase):
                 (1, 1, 'CVE-2026-0001', 9.8, 'Example issue', NULL);
             INSERT INTO cve_intel (cve_id, epss, epss_percentile, in_kev, kev_required_action)
                 VALUES ('CVE-2026-0001', 0.42, 0.97, 1, 'Apply updates');
-            INSERT INTO certificates (cert_id, hostname, issuer, not_after)
-                VALUES (1, 'api.example.com', 'Example CA', datetime('now', '+10 days'));
+            INSERT INTO certificates (cert_id, hostname, port, issuer, not_after, source)
+                VALUES (1, 'api.example.com', 443, 'Example CA', datetime('now', '+10 days'), 'tls');
             INSERT INTO directories (dir_id, http_id, path, status_code, content_length) VALUES (1, 1, '/admin', 403, 0);
             INSERT INTO scan_queue (queue_id, scan_type, cycle, target, status, queued_at) VALUES
                 (1, 'phase2_deep_scan', 'standard', 'api.example.com', 'pending', '2026-01-03');

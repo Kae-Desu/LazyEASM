@@ -157,6 +157,9 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
 
         from utils.screenshots import capture_quietly
         capture_quietly([asset_name])
+
+        from utils.tls_certs import refresh_quietly
+        refresh_quietly([asset_name])
         
         # Update last_wappalyzer_scan timestamp
         try:

@@ -95,7 +95,7 @@ def send_ctlogs_notification(result: dict):
         from modules.Notify import send_message, send_cert_expiry_threshold_alert
         from utils.db_utils import mark_cert_notified
         
-        lines = ["**CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
+        lines = ["**Certificates & CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
         
         if result['new_subdomains']:
             lines.append(f"\n**New Subdomains ({len(result['new_subdomains'])}):**")
@@ -104,16 +104,12 @@ def send_ctlogs_notification(result: dict):
             if len(result['new_subdomains']) > 10:
                 lines.append(f"• ... and {len(result['new_subdomains']) - 10} more")
         
-        if result.get('signature_changes'):
-            lines.append(f"\n**Certificate Signature Changed ({len(result['signature_changes'])}):**")
-            for change in result['signature_changes'][:5]:
-                lines.append(f"• {change['hostname']}")
-                old_serial = change.get('old_serial', 'N/A')
-                new_serial = change.get('new_serial', 'N/A')
-                if old_serial and new_serial and old_serial != 'N/A':
-                    lines.append(f"  Serial: {old_serial[:16]}... → {new_serial[:16]}...")
-            if len(result['signature_changes']) > 5:
-                lines.append(f"• ... and {len(result['signature_changes']) - 5} more")
+        if result.get('certificate_changes'):
+            lines.append(f"\n**Certificates Replaced ({len(result['certificate_changes'])}):**")
+            for change in result['certificate_changes'][:5]:
+                lines.append(f"• {change['hostname']}: {change['summary']}")
+            if len(result['certificate_changes']) > 5:
+                lines.append(f"• ... and {len(result['certificate_changes']) - 5} more")
         
         if len(lines) > 2:
             send_message('\n'.join(lines))
@@ -299,10 +295,33 @@ def run_monitor(name: str):
     Run one Phase 3 check now (scheduled or manual). A per-check lock keeps a
     manual run from overlapping the scheduled run of the same check.
     """
+    from utils.db_utils import set_setting
+
     if name not in MONITORS:
         raise ValueError(f"unknown check: {name}")
     with _locks.setdefault(name, threading.Lock()):
+        # Stored before running, so a check that crashes is not retried in a loop
+        set_setting(_last_run_key(name), str(int(time.time())))
         MONITORS[name][3]()
+
+
+def _last_run_key(name: str) -> str:
+    return f'monitor_last_run_{name}'
+
+
+def is_due(name: str) -> bool:
+    """
+    True when the check's interval has passed since it last started. The start
+    time is kept in the settings table, so restarting the worker (deploys,
+    crashes, reboots) does not re-run every check at once.
+    """
+    from utils.db_utils import get_setting
+
+    try:
+        last = float(get_setting(_last_run_key(name)))
+    except (TypeError, ValueError):
+        return True     # never ran
+    return time.time() - last >= interval_seconds(name)
 
 
 def interval_seconds(name: str) -> int:
@@ -319,18 +338,15 @@ def _monitor_loop(label: str, name: str):
 
     The enabled flag and the interval are re-read every few seconds, so
     changes made in the dashboard (web process) apply in the worker process
-    without a restart. A check that already ran is not repeated before its
-    interval passes.
+    without a restart. A check that already ran (also before a restart, or
+    as a manual run) is not repeated before its interval passes.
     """
     from utils.db_utils import get_setting
 
     logger.info(f"{label} thread started")
-    last_run = None
     while _phase3_running:
         try:
-            due = last_run is None or time.monotonic() - last_run >= interval_seconds(name)
-            if due and get_setting('phase3_enabled') == '1':
-                last_run = time.monotonic()
+            if get_setting('phase3_enabled') == '1' and is_due(name):
                 logger.info(f"Running {label}...")
                 run_monitor(name)
         except Exception as e:
@@ -349,7 +365,7 @@ def _run_liveness():
 def _run_ctlogs():
     from utils.ct_monitor import poll_all_domains
     result = poll_all_domains()
-    if result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()) or result.get('signature_changes'):
+    if result['new_subdomains'] or any(result.get('expiry_alerts', {}).values()) or result.get('certificate_changes'):
         send_ctlogs_notification(result)
 
 
@@ -406,7 +422,7 @@ def _run_maintenance():
 # name -> (setting key, default, seconds per unit, run function)
 MONITORS = {
     'liveness': ('liveness_interval_min', 5, 60, _run_liveness),
-    'ctlogs': ('ctlogs_interval_hr', 1, 3600, _run_ctlogs),
+    'ctlogs': ('ctlogs_interval_hr', 6, 3600, _run_ctlogs),
     'wappalyzer': ('wappalyzer_interval_hr', 24, 3600, _run_wappalyzer),
     'takeover': ('takeover_interval_hr', 24, 3600, _run_takeover),
     'intel': ('intel_interval_hr', 24, 3600, _run_intel),
@@ -488,7 +504,7 @@ def get_phase3_status() -> dict:
         'last_discovery_check': get_setting('last_discovery_check') or '-',
         'last_screenshot_check': get_setting('last_screenshot_check') or '-',
         'liveness_interval_min': int(get_setting('liveness_interval_min') or '5'),
-        'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '1'),
+        'ctlogs_interval_hr': int(get_setting('ctlogs_interval_hr') or '6'),
         'wappalyzer_interval_hr': int(get_setting('wappalyzer_interval_hr') or '24'),
         'takeover_interval_hr': int(get_setting('takeover_interval_hr') or '24'),
         'intel_interval_hr': int(get_setting('intel_interval_hr') or '24'),

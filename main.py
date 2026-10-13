@@ -113,6 +113,7 @@ KEY_NAMES = {
     'SMTP_FROM': 'SMTP From',
     'SMTP_TO': 'SMTP Recipients',
     'OTX_API_KEY': 'OTX Key',
+    'CERTSPOTTER_API_KEY': 'CertSpotter Key',
     'DNS_BRUTEFORCE': 'DNS Brute Force',
     'SCREENSHOTS_ENABLED': 'Web Screenshots'
 }

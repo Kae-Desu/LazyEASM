@@ -1739,43 +1739,28 @@ def _get_ips_for_subdomain(cursor, sub_id: int) -> list:
 
 def _get_cert_expiry(cursor, hostname: str) -> dict:
     """
-    Get certificate expiry for a hostname.
-    
-    Shows the soonest-expiring certificate (most urgent for security).
-    
-    Args:
-        cursor: Database cursor
-        hostname: Hostname to check
-    
+    The certificate the host currently serves (soonest-expiring if its HTTPS
+    ports differ), including an expired one.
+
     Returns:
-        Dict with 'not_after', 'issuer', 'days_until_expiry' or None
+        Dict with 'not_after', 'issuer', 'port', 'days_until_expiry', or None
     """
     from datetime import datetime, timezone
-    
-    cursor.execute('''
-        SELECT not_after, issuer
-        FROM certificates
-        WHERE hostname = ?
-            AND julianday(not_after) > julianday('now')
-        ORDER BY not_after ASC
-        LIMIT 1
-    ''', (hostname,))
-    
-    row = cursor.fetchone()
-    if row:
-        result = dict(row)
-        not_after_str = result['not_after']
-        try:
-            if 'T' in not_after_str:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%dT%H:%M:%S').replace(tzinfo=timezone.utc)
-            else:
-                not_after = datetime.strptime(not_after_str, '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
-            days_remaining = int((not_after - datetime.now(timezone.utc)).total_seconds() / 86400)
-            result['days_until_expiry'] = days_remaining
-        except (ValueError, TypeError):
-            result['days_until_expiry'] = None
-        return result
-    return None
+
+    row = cursor.execute(f"""
+        SELECT not_after, issuer, port FROM certificates
+        WHERE {SERVED_CERT} AND hostname = ?
+        ORDER BY not_after ASC LIMIT 1
+    """, (hostname,)).fetchone()
+    if not row:
+        return None
+    result = dict(row)
+    try:
+        not_after = datetime.strptime(result['not_after'][:19].replace('T', ' '), '%Y-%m-%d %H:%M:%S').replace(tzinfo=timezone.utc)
+        result['days_until_expiry'] = int((not_after - datetime.now(timezone.utc)).total_seconds() // 86400)
+    except (ValueError, TypeError):
+        result['days_until_expiry'] = None
+    return result
 
 
 def _get_technologies_for_host(cursor, host: str) -> list:
@@ -2404,150 +2389,89 @@ def update_asset_last_scanned(asset_id: int, asset_type: str) -> None:
         conn.close()
 
 
-def upsert_certificate(hostname: str, issuer: str = None, not_before: str = None, 
-                       not_after: str = None, serial_number: str = None, 
-                       fingerprint: str = None, sub_id: int = None, source: str = 'ctlogs') -> dict:
-    """
-    Insert or update certificate record.
-    
-    Args:
-        hostname: Hostname the cert is for
-        issuer: Certificate issuer (e.g., "Let's Encrypt")
-        not_before: Validity start date (ISO format)
-        not_after: Expiry date (ISO format)
-        serial_number: Certificate serial number
-        fingerprint: Certificate fingerprint/hash
-        sub_id: Subdomain ID (optional)
-        source: Source of cert data ('ctlogs', 'ssl_scan')
-    
-    Returns:
-        {
-            'cert_id': int,
-            'is_new': bool,
-            'signature_changed': bool,
-            'old_serial': str or None,
-            'old_fingerprint': str or None
-        }
-    """
+SERVED_CERT = "source = 'tls' AND replaced_at IS NULL"   # certificates currently presented
+
+
+def get_https_services(hosts=None) -> list:
+    """Distinct (host, port) of HTTPS services, optionally only for hosts."""
+    if hosts is not None and not hosts:
+        return []
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        query = 'SELECT DISTINCT host, port_num FROM http_services WHERE is_https = 1'
+        params = []
+        if hosts is not None:
+            query += f" AND host IN ({','.join('?' * len(hosts))})"
+            params = list(hosts)
+        return [(row['host'], row['port_num']) for row in conn.execute(query + ' ORDER BY host, port_num', params)]
+    finally:
+        conn.close()
+
+
+def record_served_certificate(cert: dict):
+    """
+    Store the certificate a service presents (from utils.tls_certs).
+
+    Returns:
+        ('same', None) unchanged, ('new', None) first certificate seen, or
+        ('changed', {'hostname', 'port', 'summary'}) when it was replaced;
+        the change is also recorded in the change history.
+    """
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    
-    result = {
-        'cert_id': 0,
-        'is_new': False,
-        'signature_changed': False,
-        'old_serial': None,
-        'old_fingerprint': None
-    }
-    
+    host, port = cert['hostname'], cert['port']
+    conn = get_db_connection()
     try:
-        # Check if cert exists with same hostname and not_after
-        cursor.execute('''
-            SELECT cert_id, serial_number, fingerprint FROM certificates 
-            WHERE hostname = ? AND not_after = ?
-        ''', (hostname, not_after))
-        
-        existing = cursor.fetchone()
-        
-        if existing:
-            # Cert exists - check if signature changed
-            cert_id = existing['cert_id']
-            old_serial = existing['serial_number']
-            old_fingerprint = existing['fingerprint']
-            
-            # Detect signature change
-            signature_changed = False
-            if old_serial and serial_number and old_serial != serial_number:
-                signature_changed = True
-            if old_fingerprint and fingerprint and old_fingerprint != fingerprint:
-                signature_changed = True
-            
-            if signature_changed:
-                result['signature_changed'] = True
-                result['old_serial'] = old_serial
-                result['old_fingerprint'] = old_fingerprint
-            
-            # Update cert info
-            cursor.execute('''
-                UPDATE certificates 
-                SET issuer = ?, not_before = ?, serial_number = ?, fingerprint = ?, 
-                    sub_id = ?, first_seen = ?
-                WHERE cert_id = ?
-            ''', (issuer, not_before, serial_number, fingerprint, sub_id, now, cert_id))
+        cursor = conn.cursor()
+        current = cursor.execute(f"""
+            SELECT cert_id, issuer, not_after, fingerprint FROM certificates
+            WHERE {SERVED_CERT} AND hostname = ? AND port = ?
+            ORDER BY cert_id DESC LIMIT 1
+        """, (host, port)).fetchone()
+        if current and current['fingerprint'] == cert['fingerprint']:
+            cursor.execute('UPDATE certificates SET last_seen = ? WHERE cert_id = ?', (now, current['cert_id']))
             conn.commit()
-            result['cert_id'] = cert_id
+            return 'same', None
+
+        sub = cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (host,)).fetchone()
+        cursor.execute("""
+            INSERT INTO certificates (sub_id, hostname, port, issuer, not_before, not_after, serial_number,
+                                      fingerprint, source, first_seen, last_seen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'tls', ?, ?)
+        """, (sub['sub_id'] if sub else None, host, port, cert.get('issuer'), cert.get('not_before'),
+              cert['not_after'], cert.get('serial_number'), cert['fingerprint'], now, now))
+        if not current:
+            conn.commit()
+            return 'new', None
+
+        cursor.execute('UPDATE certificates SET replaced_at = ? WHERE cert_id = ?', (now, current['cert_id']))
+        where = f" on port {port}" if port != 443 else ''
+        if (current['issuer'] or '') != (cert.get('issuer') or ''):
+            summary = (f"Certificate replaced{where}: now issued by {cert.get('issuer') or 'unknown'} "
+                       f"(was {current['issuer'] or 'unknown'}), valid until {cert['not_after'][:10]}")
         else:
-            # New certificate
-            cursor.execute('''
-                INSERT INTO certificates (hostname, issuer, not_before, not_after, serial_number, fingerprint, sub_id, source, first_seen)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (hostname, issuer, not_before, not_after, serial_number, fingerprint, sub_id, source, now))
-            conn.commit()
-            result['cert_id'] = cursor.lastrowid
-            result['is_new'] = True
-        
-        return result
-        
-    except Exception as e:
-        print(f"Error upserting certificate: {e}")
-        return result
+            summary = f"Certificate replaced{where}, valid until {cert['not_after'][:10]}"
+        _record_change(cursor, host, 'certificate_changed', summary, {
+            'port': port, 'old_fingerprint': current['fingerprint'], 'new_fingerprint': cert['fingerprint'],
+            'old_issuer': current['issuer'], 'new_issuer': cert.get('issuer'),
+            'old_not_after': current['not_after'], 'not_after': cert['not_after'],
+        })
+        conn.commit()
+        return 'changed', {'hostname': host, 'port': port, 'summary': summary}
     finally:
         conn.close()
 
 
-def get_expiring_certificates(days: int = 30) -> list:
-    """
-    Get certificates expiring within specified days.
-    
-    Args:
-        days: Number of days to look ahead (default: 30)
-    
-    Returns:
-        List of certificate records with days_until_expiry
-    """
+def retire_served_certificates(still_served) -> int:
+    """Mark certificates of services that are no longer HTTPS (or gone) as replaced."""
+    keep = {(host, port) for host, port in still_served}
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
     try:
-        cursor.execute('''
-            SELECT cert_id, hostname, issuer, not_after, 
-                   julianday(not_after) - julianday('now') as days_until_expiry,
-                   sub_id, source
-            FROM certificates
-            WHERE not_after IS NOT NULL
-              AND julianday(not_after) - julianday('now') <= ?
-              AND julianday(not_after) - julianday('now') > 0
-            ORDER BY not_after ASC
-        ''', (days,))
-        
-        return [dict(row) for row in cursor.fetchall()]
-    finally:
-        conn.close()
-
-
-def get_expired_certificates() -> list:
-    """
-    Get all expired certificates.
-    
-    Returns:
-        List of expired certificate records
-    """
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    try:
-        cursor.execute('''
-            SELECT cert_id, hostname, issuer, not_after,
-                   julianday('now') - julianday(not_after) as days_expired,
-                   sub_id, source
-            FROM certificates
-            WHERE not_after IS NOT NULL
-              AND julianday('now') > julianday(not_after)
-            ORDER BY not_after DESC
-        ''')
-        
-        return [dict(row) for row in cursor.fetchall()]
+        stale = [row['cert_id'] for row in conn.execute(f'SELECT cert_id, hostname, port FROM certificates WHERE {SERVED_CERT}')
+                 if (row['hostname'], row['port']) not in keep]
+        conn.executemany('UPDATE certificates SET replaced_at = ? WHERE cert_id = ?', [(now, cert_id) for cert_id in stale])
+        conn.commit()
+        return len(stale)
     finally:
         conn.close()
 

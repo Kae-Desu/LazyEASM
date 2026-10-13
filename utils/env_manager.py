@@ -32,6 +32,7 @@ EDITABLE_KEYS = [
     'SMTP_FROM',
     'SMTP_TO',
     'OTX_API_KEY',
+    'CERTSPOTTER_API_KEY',
     'DNS_BRUTEFORCE',
     'SCREENSHOTS_ENABLED'
 ]
@@ -53,7 +54,8 @@ SENSITIVE_KEYS = [
     'SLACK_WEBHOOK_URL',
     'NOTIFY_WEBHOOK_SECRET',
     'SMTP_PASSWORD',
-    'OTX_API_KEY'
+    'OTX_API_KEY',
+    'CERTSPOTTER_API_KEY'
 ]
 
 KEY_DISPLAY_NAMES = {
@@ -78,6 +80,7 @@ KEY_DISPLAY_NAMES = {
     'SMTP_FROM': 'SMTP From',
     'SMTP_TO': 'SMTP Recipients',
     'OTX_API_KEY': 'AlienVault OTX API Key',
+    'CERTSPOTTER_API_KEY': 'CertSpotter API Key',
     'DNS_BRUTEFORCE': 'DNS Brute Force',
     'SCREENSHOTS_ENABLED': 'Web Screenshots'
 }

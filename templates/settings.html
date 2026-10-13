@@ -126,6 +126,7 @@
                 <h2 class="font-bold dark:text-white">Discovery & screenshots</h2>
                 {{ choice('DNS_BRUTEFORCE', 'DNS brute force & permutations', [('true', 'Enabled'), ('false', 'Disabled')], 'true', 'Guesses common subdomain names and variations of known ones with DNS lookups. Skipped automatically on wildcard DNS. Applies from the next discovery run.') }}
                 {{ field('OTX_API_KEY', 'AlienVault OTX API key (optional)', 'Adds a passive DNS source.') }}
+                {{ field('CERTSPOTTER_API_KEY', 'CertSpotter API key (optional)', 'Certificate transparency lookups use CertSpotter first (crt.sh only as a fallback). Works without a key; a free key raises the hourly quota.') }}
                 {{ choice('SCREENSHOTS_ENABLED', 'Web screenshots', [('true', 'Enabled'), ('false', 'Disabled')], 'true', 'Captures each web service in a headless browser for visual triage. Requests to internal addresses other than the asset itself are blocked. Interval under Schedule & Thresholds.') }}
                 {{ save_button() }}
             </section>
