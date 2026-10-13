@@ -8,6 +8,7 @@ Lives outside main.py so workers never import the Flask app.
 """
 
 import json
+from datetime import datetime
 import logging
 import importlib
 
@@ -19,6 +20,11 @@ logger = logging.getLogger(__name__)
 INPUT_DISCOVERY = 'input_discovery'
 MONITOR_RUN = 'monitor_run'
 JOB_TYPES = (INPUT_DISCOVERY, MONITOR_RUN)
+
+
+def _now() -> str:
+    # Local time, like every other scan_queue timestamp (the column default is UTC)
+    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
 
 def enqueue_input_discovery(targets: dict) -> int:
@@ -35,9 +41,9 @@ def enqueue_input_discovery(targets: dict) -> int:
     conn = get_db_connection()
     try:
         cursor = conn.execute('''
-            INSERT INTO scan_queue (scan_type, cycle, target, target_type, status)
-            VALUES (?, 'standard', ?, 'input', 'pending')
-        ''', (INPUT_DISCOVERY, json.dumps(payload)))
+            INSERT INTO scan_queue (scan_type, cycle, target, target_type, status, queued_at)
+            VALUES (?, 'standard', ?, 'input', 'pending', ?)
+        ''', (INPUT_DISCOVERY, json.dumps(payload), _now()))
         conn.commit()
         return cursor.lastrowid
     finally:
@@ -60,9 +66,9 @@ def enqueue_monitor_run(name: str) -> tuple:
         if existing:
             return existing['queue_id'], False
         cursor = conn.execute('''
-            INSERT INTO scan_queue (scan_type, cycle, target, target_type, status)
-            VALUES (?, 'manual', ?, 'monitor', 'pending')
-        ''', (MONITOR_RUN, name))
+            INSERT INTO scan_queue (scan_type, cycle, target, target_type, status, queued_at)
+            VALUES (?, 'manual', ?, 'monitor', 'pending', ?)
+        ''', (MONITOR_RUN, name, _now()))
         conn.commit()
         return cursor.lastrowid, True
     finally:

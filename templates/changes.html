@@ -1,0 +1,76 @@
+{% extends 'base.html' %}
+{% from '_changes.html' import change_item %}
+{% block title %}Changes{% endblock %}
+
+{% block content %}
+{% set input_cls = 'bg-white dark:bg-dark-card border border-border dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-accent outline-none dark:text-white' %}
+{% set p = result.pagination %}
+
+<h1 class="text-2xl font-bold mb-6 dark:text-white"><i class="fas fa-clock-rotate-left mr-2 text-accent"></i>Changes</h1>
+
+<form method="get" action="/changes" class="flex flex-wrap gap-3 mb-3" role="search" data-autosubmit>
+    <div class="flex-[2_1_260px]">
+        <label for="f-q" class="sr-only">Search</label>
+        <input id="f-q" name="q" type="search" value="{{ filters.q or '' }}" placeholder="Search host or description" class="w-full {{ input_cls }}">
+    </div>
+    <div class="flex-[1_1_160px]">
+        <label for="f-category" class="sr-only">Category</label>
+        <select id="f-category" name="category" class="w-full {{ input_cls }}">
+            {% for value, label in [('', 'All changes'), ('assets', 'Assets up / down / new'), ('ports', 'Ports'), ('technologies', 'Technologies'),
+                                    ('certificates', 'Certificates'), ('vulnerabilities', 'CVEs and findings'), ('appearance', 'Page appearance'),
+                                    ('triage', 'Status changes')] %}
+            <option value="{{ value }}" {% if filters.category == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="flex-[1_1_140px]">
+        <label for="f-period" class="sr-only">Period</label>
+        <select id="f-period" name="period" class="w-full {{ input_cls }}">
+            {% for value, label in [('', 'Any time'), ('24h', 'Last 24 hours'), ('7d', 'Last 7 days'), ('30d', 'Last 30 days')] %}
+            <option value="{{ value }}" {% if filters.period == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    {% if filters.host %}<input type="hidden" name="host" value="{{ filters.host }}">{% endif %}
+    <noscript><button type="submit" class="{{ input_cls }}">Filter</button></noscript>
+</form>
+{% if filters.host %}
+<div class="flex flex-wrap gap-2 mb-4">
+    <a href="{{ url_for('changes_page', **dict(filters, host=None, page=None)) }}" class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-accent/15 text-accent text-xs font-semibold">
+        Host: <span class="font-mono">{{ filters.host }}</span><i class="fas fa-xmark" aria-hidden="true"></i><span class="sr-only">Remove filter</span></a>
+</div>
+{% endif %}
+
+<div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-xl mt-4">
+    {% for day, entries in days %}
+    <h2 class="px-6 py-2 bg-slate-50 dark:bg-lazy-dark border-b border-border dark:border-white/5 text-[10px] font-bold uppercase tracking-widest text-slate-500">{{ day }}</h2>
+    <ul class="divide-y divide-slate-100 dark:divide-white/5 border-b border-border dark:border-white/5 last:border-b-0">
+        {% for c in entries %}{{ change_item(c, time_only=True) }}{% endfor %}
+    </ul>
+    {% else %}
+    <p class="px-6 py-10 text-center text-sm text-slate-400">
+        {% if filters.values()|select|list %}No changes match these filters.{% else %}No changes recorded yet. Changes appear after assets are re-scanned.{% endif %}
+    </p>
+    {% endfor %}
+    <div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-border dark:border-white/5 text-xs text-slate-500">
+        <span aria-live="polite">{% if p.total %}{{ (p.page - 1) * p.page_size + 1 }}–{{ [p.page * p.page_size, p.total]|min }} of {{ p.total }} changes{% else %}0 changes{% endif %}</span>
+        <div class="flex items-center gap-2">
+            {% set nav = 'px-3 py-1.5 rounded-lg border border-border dark:border-white/10' %}
+            {% if p.has_previous %}<a href="{{ url_for('changes_page', **dict(filters, page=p.page - 1)) }}" class="{{ nav }} hover:text-accent" aria-label="Previous page"><i class="fas fa-chevron-left"></i></a>
+            {% else %}<span class="{{ nav }} opacity-40" aria-hidden="true"><i class="fas fa-chevron-left"></i></span>{% endif %}
+            {% if p.has_next %}<a href="{{ url_for('changes_page', **dict(filters, page=p.page + 1)) }}" class="{{ nav }} hover:text-accent" aria-label="Next page"><i class="fas fa-chevron-right"></i></a>
+            {% else %}<span class="{{ nav }} opacity-40" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>{% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // Dropdowns apply immediately; search applies on Enter or when leaving the field
+    (function () {
+        const form = document.querySelector('form[data-autosubmit]');
+        form.addEventListener('change', () => form.submit());
+    })();
+</script>
+{% endblock %}

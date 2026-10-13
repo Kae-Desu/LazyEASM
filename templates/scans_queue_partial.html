@@ -1,0 +1,69 @@
+{# Scan queue table (Scans page and its auto-refresh via /scans/queue) #}
+{% set p = result.pagination %}
+{% set kind_labels = {'discovery': ('Discovery', 'fa-satellite-dish'), 'scan': ('Scan', 'fa-bolt'),
+                      'deep_scan': ('Deep scan', 'fa-search-plus'), 'monitor': ('Monitor run', 'fa-heart-pulse')} %}
+{% set status_styles = {'pending': ('Queued', 'bg-amber-500/10 text-amber-500 border-amber-500/20'),
+                        'running': ('Running', 'bg-blue-500/10 text-blue-500 border-blue-500/20 animate-pulse'),
+                        'completed': ('Completed', 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'),
+                        'failed': ('Failed', 'bg-red-500/10 text-red-500 border-red-500/20'),
+                        'cancelled': ('Cancelled', 'bg-slate-500/10 text-slate-400 border-slate-500/20')} %}
+<div class="relative overflow-x-auto">
+    <table class="min-w-[820px] w-full text-sm text-left">
+        <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.15em]">
+            <tr>
+                <th scope="col" class="px-5 py-3">Type</th>
+                <th scope="col" class="px-5 py-3">Target</th>
+                <th scope="col" class="px-5 py-3">Status</th>
+                <th scope="col" class="px-5 py-3">Queued</th>
+                <th scope="col" class="px-5 py-3">Duration</th>
+                <th scope="col" class="px-5 py-3">Result</th>
+                <th scope="col" class="px-5 py-3 text-right"><span class="sr-only">Action</span></th>
+            </tr>
+        </thead>
+        <tbody class="divide-y divide-slate-100 dark:divide-white/5">
+            {% for item in result['items'] %}
+            {% set kind_label, kind_icon = kind_labels.get(item.kind, (item.kind, 'fa-gear')) %}
+            {% set status_label, status_cls = status_styles.get(item.status, (item.status, 'bg-slate-500/10 text-slate-500 border-slate-500/20')) %}
+            <tr class="hover:bg-slate-50 dark:hover:bg-white/5">
+                <td class="px-5 py-3 text-xs text-slate-500 whitespace-nowrap"><i class="fas {{ kind_icon }} w-4 mr-1 text-slate-400" aria-hidden="true"></i>{{ kind_label }}</td>
+                <td class="px-5 py-3 font-mono text-xs dark:text-white">
+                    <div class="max-w-[280px] truncate" title="{{ item.target }}">
+                    {% if item.asset_type %}<a href="/assets/{{ item.asset_type }}/{{ item.asset_id }}" class="hover:text-accent">{{ item.target }}</a>{% else %}{{ item.target }}{% endif %}
+                    </div>
+                </td>
+                <td class="px-5 py-3"><span class="px-2 py-0.5 rounded text-[10px] font-bold uppercase border whitespace-nowrap {{ status_cls }}">{{ status_label }}</span></td>
+                <td class="px-5 py-3 text-[11px] text-slate-500 font-mono whitespace-nowrap">{{ item.queued_at or '-' }}</td>
+                <td class="px-5 py-3 text-[11px] text-slate-500 font-mono whitespace-nowrap">{{ item.duration or ('…' if item.status == 'running' else '-') }}</td>
+                <td class="px-5 py-3 text-xs text-slate-500 whitespace-nowrap">
+                    {% if item.status == 'failed' %}
+                    <span class="block max-w-[240px] truncate text-red-500" title="{{ item.error_message or 'Error' }}">{{ item.error_message or 'Error' }}</span>
+                    {% elif item.status == 'completed' and item.kind == 'deep_scan' %}
+                    {{ item.ports_found or 0 }} ports, {{ item.dirs_found or 0 }} dirs
+                    {% elif item.status == 'completed' and item.kind == 'scan' and (item.ports_found or item.tech_found or item.cve_found) %}
+                    {{ item.ports_found or 0 }} ports, {{ item.tech_found or 0 }} tech, {{ item.cve_found or 0 }} CVEs
+                    {% else %}-{% endif %}
+                </td>
+                <td class="px-5 py-3 text-right">
+                    {% if item.kind == 'deep_scan' and item.status == 'pending' %}
+                    <button type="button" data-action="cancel_scan" data-asset-name="{{ item.target }}" class="text-amber-500 hover:text-amber-700 text-xs whitespace-nowrap"><i class="fas fa-times-circle mr-1"></i>Cancel</button>
+                    {% endif %}
+                </td>
+            </tr>
+            {% else %}
+            <tr><td colspan="7" class="px-5 py-10 text-center text-slate-400 text-sm">
+                {% if filters %}No queue items match these filters.{% else %}Nothing has been queued yet. Add targets above to start.{% endif %}
+            </td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+<div class="flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t border-border dark:border-white/5 text-xs text-slate-500">
+    <span aria-live="polite">{% if p.total %}{{ (p.page - 1) * p.page_size + 1 }}–{{ [p.page * p.page_size, p.total]|min }} of {{ p.total }} queue items{% else %}0 queue items{% endif %}</span>
+    <div class="flex items-center gap-2">
+        {% set nav = 'px-3 py-1.5 rounded-lg border border-border dark:border-white/10' %}
+        {% if p.has_previous %}<a href="{{ url_for('scans_page', **dict(filters, page=p.page - 1)) }}#queue" class="{{ nav }} hover:text-accent" aria-label="Previous page"><i class="fas fa-chevron-left"></i></a>
+        {% else %}<span class="{{ nav }} opacity-40" aria-hidden="true"><i class="fas fa-chevron-left"></i></span>{% endif %}
+        {% if p.has_next %}<a href="{{ url_for('scans_page', **dict(filters, page=p.page + 1)) }}#queue" class="{{ nav }} hover:text-accent" aria-label="Next page"><i class="fas fa-chevron-right"></i></a>
+        {% else %}<span class="{{ nav }} opacity-40" aria-hidden="true"><i class="fas fa-chevron-right"></i></span>{% endif %}
+    </div>
+</div>

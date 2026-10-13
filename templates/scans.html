@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+{% block title %}Scans{% endblock %}
+
+{% block content %}
+{% set input_cls = 'bg-white dark:bg-dark-card border border-border dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-accent outline-none dark:text-white' %}
+{% set panel = 'bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden' %}
+{% set label = 'text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400' %}
+
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+    <h1 class="text-2xl font-bold dark:text-white"><i class="fas fa-satellite mr-2 text-accent"></i>Scans</h1>
+    {% if worker.alive %}
+    <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20"><i class="fas fa-circle text-[7px] mr-1.5 align-middle"></i>Worker running</span>
+    {% else %}
+    <span class="px-3 py-1 rounded-full text-[10px] font-bold uppercase bg-red-500/10 text-red-500 border border-red-500/20" title="No heartbeat from worker.py; queued work will not run"><i class="fas fa-circle-exclamation mr-1.5"></i>Worker not running</span>
+    {% endif %}
+</div>
+
+<div class="grid grid-cols-1 xl:grid-cols-2 gap-4">
+    <!-- Submit targets -->
+    <section class="{{ panel }} flex flex-col">
+        <div class="px-5 py-3 border-b border-border dark:border-white/5"><h2 class="{{ label }}"><i class="fas fa-crosshairs mr-2 text-accent"></i>Add targets</h2></div>
+        <form action="/process_assets" method="POST" class="p-5 flex-grow flex flex-col gap-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="asset-input" class="text-xs text-slate-500">Domains, subdomains, IPs or CIDRs, one per line. Discovery, scanning and monitoring start automatically.</label>
+            <textarea id="asset-input" name="asset_input" class="w-full flex-grow min-h-[7rem] bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-3 focus:ring-2 focus:ring-secondary outline-none font-mono text-sm resize-y dark:text-white" placeholder="example.com"></textarea>
+            {% if queue_status.active %}
+            <p class="text-xs text-blue-500"><i class="fas fa-spinner fa-spin mr-1"></i>Scanning batch: {{ queue_status.running }} running, {{ queue_status.pending }} queued, {{ queue_status.completed }} done{% if queue_status.failed %}, {{ queue_status.failed }} failed{% endif %}</p>
+            {% endif %}
+            <button type="button" data-action="scan" class="w-full font-bold py-2.5 rounded-xl bg-secondary text-white hover:opacity-90 transition-all">
+                <i class="fas fa-bolt mr-2"></i>Start scanning
+            </button>
+        </form>
+    </section>
+
+    <!-- Continuous monitoring -->
+    <section class="{{ panel }}">
+        <div class="flex items-center justify-between gap-3 px-5 py-3 border-b border-border dark:border-white/5">
+            <h2 class="{{ label }}"><i class="fas fa-heart-pulse mr-2 text-accent"></i>Continuous monitoring</h2>
+            <label class="inline-flex items-center gap-2 cursor-pointer text-xs text-slate-500">
+                <span id="phase3-status-label">{{ 'Enabled' if phase3.enabled else 'Disabled' }}</span>
+                <span class="relative inline-flex items-center">
+                    <input type="checkbox" id="phase3-toggle" class="sr-only peer" {% if phase3.enabled %}checked{% endif %} aria-label="Continuous monitoring">
+                    <span class="w-9 h-5 bg-gray-300 rounded-full dark:bg-gray-700 peer-checked:bg-emerald-500 after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-4"></span>
+                </span>
+            </label>
+        </div>
+        <table class="w-full text-xs">
+            <caption class="sr-only">Monitoring checks</caption>
+            <tbody class="divide-y divide-slate-100 dark:divide-white/5">
+                {% for m in monitors %}
+                <tr>
+                    <th scope="row" class="px-5 py-2 text-left font-semibold dark:text-slate-200">{{ m.label }}</th>
+                    <td class="px-2 py-2 text-slate-400 whitespace-nowrap">every {{ m.interval }} {{ m.unit[:-1] if m.interval == 1 else m.unit }}</td>
+                    <td class="px-2 py-2 font-mono text-[11px] text-slate-500" data-time="{{ m.last }}">-</td>
+                    <td class="px-5 py-2 text-right">
+                        <button type="button" data-run-check="{{ m.name }}" class="text-[10px] font-bold uppercase text-accent hover:text-secondary whitespace-nowrap disabled:opacity-40"><i class="fas fa-play mr-1"></i>Run now</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        <div class="px-5 py-3 border-t border-border dark:border-white/5">
+            <a href="/settings#schedule" class="text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-accent"><i class="fas fa-sliders-h mr-1"></i>Change intervals</a>
+        </div>
+    </section>
+</div>
+
+<!-- Queue -->
+<section id="queue" class="mt-8">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+        <h2 class="{{ label }}"><i class="fas fa-list-check mr-2 text-accent"></i>Queue
+            <span class="ml-2 normal-case tracking-normal font-normal">{{ result.active.running }} running · {{ result.active.pending }} queued</span></h2>
+    </div>
+    <form method="get" action="/scans#queue" class="flex flex-wrap gap-3 mb-3" role="search" data-autosubmit>
+        <div class="flex-[2_1_220px]">
+            <label for="f-q" class="sr-only">Search target</label>
+            <input id="f-q" name="q" type="search" value="{{ filters.q or '' }}" placeholder="Search target" class="w-full {{ input_cls }}">
+        </div>
+        <div class="flex-[1_1_150px]">
+            <label for="f-kind" class="sr-only">Type</label>
+            <select id="f-kind" name="kind" class="w-full {{ input_cls }}">
+                {% for value, text in [('', 'All types'), ('discovery', 'Discovery'), ('scan', 'Scans'), ('deep_scan', 'Deep scans'), ('monitor', 'Monitor runs')] %}
+                <option value="{{ value }}" {% if filters.kind == value %}selected{% endif %}>{{ text }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="flex-[1_1_150px]">
+            <label for="f-status" class="sr-only">Status</label>
+            <select id="f-status" name="status" class="w-full {{ input_cls }}">
+                {% for value, text in [('', 'Any status'), ('running', 'Running'), ('pending', 'Queued'), ('completed', 'Completed'), ('failed', 'Failed'), ('cancelled', 'Cancelled')] %}
+                <option value="{{ value }}" {% if filters.status == value %}selected{% endif %}>{{ text }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <noscript><button type="submit" class="{{ input_cls }}">Filter</button></noscript>
+    </form>
+    <div id="queue-table" class="{{ panel }} shadow-xl">
+        {% include 'scans_queue_partial.html' %}
+    </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+    const showTimes = () => document.querySelectorAll('[data-time]').forEach(el => { el.textContent = formatRelativeTime(el.dataset.time); });
+    showTimes();
+
+    // Dropdowns apply immediately; search applies on Enter or when leaving the field
+    const form = document.querySelector('form[data-autosubmit]');
+    form.addEventListener('change', () => form.submit());
+
+    // Keep the queue current: every 10s while the tab is visible
+    async function refreshQueue() {
+        if (document.hidden || isModalOpen()) return;
+        try {
+            const response = await fetch(`/scans/queue${location.search}`);
+            if (response.ok) document.getElementById('queue-table').innerHTML = await response.text();
+        } catch (err) {
+            console.error('Queue refresh failed:', err);
+        }
+    }
+    setInterval(refreshQueue, 10000);
+    window.onDataChanged = refreshQueue;
+
+    document.querySelectorAll('[data-run-check]').forEach(button => button.addEventListener('click', async () => {
+        button.disabled = true;
+        try {
+            const response = await fetch(`/api/phase3/${encodeURIComponent(button.dataset.runCheck)}/check`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error(data.error || 'Failed to queue check');
+            showToast(data.message, data.queued ? 'success' : 'info');
+            refreshQueue();
+        } catch (err) {
+            showToast(err.message || 'Network error. Please try again.', 'error');
+        } finally {
+            button.disabled = false;
+        }
+    }));
+
+    document.getElementById('phase3-toggle').addEventListener('change', async (event) => {
+        const enabled = event.target.checked;
+        try {
+            const response = await fetch('/api/phase3/toggle', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
+            });
+            const data = await response.json();
+            if (!response.ok || !data.success) throw new Error();
+            document.getElementById('phase3-status-label').textContent = data.enabled ? 'Enabled' : 'Disabled';
+            showToast(data.message, 'success');
+        } catch (err) {
+            event.target.checked = !enabled;
+            showToast('Failed to update monitoring setting', 'error');
+        }
+    });
+})();
+</script>
+{% endblock %}

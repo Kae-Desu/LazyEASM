@@ -22,6 +22,7 @@ from utils.queue_manager import task_queue
 from utils.pipeline import enqueue_input_discovery, enqueue_assets_for_phase1, enqueue_single_asset_for_phase1
 from utils.asset_repository import AssetQueryError, get_asset_detail, list_assets
 from utils.findings_repository import FindingQueryError, get_overview, list_findings
+from utils.activity_repository import ActivityQueryError, list_changes, list_scans
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
 from utils import auth
@@ -545,24 +546,7 @@ def inject_csrf_token():
 @app.route('/')
 @token_required
 def dashboard():
-    queue_status = task_queue.get_status()
-    queue_active = task_queue.is_active()
-    
-    # Get Phase 2 queue items
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('''
-        SELECT queue_id, scan_type, target, target_id, target_type, status, 
-               queued_at, started_at, completed_at, ports_found, dirs_found, error_message
-        FROM scan_queue
-        WHERE scan_type = 'phase2_deep_scan'
-        ORDER BY queued_at DESC
-        LIMIT 20
-    ''')
-    phase2_queue = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    return render_template('dashboard.html', active_page='overview', queue_status=queue_status, queue_active=queue_active, phase2_queue=phase2_queue,
+    return render_template('dashboard.html', active_page='overview',
                            changes=get_changes(limit=RECENT_CHANGES_LIMIT), overview=get_overview())
 
 
@@ -585,6 +569,70 @@ def assets_page():
 def findings_page():
     """Cross-asset triage list (data from /api/findings)."""
     return render_template('findings.html', active_page='findings')
+
+
+@app.route('/changes')
+@token_required
+def changes_page():
+    """Full change history with filters (server-rendered; filters are query params)."""
+    filters = {key: (request.args.get(key) or '').strip() or None for key in ('q', 'category', 'period', 'host')}
+    try:
+        result = list_changes(page=request.args.get('page', 1), query=filters['q'], host=filters['host'],
+                              category=filters['category'], period=filters['period'])
+    except ActivityQueryError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('changes_page'))
+    days = []
+    for item in result['items']:
+        day = (item['detected_at'] or '')[:10]
+        if not days or days[-1][0] != day:
+            days.append((day, []))
+        days[-1][1].append(item)
+    return render_template('changes.html', active_page='changes', result=result, days=days,
+                           filters={k: v for k, v in filters.items() if v})
+
+
+def _scan_view():
+    """Queue page data from the request's filters (shared by the page and its refresh partial)."""
+    filters = {key: (request.args.get(key) or '').strip() or None for key in ('kind', 'status', 'q')}
+    result = list_scans(page=request.args.get('page', 1), kind=filters['kind'],
+                        status=filters['status'], query=filters['q'])
+    return result, {k: v for k, v in filters.items() if v}
+
+
+@app.route('/scans')
+@token_required
+def scans_page():
+    """Submit targets, worker and monitoring status, and every scan queue."""
+    from utils.db_utils import get_setting
+    from utils.phase3_worker import get_phase3_status
+    from utils.scan_settings import SCHEDULE, interval_value
+    from utils.worker_runtime import get_worker_status
+
+    try:
+        result, filters = _scan_view()
+    except ActivityQueryError as exc:
+        flash(str(exc), 'error')
+        return redirect(url_for('scans_page'))
+    last_key = {'screenshots': 'last_screenshot_check'}
+    monitors = [{'name': name, 'label': label, 'unit': unit,
+                 'interval': interval_value(key, default, low, high),
+                 'last': get_setting(last_key.get(name, f'last_{name}_check')) or ''}
+                for name, label, key, default, unit, low, high in SCHEDULE]
+    return render_template('scans.html', active_page='scans', result=result, filters=filters,
+                           queue_status=task_queue.get_status(), worker=get_worker_status(),
+                           phase3=get_phase3_status(), monitors=monitors)
+
+
+@app.route('/scans/queue')
+@token_required
+def scans_queue_partial():
+    """Queue table body and footer for the Scans page auto-refresh."""
+    try:
+        result, filters = _scan_view()
+    except ActivityQueryError as exc:
+        return jsonify({'success': False, 'error': str(exc)}), 400
+    return render_template('scans_queue_partial.html', result=result, filters=filters)
 
 
 @app.route('/assets/<asset_type>/<int:asset_id>')
@@ -878,7 +926,7 @@ def test_webhook_endpoint():
     return redirect(url_for('settings_page', _anchor='notifications'))
 
 
-RECENT_CHANGES_LIMIT = 30
+RECENT_CHANGES_LIMIT = 15
 
 
 @app.route('/update_changes')
@@ -935,27 +983,6 @@ def export_data(dataset, fmt):
     response.headers['Content-Type'] = 'text/csv; charset=utf-8' if fmt == 'csv' else 'application/json'
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'
     return response
-
-
-@app.route('/update_queue')
-@token_required
-def update_queue():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('''
-        SELECT queue_id, target, target_id, target_type, status, 
-               queued_at, started_at, completed_at, ports_found, dirs_found, error_message
-        FROM scan_queue
-        WHERE scan_type = 'phase2_deep_scan'
-        ORDER BY queued_at DESC
-        LIMIT 50
-    ''')
-    
-    phase2_queue = [dict(row) for row in cursor.fetchall()]
-    conn.close()
-    
-    return render_template('queue_partial.html', phase2_queue=phase2_queue)
 
 
 @app.route('/queue/status')
@@ -1155,13 +1182,13 @@ def process_assets():
             f"Please wait for it to complete. New assets will be scanned in the next Deep Scan cycle.",
             'warning'
         )
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('scans_page'))
     
     input_text = request.form.get('asset_input', '')
     
     if not input_text or not input_text.strip():
         flash('No assets provided. Please enter domains, IPs, or CIDRs.', 'error')
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('scans_page'))
     
     # Parse input
     targets = parse_input(input_text)
@@ -1173,7 +1200,7 @@ def process_assets():
 
     if not any(v for k, v in targets.items() if k != 'invalid'):
         flash('No valid assets found. Please check your input format.' + invalid_note, 'error')
-        return redirect(url_for('dashboard'))
+        return redirect(url_for('scans_page'))
     
     # Log counts
     counts = {k: len(v) for k, v in targets.items()}
@@ -1183,7 +1210,7 @@ def process_assets():
     enqueue_input_discovery(targets)
     
     flash('Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.' + invalid_note, 'success')
-    return redirect(url_for('dashboard'))
+    return redirect(url_for('scans_page'))
 
 
 # ============================================

@@ -20,138 +20,20 @@
             {% include 'overview_partial.html' %}
         </div>
 
-                <div class="mt-8 bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden flex flex-col card-glow transition-all">
-                    <div class="px-6 py-4 border-b border-border dark:border-white/5 bg-lazy-dark flex items-center justify-between text-white">
-                        <h2 class="font-bold flex items-center text-secondary uppercase text-xs tracking-widest">
-                            <i class="fas fa-crosshairs mr-3"></i>Target Assets
-                        </h2>
-                    </div>
-                    <form action="/process_assets" method="POST" class="p-6 flex-grow flex flex-col" onsubmit="showLoading()">
-                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <div class="flex-grow space-y-1.5">
-                            <label class="text-slate-500 dark:text-slate-400 font-bold text-[10px] uppercase tracking-wider ml-1">Asset Queue (Newline separated)</label>
-                            <textarea name="asset_input" class="w-full bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-4 py-4 focus:ring-2 focus:ring-secondary outline-none transition-all font-mono text-sm h-28 resize-y dark:text-white" placeholder="example.com"></textarea>
-                        </div>
-                        <button type="button" 
-                                data-action="scan" 
-                                id="scanButton"
-                                {% if queue_active %}disabled{% endif %}
-                                class="mt-4 w-full font-bold py-3 rounded-xl transition-all shadow-lg 
-                                       {% if queue_active %}bg-gray-400 text-gray-200 cursor-not-allowed{% else %}bg-secondary text-white hover:opacity-90{% endif %}">
-                            {% if queue_active %}
-                                <i class="fas fa-spinner fa-spin mr-2"></i>Processing {{ queue_status.running }} of {{ queue_status.total }}...
-                            {% else %}
-                                <i class="fas fa-bolt mr-2 text-white"></i>Start Scanning Process
-                            {% endif %}
-                        </button>
-                    </form>
-                </div>
-
-        <!-- Phase 3 Continuous Monitoring -->
-        <div class="mt-8">
-            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
-                <i class="fas fa-heartbeat mr-2 text-accent"></i>Continuous Monitoring
-            </h3>
-            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl p-6">
-                <div class="flex justify-between items-center mb-4">
-                    <div class="flex items-center space-x-4">
-                        <label class="relative inline-flex items-center cursor-pointer">
-                            <input type="checkbox" id="phase3-toggle" class="sr-only peer" checked>
-                            <div class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-emerald-500"></div>
-                        </label>
-                        <span id="phase3-status-label" class="text-sm font-medium text-slate-700 dark:text-slate-300">Enabled</span>
-                    </div>
-                    <div class="flex items-center space-x-2">
-                        <span id="phase3-running-badge" class="hidden px-2 py-1 rounded text-[10px] font-bold uppercase bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
-                            <i class="fas fa-circle animate-pulse mr-1 text-[8px]"></i>Running
-                        </span>
-                    </div>
-                </div>
-                
-                <div class="text-slate-500 dark:text-slate-400 font-medium text-xs mb-2">Last checks</div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Liveness</div>
-                        <div id="last-liveness" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">CT logs</div>
-                        <div id="last-ctlogs" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Tech scan</div>
-                        <div id="last-wappalyzer" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Takeover</div>
-                        <div id="last-takeover" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Exploit intel</div>
-                        <div id="last-intel" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Misconfig</div>
-                        <div id="last-misconfig" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Discovery</div>
-                        <div id="last-discovery" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                    <div class="bg-slate-50 dark:bg-lazy-dark rounded-xl px-3 py-2 border border-border dark:border-white/10">
-                        <div class="text-[10px] uppercase tracking-wider text-slate-400">Screenshots</div>
-                        <div id="last-screenshots" class="font-mono text-[11px] dark:text-white truncate">-</div>
-                    </div>
-                </div>
-                <div class="mt-6 pt-4 border-t border-border dark:border-white/5 text-xs">
-                    <a href="/settings#schedule" class="text-slate-500 hover:text-accent font-bold uppercase tracking-wider text-[10px]"><i class="fas fa-sliders-h mr-1"></i>Schedule &amp; thresholds</a>
-                </div>
+        <section class="mt-6 bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden" id="changes">
+            <div class="flex items-center justify-between px-5 py-3 border-b border-border dark:border-white/5">
+                <h2 class="text-[10px] font-bold uppercase tracking-widest text-slate-500 dark:text-slate-400"><i class="fas fa-clock-rotate-left mr-2 text-accent"></i>Recent changes</h2>
+                <a href="/changes" class="text-[10px] font-bold uppercase text-slate-400 hover:text-accent">All changes</a>
             </div>
-        </div>
-
-        <!-- Change History Panel -->
-        <div class="mt-6" id="changes">
-            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
-                <i class="fas fa-clock-rotate-left mr-2 text-accent"></i>Recent Changes
-            </h3>
-            <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl">
-                <ul id="changes-list" class="divide-y divide-slate-100 dark:divide-white/5 max-h-[420px] overflow-y-auto custom-scrollbar">
-                    {% include 'changes_partial.html' %}
-                </ul>
-            </div>
-        </div>
-
-
-        <!-- Phase 2 Queue Status Panel -->
-        <div class="mt-6">
-            <h3 class="text-sm font-bold text-slate-500 mb-4 px-2 uppercase tracking-widest flex items-center">
-                <i class="fas fa-list-alt mr-2 text-accent"></i>Phase 2 Queue
-            </h3>
-            <div class="overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
-                <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-2xl inline-block min-w-full align-middle">
-                    <table class="min-w-[600px] w-full text-sm text-left">
-                        <thead class="bg-lazy-dark text-slate-400 text-[10px] uppercase tracking-[0.2em]">
-                            <tr>
-                                <th class="px-6 py-4">Target</th>
-                                <th class="px-6 py-4">Status</th>
-                                <th class="px-6 py-4">Queued At</th>
-                                <th class="px-6 py-4">Started At</th>
-                                <th class="px-6 py-4">Results</th>
-                                <th class="px-6 py-4 text-right">Action</th>
-                            </tr>
-                        </thead>
-                        <tbody id="queue-table-body" class="divide-y divide-slate-100 dark:divide-white/5">
-                            {% include 'queue_partial.html' %}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </div>
+            <ul id="changes-list" class="divide-y divide-slate-100 dark:divide-white/5">
+                {% include 'changes_partial.html' %}
+            </ul>
+        </section>
 {% endblock %}
 
 {% block scripts %}
 <script>
-    // --- Auto-refresh: queue, recent changes and monitoring status ---
+    // --- Auto-refresh: headline numbers and recent changes ---
     let reloadInterval;
     const reloadStates = [
         { label: 'OFF', value: null }, { label: '5S', value: 5000 },
@@ -161,14 +43,11 @@
     async function refreshOverview() {
         if (isModalOpen()) return;
         try {
-            const [queueResponse, changesResponse, statsResponse] = await Promise.all([fetch('/update_queue'), fetch('/update_changes'), fetch('/update_overview')]);
+            const [changesResponse, statsResponse] = await Promise.all([fetch('/update_changes'), fetch('/update_overview')]);
             const stats = document.getElementById('overview-stats');
             if (stats && statsResponse.ok) stats.innerHTML = await statsResponse.text();
-            const queueBody = document.getElementById('queue-table-body');
-            if (queueBody && queueResponse.ok) queueBody.innerHTML = await queueResponse.text();
             const changesList = document.getElementById('changes-list');
             if (changesList && changesResponse.ok) changesList.innerHTML = await changesResponse.text();
-            fetchPhase3Status();
         } catch (err) {
             console.error('Refresh failed:', err);
         }
@@ -190,53 +69,6 @@
         applyReload(next);
     }
 
-    // --- Continuous monitoring panel ---
-    let phase3Interval = null;
-
-    async function fetchPhase3Status() {
-        try {
-            const response = await fetch('/api/phase3/status');
-            if (!response.ok) throw new Error('Failed to fetch monitoring status');
-            const data = await response.json();
-            const set = (id, text) => { const el = document.getElementById(id); if (el) el.textContent = text; };
-
-            const toggle = document.getElementById('phase3-toggle');
-            if (toggle) toggle.checked = data.enabled;
-            set('phase3-status-label', data.enabled ? 'Enabled' : 'Disabled');
-            const runningBadge = document.getElementById('phase3-running-badge');
-            if (runningBadge) runningBadge.classList.toggle('hidden', !(data.running && data.enabled));
-
-            [['last-liveness', 'last_liveness_check'], ['last-ctlogs', 'last_ctlogs_check'],
-             ['last-wappalyzer', 'last_wappalyzer_check'], ['last-takeover', 'last_takeover_check'],
-             ['last-intel', 'last_intel_check'], ['last-misconfig', 'last_misconfig_check'],
-             ['last-discovery', 'last_discovery_check'], ['last-screenshots', 'last_screenshot_check']].forEach(([id, key]) => set(id, formatRelativeTime(data[key])));
-
-            if (data.enabled && !phase3Interval) phase3Interval = setInterval(fetchPhase3Status, 60000);
-            if (!data.enabled && phase3Interval) { clearInterval(phase3Interval); phase3Interval = null; }
-        } catch (err) {
-            console.error('Error fetching monitoring status:', err);
-        }
-    }
-
-    async function togglePhase3(enabled) {
-        try {
-            const response = await fetch('/api/phase3/toggle', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
-            });
-            if (!response.ok) throw new Error();
-            const data = await response.json();
-            showToast(data.message, data.success ? 'success' : 'error');
-            fetchPhase3Status();
-        } catch (err) {
-            showToast('Failed to update monitoring setting', 'error');
-        }
-    }
-
-    document.addEventListener('DOMContentLoaded', () => {
-        applyReload(parseInt(localStorage.getItem('reloadStateIndex') || 0));
-        fetchPhase3Status();
-        const toggle = document.getElementById('phase3-toggle');
-        if (toggle) toggle.addEventListener('change', e => togglePhase3(e.target.checked));
-    });
+    document.addEventListener('DOMContentLoaded', () => applyReload(parseInt(localStorage.getItem('reloadStateIndex') || 0)));
 </script>
 {% endblock %}

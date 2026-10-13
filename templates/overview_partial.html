@@ -47,7 +47,7 @@
 
 <p class="mt-3 px-1 text-xs text-slate-500">
     This week: <span class="font-bold">{{ i.new_this_week }}</span> new open finding{{ 's' if i.new_this_week != 1 }},
-    <a href="#changes" class="font-bold hover:text-accent">{{ overview.changes_this_week }}</a> change{{ 's' if overview.changes_this_week != 1 }} recorded.
+    <a href="/changes?period=7d" class="font-bold hover:text-accent">{{ overview.changes_this_week }}</a> change{{ 's' if overview.changes_this_week != 1 }} recorded.
 </p>
 
 <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-6">

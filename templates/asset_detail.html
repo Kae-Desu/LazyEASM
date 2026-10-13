@@ -1,5 +1,6 @@
 {% extends 'base.html' %}
 {% from '_cards.html' import finding_card, cve_card, empty_state %}
+{% from '_changes.html' import change_item %}
 {% block title %}{{ asset.name }}{% endblock %}
 
 {% block content %}
@@ -155,10 +156,9 @@
 <section id="panel-history" role="tabpanel" aria-labelledby="tab-history" class="tab-panel hidden">
     {% if asset.history %}
     <ol class="rounded-2xl border border-border dark:border-white/10 bg-white dark:bg-dark-card divide-y divide-slate-100 dark:divide-white/5">
-        {% for h in asset.history %}
-        <li class="px-5 py-3 text-sm"><span class="font-mono text-[11px] text-slate-400 mr-2">{{ h.detected_at }}</span>{{ h.summary }}</li>
-        {% endfor %}
+        {% for h in asset.history %}{{ change_item(h, show_host=False) }}{% endfor %}
     </ol>
+    <a href="/changes?host={{ asset.name|urlencode }}" class="inline-block mt-3 text-[10px] font-bold uppercase tracking-wider text-slate-500 hover:text-accent">Full history <i class="fas fa-arrow-right ml-1"></i></a>
     {% else %}{{ empty_state('fa-clock-rotate-left', 'No changes recorded yet. Changes appear after the asset is re-scanned.') }}{% endif %}
 </section>
 

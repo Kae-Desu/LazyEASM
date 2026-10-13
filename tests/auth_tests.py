@@ -115,7 +115,7 @@ class CsrfSessionTests(AuthTestCase):
         import re
         auth.bootstrap_admin_from_env()
         self.client.post('/login', data={'username': 'lazymin', 'password': 'generated-by-install-1'})
-        page = self.client.get('/').get_data(as_text=True)
+        page = self.client.get('/settings').get_data(as_text=True)
         csrf = re.search(r'name="csrf_token" value="([0-9a-f]+)"', page).group(1)
         old_access = self.client.get_cookie('access_token').value
 
