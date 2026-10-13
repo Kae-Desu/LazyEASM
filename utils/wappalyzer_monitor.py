@@ -42,7 +42,8 @@ def _update_wappalyzer_timestamp(host: str, timestamp: str) -> None:
 
 def get_hosts_for_wappalyzer() -> list:
     """
-    Get distinct hostnames that have HTTP services and status='up'.
+    Get distinct hostnames, and IPs submitted directly, that have HTTP
+    services and status='up'.
 
     Returns:
         List of dicts: [{host: str, ports: [int]}, ...]
@@ -75,6 +76,23 @@ def get_hosts_for_wappalyzer() -> list:
     ''')
     for row in cursor.fetchall():
         host = row['domain_name']
+        if host not in hosts:
+            hosts[host] = {'host': host, 'ports': []}
+        hosts[host]['ports'].append({
+            'port_num': row['port_num'],
+            'is_https': row['is_https']
+        })
+
+    # IPs behind a hostname are scanned through that hostname
+    cursor.execute('''
+        SELECT DISTINCT i.ip_value, h.port_num, h.is_https
+        FROM http_services h
+        JOIN ip_asset i ON i.ip_value = h.host
+        WHERE i.status = 'up'
+          AND i.ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
+    ''')
+    for row in cursor.fetchall():
+        host = row['ip_value']
         if host not in hosts:
             hosts[host] = {'host': host, 'ports': []}
         hosts[host]['ports'].append({

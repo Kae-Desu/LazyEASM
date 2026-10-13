@@ -128,6 +128,14 @@ class StorageTests(StorageTestCase):
             result = ss.run_screenshots()
         self.assertEqual((result['available'], result['error']), (False, 'Chromium missing'))
 
+    def test_monitor_run_fails_visibly_only_when_enabled(self):
+        from utils import phase3_worker
+        with patch.object(ss, 'capture_pages', side_effect=ss.ScreenshotUnavailable('Chromium sandbox is blocked')):
+            with self.assertRaisesRegex(RuntimeError, 'sandbox'):
+                phase3_worker.run_monitor('screenshots')
+        with patch.object(ss, 'screenshots_enabled', return_value=False):
+            phase3_worker.run_monitor('screenshots')          # turned off: not a failure
+
     def test_run_writes_files_and_records(self):
         with patch.object(ss, 'capture_pages', return_value=[self.capture(lambda d: None)]):
             result = ss.run_screenshots()

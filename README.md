@@ -135,6 +135,17 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 - **Web Screenshots** - Every HTTP service is captured in headless Chromium (Playwright) right after its first scan and daily afterwards (interval in Schedule & Thresholds). Thumbnails appear in the Assets list and full captures in the asset's Screenshots tab, so login portals, default pages and parked domains stand out at a glance. A perceptual hash compares each capture with the previous one; a visibly different page is recorded as an `appearance_changed` event. The last 5 captures per service are kept in `db/screenshots/`. Toggle under Settings > Discovery & Screenshots or with `SCREENSHOTS_ENABLED=false`. Manual trigger: `/api/phase3/screenshots/check`
   - The browser only talks to the asset itself: requests (including redirects and page resources) to loopback, private, link-local (cloud metadata) and other internal addresses are blocked unless they are the asset's own resolved IPs, and non-HTTP schemes are refused
   - Each page gets a fresh browser context with downloads and service workers disabled; Chromium's sandbox stays on unless running as root
+  - Ubuntu 23.10+ (native install as a normal user): AppArmor blocks the user namespaces Chromium's sandbox needs, and screenshot runs fail with "Chromium sandbox is blocked by the OS". Allow it for the Playwright binary only, as root (adjust the home path):
+    ```
+    cat > /etc/apparmor.d/lazyeasm-chromium <<'EOF'
+    abi <abi/5.0>,
+    include <tunables/global>
+    profile lazyeasm-chromium /home/*/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+      userns,
+    }
+    EOF
+    apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
+    ```
 - **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
   - Each threshold notified exactly once per certificate
   - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)

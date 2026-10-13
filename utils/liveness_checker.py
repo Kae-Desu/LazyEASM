@@ -29,6 +29,10 @@ logger = logging.getLogger(__name__)
 TCP_FALLBACK_PORTS = [80, 443, 22]
 
 
+ASSET_TABLES = {'domain': ('domain_asset', 'dom_id'), 'subdomain': ('subdomain_asset', 'sub_id'),
+                'ip': ('ip_asset', 'ip_id')}
+
+
 def check_single_asset(asset: dict) -> str:
     """
     Check if a single asset is up or down.
@@ -146,8 +150,7 @@ def check_all_liveness() -> dict:
     cursor = conn.cursor()
     try:
         for asset_id, asset_type, new_status in updates_to_make:
-            table = 'domain_asset' if asset_type == 'domain' else 'subdomain_asset'
-            id_col = 'dom_id' if asset_type == 'domain' else 'sub_id'
+            table, id_col = ASSET_TABLES[asset_type]
             cursor.execute(f'''
                 UPDATE {table} SET status = ?, last_liveness_check = ? WHERE {id_col} = ?
             ''', (new_status, now, asset_id))
@@ -158,8 +161,7 @@ def check_all_liveness() -> dict:
 
         # Update last_liveness_check for all assets (even if status unchanged)
         for asset in assets:
-            table = 'domain_asset' if asset['asset_type'] == 'domain' else 'subdomain_asset'
-            id_col = 'dom_id' if asset['asset_type'] == 'domain' else 'sub_id'
+            table, id_col = ASSET_TABLES[asset['asset_type']]
             cursor.execute(f'''
                 UPDATE {table} SET last_liveness_check = ? WHERE {id_col} = ?
             ''', (now, asset['asset_id']))

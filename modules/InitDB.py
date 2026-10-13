@@ -408,6 +408,9 @@ def init_db():
         cursor.execute("ALTER TABLE domain_asset ADD COLUMN last_liveness_check TEXT")
     if 'last_liveness_check' not in subdomain_columns:
         cursor.execute("ALTER TABLE subdomain_asset ADD COLUMN last_liveness_check TEXT")
+    cursor.execute("PRAGMA table_info(ip_asset)")
+    if 'last_liveness_check' not in [col[1] for col in cursor.fetchall()]:
+        cursor.execute("ALTER TABLE ip_asset ADD COLUMN last_liveness_check TEXT")
 
     # Add last_wappalyzer_scan column to domain_asset and subdomain_asset
     if 'last_wappalyzer_scan' not in domain_columns:

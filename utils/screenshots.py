@@ -173,6 +173,12 @@ def capture_pages(targets: List[dict], resolver=None) -> List[Capture]:
             sandbox = not (hasattr(os, 'geteuid') and os.geteuid() == 0)
             browser = playwright.chromium.launch(headless=True, chromium_sandbox=sandbox)
         except PlaywrightError as e:
+            if 'No usable sandbox' in str(e):
+                # Ubuntu 23.10+ blocks the user namespaces the sandbox needs for
+                # binaries without an AppArmor profile; see README > Web Screenshots
+                raise ScreenshotUnavailable(
+                    'Chromium sandbox is blocked by the OS (AppArmor user namespace restriction). '
+                    'Add an AppArmor profile for the Playwright Chromium binary; see README.') from e
             raise ScreenshotUnavailable(f'Chromium is not available (python -m playwright install chromium): {e}') from e
         try:
             for target in targets:

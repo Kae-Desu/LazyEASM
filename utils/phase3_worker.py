@@ -389,8 +389,11 @@ def _run_discovery():
 
 
 def _run_screenshots():
-    from utils.screenshots import run_screenshots
-    run_screenshots()
+    from utils.screenshots import run_screenshots, screenshots_enabled
+    result = run_screenshots()
+    # Turned off in settings is fine; a browser that cannot start must show as a failed run
+    if result.get('error') and screenshots_enabled():
+        raise RuntimeError(result['error'])
 
 
 def _run_maintenance():

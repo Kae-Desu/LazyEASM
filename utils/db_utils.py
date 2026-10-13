@@ -2655,7 +2655,8 @@ def set_setting(key: str, value: str) -> bool:
 
 def get_all_assets_for_liveness() -> list:
     """
-    Get all domains and subdomains with their current status.
+    Get all domains, subdomains and standalone IPs (submitted directly, not
+    resolved from a hostname) with their current status.
     
     Returns:
         List of dicts with asset_id, asset_type, name, status, last_liveness_check
@@ -2676,6 +2677,14 @@ def get_all_assets_for_liveness() -> list:
     cursor.execute('''
         SELECT sub_id as asset_id, 'subdomain' as asset_type, subdomain_name as name, status, last_liveness_check
         FROM subdomain_asset
+    ''')
+    assets.extend([dict(row) for row in cursor.fetchall()])
+
+    # IPs behind a hostname are covered by that hostname's check
+    cursor.execute('''
+        SELECT ip_id as asset_id, 'ip' as asset_type, ip_value as name, status, last_liveness_check
+        FROM ip_asset
+        WHERE ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
     ''')
     assets.extend([dict(row) for row in cursor.fetchall()])
     

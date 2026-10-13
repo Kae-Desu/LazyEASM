@@ -245,7 +245,19 @@ class PortScanner:
                 error_msg = result.stderr.strip() if result.stderr else "Unknown nmap error"
                 self.logger.error(f"Nmap failed for {target}: {error_msg}")
                 return False, error_msg, []
-            
+
+            # Host discovery can miss live hosts (without root it only tries TCP
+            # 80/443, and rate-limited hosts drop probes). Nmap then scans no
+            # ports at all, which would be recorded as "no open ports", so retry
+            # once treating the host as up.
+            if '<hosts up="0"' in result.stdout:
+                self.logger.info(f"Host discovery found {target} down; retrying with -Pn")
+                result = subprocess.run(cmd[:1] + ['-Pn'] + cmd[1:], capture_output=True, text=True, timeout=timeout)
+                if result.returncode != 0:
+                    error_msg = result.stderr.strip() if result.stderr else "Unknown nmap error"
+                    self.logger.error(f"Nmap failed for {target}: {error_msg}")
+                    return False, error_msg, []
+
             # Parse XML output
             ports = self._parse_nmap_xml(result.stdout)
             return True, None, ports

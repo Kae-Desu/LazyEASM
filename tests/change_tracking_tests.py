@@ -80,6 +80,39 @@ class AssetChangeTests(ChangeTrackingTestCase):
         self.assertIn('asset_down', self.types('old.example.com'))
         self.assertNotIn('asset_down', self.types('new.example.com'))  # first check is not a transition
 
+    def test_liveness_covers_submitted_ips_but_not_resolved_ones(self):
+        from utils import liveness_checker
+        dom_id = db_utils.upsert_domain('example.com')
+        resolved = db_utils.upsert_ip('198.51.100.1')
+        db_utils.create_domain_resolution(dom_id, [resolved])
+        submitted = db_utils.upsert_ip('203.0.113.9')
+        conn = db_utils.get_db_connection()
+        conn.execute("UPDATE ip_asset SET last_liveness_check = '2026-01-01 00:00:00' WHERE ip_id = ?", (submitted,))
+        conn.commit()
+        conn.close()
+
+        checked = []
+        with patch.object(liveness_checker, 'check_single_asset', side_effect=lambda a: checked.append(a['name']) or 'down'):
+            liveness_checker.check_all_liveness()
+
+        self.assertEqual(sorted(checked), ['203.0.113.9', 'example.com'])
+        self.assertIn('asset_down', self.types('203.0.113.9'))
+        conn = db_utils.get_db_connection()
+        self.assertEqual(conn.execute('SELECT status FROM ip_asset WHERE ip_id = ?', (submitted,)).fetchone()[0], 'down')
+        conn.close()
+
+    def test_tech_rescan_covers_submitted_ips(self):
+        from utils.wappalyzer_monitor import get_hosts_for_wappalyzer
+        dom_id = db_utils.upsert_domain('example.com')
+        db_utils.create_domain_resolution(dom_id, [db_utils.upsert_ip('198.51.100.1')])
+        db_utils.upsert_ip('203.0.113.9')
+        conn = db_utils.get_db_connection()
+        conn.executescript("""INSERT INTO http_services (host, port_num, is_https) VALUES
+            ('example.com', 443, 1), ('198.51.100.1', 80, 0), ('203.0.113.9', 80, 0)""")
+        conn.commit()
+        conn.close()
+        self.assertEqual(sorted(h['host'] for h in get_hosts_for_wappalyzer()), ['203.0.113.9', 'example.com'])
+
 
 class TechnologyChangeTests(ChangeTrackingTestCase):
     def setUp(self):
