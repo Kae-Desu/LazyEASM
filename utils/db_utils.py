@@ -1306,6 +1306,49 @@ def get_http_services_by_host(hosts=None) -> dict:
         conn.close()
 
 
+def get_unserved_candidates(hosts=None, finding_type: str = 'unserved_hostname') -> dict:
+    """
+    Hostnames to check for "resolves but nothing serves it": up, resolving
+    only to non-CDN IPs, and without any recorded HTTP service. Hostnames
+    with an open finding of that type are included (whatever their state) so
+    the finding can be closed. hosts=None returns all; an empty list nothing.
+
+    Returns:
+        {hostname: [ip, ...]}
+    """
+    if hosts is not None and not hosts:
+        return {}
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('''
+            SELECT d.domain_name AS name, d.status, i.ip_value, i.is_shared
+            FROM domain_asset d JOIN domain_ip di ON di.dom_id = d.dom_id JOIN ip_asset i ON i.ip_id = di.ip_id
+            WHERE d.expand = 1
+            UNION ALL
+            SELECT s.subdomain_name, s.status, i.ip_value, i.is_shared
+            FROM subdomain_asset s JOIN subdomain_ip si ON si.sub_id = s.sub_id JOIN ip_asset i ON i.ip_id = si.ip_id
+        ''').fetchall()
+        served = {row['host'] for row in conn.execute('SELECT DISTINCT host FROM http_services')}
+        open_findings = {row['host'] for row in conn.execute(
+            "SELECT host FROM findings WHERE finding_type = ? AND status = 'open'", (finding_type,))}
+    finally:
+        conn.close()
+
+    by_host, shared, status = {}, set(), {}
+    for row in rows:
+        by_host.setdefault(row['name'], []).append(row['ip_value'])
+        status[row['name']] = row['status']
+        if row['is_shared']:
+            shared.add(row['name'])
+    candidates = {host: sorted(set(ips)) for host, ips in by_host.items()
+                  if status[host] == 'up' and host not in shared and host not in served}
+    for host in open_findings:
+        candidates.setdefault(host, sorted(set(by_host.get(host, []))))
+    if hosts is not None:
+        candidates = {h: ips for h, ips in candidates.items() if h in set(hosts)}
+    return candidates
+
+
 def get_risky_ports_by_ip(ports, ips=None) -> dict:
     """
     Recorded open ports from the given list, on public non-CDN IPs: {ip: [port, ...]}.

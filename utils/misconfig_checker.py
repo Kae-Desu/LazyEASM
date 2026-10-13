@@ -34,6 +34,9 @@ MAX_BODY_BYTES = 256 * 1024
 USER_AGENT = 'LazyEASM misconfig-check'
 
 REFUSED = 'refused'   # connection refused: the service is definitely not there
+UNSERVED = 'unserved_hostname'
+UNSERVED_STRIKES_KEY = 'unserved_hostname_strikes'   # settings: {host: consecutive detections}
+UNSERVED_CONFIRMATIONS = 2
 
 
 @dataclass
@@ -318,6 +321,89 @@ def check_web(host: str, services: List[Tuple[int, bool]]) -> HostResult:
     return result
 
 
+def _tls_state(host: str, port: int = 443) -> Optional[str]:
+    """'ok' (a certificate was presented), 'rejected' (TLS refused for this name), 'closed', or None."""
+    context = ssl.create_default_context()
+    context.check_hostname = False
+    context.verify_mode = ssl.CERT_NONE
+    try:
+        with socket.create_connection((host, port), timeout=HTTP_TIMEOUT) as sock:
+            with context.wrap_socket(sock, server_hostname=host):
+                return 'ok'
+    except ssl.SSLError:
+        return 'rejected'
+    except ConnectionRefusedError:
+        return 'closed'
+    except OSError:
+        return None   # timeout or network error: inconclusive
+
+
+def _http_state(host: str) -> Optional[str]:
+    """'ok' (content or an error page), 'to_https' (redirects to HTTPS), 'closed', or None."""
+    response = http_get(f"http://{host}/")
+    if response is None:
+        return None
+    if response == REFUSED:
+        return 'closed'
+    status, headers, _ = response
+    if 300 <= status < 400 and (headers.get('Location') or '').lower().startswith('https://'):
+        return 'to_https'
+    return 'ok'
+
+
+def check_unserved(host: str, ips: List[str]) -> HostResult:
+    """
+    A hostname whose DNS points to a server that does not serve it: the server
+    rejects TLS for the name, or redirects to HTTPS that is not there. If the
+    address is ever reassigned, the name serves whatever the new owner hosts.
+    Hosts with no web server at all are not reported (mail, SSH-only hosts).
+    """
+    result = HostResult(host)
+    try:
+        socket.getaddrinfo(host, 443)
+    except socket.gaierror:
+        result.evaluated.add(UNSERVED)    # the record was removed: nothing left to serve
+        return result
+
+    tls, http = _tls_state(host), _http_state(host)
+    if tls == 'ok' or http == 'ok' or (tls == 'closed' and http == 'closed'):
+        result.evaluated.add(UNSERVED)
+    elif tls == 'rejected' or (http == 'to_https' and tls == 'closed'):
+        result.evaluated.add(UNSERVED)
+        reason = ('rejects the TLS connection for this name' if tls == 'rejected'
+                  else 'redirects to HTTPS, which is not running')
+        where = ', '.join(ips) if ips else 'its current address'
+        result.add(UNSERVED, 'Hostname points to a server that does not serve it', 'low',
+                   f"DNS points {host} to {where}, but the web server there {reason}. If that address is "
+                   f"ever reassigned, this name would serve someone else's content. Remove the DNS record "
+                   f"or configure the site.", f"https://{host}/", ips=ips, tls=tls, http=http)
+    return result
+
+
+def _apply_confirmations(results: List[HostResult]) -> None:
+    """
+    Report an unserved hostname only after UNSERVED_CONFIRMATIONS checks in a
+    row agree, so one bad moment does not open a finding. A host that is served
+    again starts over.
+    """
+    import json
+    from utils.db_utils import get_setting, set_setting
+
+    try:
+        strikes = json.loads(get_setting(UNSERVED_STRIKES_KEY) or '{}')
+    except ValueError:
+        strikes = {}
+    for result in results:
+        if UNSERVED in result.findings:
+            strikes[result.host] = strikes.get(result.host, 0) + 1
+            if strikes[result.host] < UNSERVED_CONFIRMATIONS:
+                del result.findings[UNSERVED]
+                result.evaluated.discard(UNSERVED)   # not confirmed yet: leave any finding as it is
+        elif UNSERVED in result.evaluated:
+            strikes.pop(result.host, None)
+    set_setting(UNSERVED_STRIKES_KEY, json.dumps(strikes))
+
+
 def check_ports(ip: str, ports: List[int]) -> HostResult:
     """Re-confirm risky ports recorded by Nmap on a public IP."""
     result = HostResult(ip)
@@ -350,19 +436,24 @@ def run_misconfig_check(hosts: List[str] = None, ips: List[str] = None, max_work
         new_findings only includes medium severity and above (used for alerts)
     """
     from utils.db_utils import (
-        get_http_services_by_host, get_risky_ports_by_ip, upsert_finding, reconcile_findings, set_setting
+        get_http_services_by_host, get_risky_ports_by_ip, get_unserved_candidates, upsert_finding,
+        reconcile_findings, set_setting
     )
 
     full_run = hosts is None and ips is None
     services = get_http_services_by_host(hosts)
     risky_ports = get_risky_ports_by_ip(list(RISKY_PORTS), ips)
+    unserved = get_unserved_candidates(hosts)
 
     jobs = [(check_web, host, svc) for host, svc in services.items()] + \
-           [(check_ports, ip, ports) for ip, ports in risky_ports.items()]
+           [(check_ports, ip, ports) for ip, ports in risky_ports.items()] + \
+           [(check_unserved, host, host_ips) for host, host_ips in unserved.items()]
 
-    logger.info(f"Starting misconfiguration check: {len(services)} hosts, {len(risky_ports)} IPs")
+    logger.info(f"Starting misconfiguration check: {len(services)} hosts, {len(risky_ports)} IPs, "
+                f"{len(unserved)} hostnames without a web service")
     with ThreadPoolExecutor(max_workers=max_workers) as executor:
         results = list(executor.map(lambda job: job[0](job[1], job[2]), jobs))
+    _apply_confirmations(results[len(results) - len(unserved):] if unserved else [])
 
     summary = {'hosts_checked': len(results), 'open_findings': [], 'new_findings': [], 'closed': 0, 'errors': []}
 
