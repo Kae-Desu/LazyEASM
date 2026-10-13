@@ -13,6 +13,18 @@ except ImportError:
     DOTENV_AVAILABLE = False
 
 ENV_LOADED = False
+PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def get_log_dir() -> str:
+    """
+    Folder for the log files (created if missing): LAZYEASM_LOG_DIR, or
+    logs/ in the project. The test suite points it at a temporary folder so
+    test runs on a live install do not write into its logs.
+    """
+    path = os.environ.get('LAZYEASM_LOG_DIR') or str(PROJECT_ROOT / 'logs')
+    os.makedirs(path, exist_ok=True)
+    return path
 
 
 def load_env():

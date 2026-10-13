@@ -656,6 +656,14 @@ phase_status ─── Current phase tracking
 7. **Deep Scan** - Click "Deep Scan" on any asset for full port scan + directory discovery
 8. **Enable Monitoring** - Toggle Phase 3 for continuous liveness and CT log monitoring
 
+## Testing
+
+```bash
+python -m tests        # add -v for each test name
+```
+
+Tests use temporary databases and write their log files to a temporary folder, so running them on a live install leaves its data and `logs/` untouched. (Plain `python -m unittest discover -s tests` also works but skips that setup; set `LAZYEASM_LOG_DIR` to send logs elsewhere.) The real-browser screenshot test is skipped when Chromium cannot start.
+
 ## Tech Stack
 
 | Component | Technology |

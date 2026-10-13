@@ -55,8 +55,9 @@ from utils.db_utils import (
 from modules.CVEmatch import find_cve
 from modules.Notify import send_vulnerability_alert
 
-LOGS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'logs')
-os.makedirs(LOGS_DIR, exist_ok=True)
+from utils.config import get_log_dir
+
+LOGS_DIR = get_log_dir()
 log_file = os.path.join(LOGS_DIR, f"wappalyzer-{datetime.now().strftime('%Y-%m-%d')}.log")
 
 logging.basicConfig(

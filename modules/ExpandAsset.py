@@ -32,7 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils.config import get_env
+from utils.config import get_env, get_log_dir
 from utils.parsing import (
     parse_input, normalize_hostname, extract_root_domain,
     validate_ip, validate_cidr, expand_cidr, categorize_targets,
@@ -54,11 +54,7 @@ from utils.utility import (
     is_private_ip, is_shared_hosting, is_wildcard_domain
 )
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-LOGS_DIR = os.path.join(BASE_DIR, "logs")
-
-if not os.path.exists(LOGS_DIR):
-    os.makedirs(LOGS_DIR)
+LOGS_DIR = get_log_dir()
 
 log_file = os.path.join(LOGS_DIR, f"phase1-{datetime.now().strftime('%Y-%m-%d')}.log")
 

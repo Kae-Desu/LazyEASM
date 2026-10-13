@@ -37,7 +37,6 @@ from utils.db_utils import (
 # Constants
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DB_PATH = os.path.join(PROJECT_ROOT, 'db', 'lazyeasm.db')
-LOGS_DIR = os.path.join(PROJECT_ROOT, 'logs')
 
 # Nmap scan profiles
 SCAN_PROFILES = {
@@ -105,8 +104,8 @@ class PortScanner:
         
     def _setup_logging(self) -> logging.Logger:
         """Setup logging to file and console."""
-        os.makedirs(LOGS_DIR, exist_ok=True)
-        log_file = os.path.join(LOGS_DIR, f'port-scanner-{datetime.now().strftime("%Y-%m-%d")}.log')
+        from utils.config import get_log_dir
+        log_file = os.path.join(get_log_dir(),f'port-scanner-{datetime.now().strftime("%Y-%m-%d")}.log')
         
         logger = logging.getLogger('PortScanner')
         logger.setLevel(logging.INFO)
