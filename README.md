@@ -268,6 +268,19 @@ cd LazyEASM
 ./start.sh --native
 ```
 
+> **Ubuntu 23.10 or newer:** Ubuntu blocks the user namespaces Chromium's sandbox needs, so web screenshots fail ("Chromium sandbox is blocked by the OS" on the Scans page) until you allow it for the Playwright Chromium binary. Run once as root, replacing `lazyeasm` with the user LazyEASM runs as:
+> ```bash
+> cat > /etc/apparmor.d/lazyeasm-chromium <<'EOF'
+> abi <abi/5.0>,
+> include <tunables/global>
+> profile lazyeasm-chromium /home/lazyeasm/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+>   userns,
+> }
+> EOF
+> apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
+> ```
+> This allows only that binary; the system-wide restriction stays on. Docker installs are not affected (Chromium runs as root in the container, without the sandbox).
+
 ### start.sh Commands
 
 | Command | Description |
