@@ -571,6 +571,16 @@ def init_db():
 
     migrate_timestamps_to_utc(cursor)
 
+    # Technologies renamed in the fingerprints that replaced python-Wappalyzer's
+    # (rows are renamed unless the new name already exists for that service)
+    from utils.fingerprints import RENAMED_TECHNOLOGIES
+    for old_name, new_name in RENAMED_TECHNOLOGIES.items():
+        cursor.execute('''
+            UPDATE technologies SET tech_name = ?
+            WHERE tech_name = ? AND NOT EXISTS (
+                SELECT 1 FROM technologies t2 WHERE t2.http_id = technologies.http_id AND t2.tech_name = ?)
+        ''', (new_name, old_name, new_name))
+
     conn.commit()
     conn.close()
     print("Database initialization complete.")

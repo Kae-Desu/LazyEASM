@@ -420,6 +420,8 @@ def _run_maintenance():
     removed = prune_scan_queue(days=90)
     if removed:
         logger.info(f"Pruned {removed} finished queue items older than 90 days")
+    from utils.fingerprints import refresh
+    refresh()   # downloads new fingerprints when the current ones are a week old
 
 
 # name -> (setting key, default, seconds per unit, run function)

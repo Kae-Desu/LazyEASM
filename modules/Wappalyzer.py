@@ -5,10 +5,13 @@ Flow:
     1. Read domains/subdomains with HTTP ports from DB (status='up')
     2. For each target:
        - Construct URL (http/https based on port)
-       - Call Wappalyzer to detect tech stack
+       - Detect the tech stack from the response (utils/techdetect.py,
+         Wappalyzer-format fingerprints from utils/fingerprints.py)
+       - Detect JavaScript libraries (utils/jslibs.py, Retire.js)
        - Create/update http_services entry
        - Store technologies in DB
-       - Search CVEs for each technology (0.5s delay)
+       - CVEs: Retire.js version ranges for JavaScript libraries it tracks,
+         NVD CPE matching for everything else (0.5s delay)
        - Store vulnerabilities in DB
     3. Log results to scan_history
     4. Return stats with CVE data grouped by asset
@@ -20,14 +23,6 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-
-try:
-    from Wappalyzer import Wappalyzer, WebPage
-    WAPPALYZER_AVAILABLE = True
-except ImportError:
-    Wappalyzer = None
-    WebPage = None
-    WAPPALYZER_AVAILABLE = False
 
 try:
     import requests
@@ -52,7 +47,8 @@ from utils.db_utils import (
     log_scan
 )
 
-from modules.CVEmatch import find_cve
+from modules.CVEmatch import find_cve, lookup_cve_scores
+from utils import jslibs, techdetect
 from modules.Notify import send_vulnerability_alert
 
 from utils.config import get_log_dir
@@ -72,17 +68,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+USER_AGENT = 'Mozilla/5.0 (compatible; LazyEASM)'
+MAX_PAGE_BYTES = 2 * 1024 * 1024
+
+
 class WappalyzerScanner:
-    """Technology fingerprinting using Wappalyzer."""
-    
+    """Technology fingerprinting (Wappalyzer-format fingerprints) and CVE matching."""
+
     def __init__(self, enable_cve: bool = True, cvss_min: float = 5.0, cve_delay: float = 0.5):
-        if not WAPPALYZER_AVAILABLE:
-            raise ImportError("python-Wappalyzer not installed. Run: pip install python-Wappalyzer")
-        
         if not REQUESTS_AVAILABLE:
             raise ImportError("requests not installed. Run: pip install requests")
-        
-        self.wappalyzer = Wappalyzer.latest()
+
         self.enable_cve = enable_cve
         self.cvss_min = cvss_min
         self.cve_delay = cve_delay
@@ -155,55 +151,75 @@ class WappalyzerScanner:
         
         return error_info
     
-    def scan_url(self, url: str, timeout: int = 30) -> Tuple[bool, Optional[Dict], Optional[Dict]]:
+    def fetch_page(self, url: str, timeout: int = 30) -> techdetect.Page:
         """
-        Scan a URL using Wappalyzer with comprehensive error handling.
-        
+        GET the page (redirects followed). Certificates are not verified:
+        this reads what the service shows; invalid certificates are reported
+        by the misconfiguration check.
+        """
+        import warnings
+        from urllib3.exceptions import InsecureRequestWarning
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore', InsecureRequestWarning)
+            with requests.get(url, timeout=timeout, verify=False, stream=True,
+                              headers={'User-Agent': USER_AGENT}) as response:
+                body = response.raw.read(MAX_PAGE_BYTES, decode_content=True) or b''
+                encoding = response.encoding or response.apparent_encoding or 'utf-8'
+                html = body.decode(encoding, errors='replace')
+                return techdetect.parse_page(response.url, dict(response.headers),
+                                             requests.utils.dict_from_cookiejar(response.cookies), html)
+
+    def scan_url(self, url: str, timeout: int = 30):
+        """
+        Fetch a URL and detect its technologies, with comprehensive error handling.
+
         Args:
             url: Full URL (http:// or https://)
             timeout: Request timeout in seconds
-        
+
         Returns:
-            Tuple of (success, technologies_dict or None, error_info or None)
+            Tuple of (success, technologies or None, error_info or None, page or None);
+            technologies: {name: {'versions': [...], 'categories': [...]}}
         """
         try:
             logger.info(f"Scanning {url}")
-            
-            webpage = WebPage.new_from_url(url, timeout=timeout)
-            technologies = self.wappalyzer.analyze_with_versions_and_categories(webpage)
-            
-            return True, technologies, None
+
+            page = self.fetch_page(url, timeout=timeout)
+            technologies = {name: {'versions': info['versions'], 'categories': info['categories']}
+                            for name, info in techdetect.detect(page).items()}
+
+            return True, technologies, None, page
         
         except requests.exceptions.HTTPError as e:
             error_info = self.categorize_error(e)
             error_info['url'] = url
             status_msg = f" {error_info['http_status']}" if error_info.get('http_status') else ""
             logger.warning(f"HTTP error scanning {url}{status_msg}")
-            return False, None, error_info
+            return False, None, error_info, None
         
         except requests.exceptions.Timeout as e:
             error_info = self.categorize_error(e)
             error_info['url'] = url
             logger.warning(f"Timeout scanning {url}")
-            return False, None, error_info
+            return False, None, error_info, None
         
         except requests.exceptions.ConnectionError as e:
             error_info = self.categorize_error(e)
             error_info['url'] = url
             logger.warning(f"Connection error scanning {url}: {str(e)[:100]}")
-            return False, None, error_info
+            return False, None, error_info, None
         
         except requests.exceptions.SSLError as e:
             error_info = self.categorize_error(e)
             error_info['url'] = url
             logger.warning(f"SSL error scanning {url}")
-            return False, None, error_info
+            return False, None, error_info, None
         
         except Exception as e:
             error_info = self.categorize_error(e)
             error_info['url'] = url
             logger.error(f"Unexpected error scanning {url}: {type(e).__name__}: {str(e)[:150]}")
-            return False, None, error_info
+            return False, None, error_info, None
     
     def extract_web_server(self, technologies: Dict) -> Optional[str]:
         """
@@ -231,6 +247,37 @@ class WappalyzerScanner:
         
         return None
     
+    def scan_js_libraries(self, page: techdetect.Page, host: str) -> Dict[str, str]:
+        """Retire.js libraries on the page; never fails the scan."""
+        try:
+            own_ips = {info[4][0] for info in socket.getaddrinfo(host, None)}
+        except (socket.gaierror, UnicodeError):
+            own_ips = set()
+        try:
+            return jslibs.scan_page(page, own_ips)
+        except Exception as e:
+            logger.warning(f"JavaScript library detection failed for {page.url}: {e}")
+            return {}
+
+    def js_library_cves(self, library: str, tech_name: str, version: str) -> List[Dict]:
+        """
+        Retire.js vulnerabilities for a library version, as find_cve() results.
+        CVSS and description come from NVD by CVE ID (cached); when that is
+        unavailable, or the advisory has no CVE, the Retire.js severity is used.
+        """
+        vulns = jslibs.vulnerabilities(library, version)
+        scores = lookup_cve_scores([vid for v in vulns for vid in v['ids']]) if vulns else {}
+        cves = {}
+        for vuln in vulns:
+            for vid in vuln['ids']:
+                known = scores.get(vid, {})
+                score = known.get('cvss') or jslibs.SEVERITY_SCORES.get(vuln['severity'], 5.0)
+                if score < self.cvss_min:
+                    continue
+                cves.setdefault(vid, {'cve_id': vid, 'cvss': score, 'tech_name': tech_name,
+                                      'description': known.get('description') or vuln['summary'] or vid})
+        return sorted(cves.values(), key=lambda c: c['cvss'], reverse=True)
+
     def scan_target(self, host: str, port: int, ip_id: int | None = None, is_https: int = 0) -> Dict:
         """
         Scan a single target and store results.
@@ -256,7 +303,7 @@ class WappalyzerScanner:
             'error_info': None
         }
         
-        success, technologies, error_info = self.scan_url(url)
+        success, technologies, error_info, page = self.scan_url(url)
         
         if not success:
             self.stats['failed'] += 1
@@ -269,6 +316,13 @@ class WappalyzerScanner:
             result['error_info'] = error_info
             return result
         
+        # JavaScript libraries (Retire.js); its version, read from the file
+        # itself, is preferred over the one in the URL
+        for library, version in self.scan_js_libraries(page, host).items():
+            entry = technologies.setdefault(jslibs.technology_for_library(library),
+                                            {'versions': [], 'categories': ['JavaScript libraries']})
+            entry['versions'] = [version] + [v for v in entry['versions'] if v != version]
+
         web_server = self.extract_web_server(technologies)
         
         http_id = upsert_http_service(
@@ -303,19 +357,26 @@ class WappalyzerScanner:
             self.stats['technologies_found'] += 1
             
             if self.enable_cve and tech_version:
-                time.sleep(self.cve_delay)
-                
-                cve_result = find_cve(tech_name, tech_version, min_cvss=self.cvss_min)
-                if not cve_result['ok']:
-                    all_lookups_ok = False
-                
-                for cve in cve_result.get('cves', []):
+                library = jslibs.library_for_technology(tech_name)
+                if library:
+                    # Retire.js tracks this library: exact affected version ranges
+                    cves = self.js_library_cves(library, tech_name, tech_version)
+                    method = 'retirejs'
+                else:
+                    time.sleep(self.cve_delay)
+                    cve_result = find_cve(tech_name, tech_version, min_cvss=self.cvss_min)
+                    if not cve_result['ok']:
+                        all_lookups_ok = False
+                    cves = cve_result.get('cves', [])
+                    method = 'cpe'
+
+                for cve in cves:
                     vuln_id = upsert_vulnerability(
                         tech_id=tech_id,
                         cve_id=cve['cve_id'],
                         cve_score=cve['cvss'],
                         description=cve['description'],
-                        match_method='cpe'
+                        match_method=method
                     )
                     seen_vuln_ids.append(vuln_id)
                     

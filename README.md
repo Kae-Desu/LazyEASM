@@ -99,8 +99,9 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 
 ### Phase 1: Active Scanning
 - **Port Scanning** - Nmap top 100 ports with service detection
-- **Technology Fingerprinting** - Wappalyzer integration (100+ technologies)
-- **CVE Matching** - NVD CPE + version-range matching with a CVSS filter (minimum 5.0 by default, adjustable in the dashboard)
+- **Technology Fingerprinting** - 7,600+ technologies from the community-maintained Wappalyzer fingerprints ([enthec/webappanalyzer](https://github.com/enthec/webappanalyzer)), matched against headers, cookies, meta tags, script URLs, inline scripts, HTML and the URL, with versions, implied technologies and categories. A snapshot ships in `data/fingerprints/`; a fresh copy is downloaded weekly (validated, with the snapshot as fallback), so detection keeps up without upgrading LazyEASM
+- **JavaScript Libraries** - [Retire.js](https://github.com/RetireJS/retire.js) detection by script URL, file name, file content and hash (script files the page loads are fetched through the same internal-address filter as screenshots), with exact vulnerable version ranges
+- **CVE Matching** - JavaScript libraries Retire.js tracks use its version ranges (CVSS looked up in NVD by CVE ID, cached; Retire.js severity when unavailable; GitHub advisory IDs when there is no CVE). Everything else uses NVD CPE + version-range matching. CVSS filter: minimum 5.0 by default, adjustable in the dashboard
 - **Finding Lifecycle** - Open / fixed / accepted / false positive; findings no longer seen on rescan are closed automatically and reopened if they return
 - **Exploit-Based Prioritization** - Each CVE is ranked by real-world exploitation, not just CVSS, using the CISA Known Exploited Vulnerabilities catalog and FIRST EPSS:
   - **P1** - in CISA KEV (exploited in the wild); shows CISA's required action and due date
@@ -574,7 +575,7 @@ LazyEASM/
 │   ├── FindDir.py             # Directory enumeration
 │   ├── phase1_runner.py       # Phase 1 scanning pipeline
 │   ├── phase2_dirsearch.py    # Phase 2 deep scan runner
-│   ├── Wappalyzer.py          # Technology fingerprinting
+│   ├── Wappalyzer.py          # Technology scan of HTTP services + CVE matching
 │   ├── CVEmatch.py            # CVE lookup via NVD (CPE matching)
 │   ├── AskAI.py               # AI recommendations (Gemini / Claude / OpenAI / compatible)
 │   └── Notify.py              # Discord notifications
@@ -597,6 +598,9 @@ LazyEASM/
 │   ├── misconfig_checker.py   # Exposed files, TLS, headers, risky ports (Phase 3)
 │   ├── subdomain_discovery.py # Extra passive sources + DNS brute force / permutations
 │   ├── screenshots.py         # Headless Chromium captures, request filtering, perceptual hash
+│   ├── fingerprints.py        # Fingerprint data: bundled snapshot + weekly download
+│   ├── techdetect.py          # Technology detection (Wappalyzer format)
+│   ├── jslibs.py              # JavaScript libraries and vulnerabilities (Retire.js)
 │   ├── asset_repository.py    # Asset list / detail queries (Assets pages, /api/assets)
 │   ├── findings_repository.py # Cross-asset findings and Overview numbers
 │   ├── activity_repository.py # Change history and scan queue pages
@@ -687,7 +691,7 @@ Tests use temporary databases and write their log files to a temporary folder, s
 | **AI** | Google Gemini, Anthropic Claude, OpenAI, or OpenAI-compatible endpoints |
 | **Notifications** | Discord Webhooks |
 | **Port Scanning** | Nmap |
-| **Tech Fingerprinting** | python-Wappalyzer |
+| **Tech Fingerprinting** | Wappalyzer-format fingerprints (enthec/webappanalyzer), Retire.js |
 | **Directory Discovery** | Dirsearch |
 | **CVE Database** | NVD API 2.0 (CPE matching) |
 
@@ -697,6 +701,7 @@ Tests use temporary databases and write their log files to a temporary folder, s
 - Certificate transparency lookups depend on CertSpotter (free quota; set `CERTSPOTTER_API_KEY` for more) and crt.sh, which often returns 502/503 under load. Discovery continues with the other sources when both are unavailable
 - Shared/CDN IPs skipped for port scanning
 - CVE matching requires version detection
+- Fingerprints that need a running browser (JavaScript globals, DOM) are not evaluated; detection uses what the HTTP response shows
 - Access tokens remain valid for up to 15 minutes after logout (stateless by design); changing the password revokes every session immediately
 - Browser must support cookies for authentication (no API key auth)
 - Gemini API free tier has rate limits (may need paid plan for heavy use)
@@ -725,7 +730,7 @@ Releases published before this change remain available under the MIT License.
 - SecurityTrails API for subdomain enumeration
 - CertSpotter (SSLMate) and crt.sh for certificate transparency lookups
 - NVD (National Vulnerability Database) for CVE information
-- Wappalyzer for technology fingerprinting patterns
+- [enthec/webappanalyzer](https://github.com/enthec/webappanalyzer), the community-maintained continuation of the Wappalyzer fingerprints (GPL-3.0), and [Retire.js](https://github.com/RetireJS/retire.js) for JavaScript library vulnerabilities (Apache-2.0); see [data/fingerprints/README.md](data/fingerprints/README.md)
 - [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) for exploited-in-the-wild CVEs
 - [FIRST EPSS](https://www.first.org/epss/) for exploit prediction scores
 - [can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz) by EdOverflow and contributors for subdomain takeover fingerprints (CC BY 4.0, see [data/README.md](data/README.md))

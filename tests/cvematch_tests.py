@@ -32,7 +32,9 @@ class ParseTests(unittest.TestCase):
 
     def test_wappalyzer_cpe_lookup(self):
         self.assertEqual(CVEmatch.get_cpe_for_technology("jQuery"), ("a", "jquery", "jquery"))
-        self.assertEqual(CVEmatch.get_cpe_for_technology("nginx"), ("a", "nginx", "nginx"))
+        self.assertEqual(CVEmatch.get_cpe_for_technology("nginx"), ("a", "f5", "nginx"))
+        # older nginx CVEs are listed under the previous vendor, so both are queried
+        self.assertIn(("nginx", "nginx"), CVEmatch.CPE_ALIASES[("f5", "nginx")])
         self.assertIsNone(CVEmatch.get_cpe_for_technology("NotARealTechnology"))
 
 

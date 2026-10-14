@@ -148,7 +148,8 @@ def refresh_threat_intel(cve_ids: Iterable[str] = None) -> dict:
     from utils.db_utils import get_all_vulnerability_cve_ids, get_cve_intel, upsert_cve_intel, \
         get_open_hosts_for_cve, set_setting
 
-    ids = sorted({c.upper() for c in (cve_ids if cve_ids is not None else get_all_vulnerability_cve_ids()) if c})
+    ids = sorted({c.upper() for c in (cve_ids if cve_ids is not None else get_all_vulnerability_cve_ids())
+                  if c and c.upper().startswith('CVE-')})
     result = {'cves_checked': len(ids), 'kev_count': 0, 'newly_kev': [], 'errors': []}
     if not ids:
         return result

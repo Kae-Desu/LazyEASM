@@ -191,7 +191,7 @@
                 const asset = f.asset_type ? `/assets/${encodeURIComponent(f.asset_type)}/${encodeURIComponent(f.asset_id)}` : null;
                 const hostLink = asset ? `<a href="${asset}" class="font-mono text-xs font-semibold dark:text-white hover:text-accent break-all">${escapeHtml(f.host)}</a>`
                                        : `<span class="font-mono text-xs font-semibold dark:text-white break-all">${escapeHtml(f.host)}</span>`;
-                const nvd = f.kind === 'cve' ? ` <a href="https://nvd.nist.gov/vuln/detail/${encodeURIComponent(f.identifier)}" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-accent" title="Open in NVD"><i class="fas fa-arrow-up-right-from-square text-[9px]"></i></a>` : '';
+                const nvd = f.kind === 'cve' ? ` <a href="${f.identifier.startsWith('GHSA-') ? 'https://github.com/advisories/' : 'https://nvd.nist.gov/vuln/detail/'}${encodeURIComponent(f.identifier)}" target="_blank" rel="noopener noreferrer" class="text-slate-400 hover:text-accent" title="Open the advisory"><i class="fas fa-arrow-up-right-from-square text-[9px]"></i></a>` : '';
                 return `<tr class="${f.status !== 'open' ? 'opacity-60 ' : ''}hover:bg-slate-50 dark:hover:bg-white/5" data-status-card>
                     <td class="p-0 align-top"><label class="block pl-5 pr-2 py-3 cursor-pointer"><input type="checkbox" data-key="${escapeHtml(key)}" ${selected.has(key) ? 'checked' : ''} aria-label="Select ${escapeHtml(f.title)} on ${escapeHtml(f.host)}" class="w-4 h-4 accent-[#CC9ACC] cursor-pointer"></label></td>
                     <td class="px-3 py-3 align-top max-w-md">

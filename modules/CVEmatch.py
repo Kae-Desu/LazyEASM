@@ -34,10 +34,13 @@ NVD_URL = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 NVD_PAGE_SIZE = 2000
 NVD_RETRY_DELAY = 6.0  # NVD allows 5 requests / 30s without an API key
 
-# NVD renamed some products; Wappalyzer still uses the old CPE.
+# Products NVD lists under more than one name (older CVEs keep the old vendor);
+# both are queried whichever one the fingerprint uses
 CPE_ALIASES = {
     ('nginx', 'nginx'): [('f5', 'nginx')],
+    ('f5', 'nginx'): [('nginx', 'nginx')],
     ('microsoft', 'internet_information_server'): [('microsoft', 'internet_information_services')],
+    ('microsoft', 'internet_information_services'): [('microsoft', 'internet_information_server')],
 }
 
 
@@ -45,24 +48,18 @@ class CVELookupError(Exception):
     """NVD lookup failed (network, rate limit, bad response)."""
 
 
-@lru_cache(maxsize=1)
 def _load_wappalyzer_cpes() -> Dict[str, Tuple[str, str, str]]:
-    """Map Wappalyzer technology name -> (part, vendor, product)."""
-    try:
-        import Wappalyzer
-    except ImportError:
-        return {}
+    """Map technology name (lower case) -> (part, vendor, product), from utils/fingerprints.py."""
+    from utils import fingerprints
+    return _cpes_for(fingerprints._signature())
 
-    path = os.path.join(os.path.dirname(Wappalyzer.__file__), 'data', 'technologies.json')
-    try:
-        with open(path, encoding='utf8') as f:
-            data = json.load(f)
-    except (OSError, ValueError):
-        return {}
 
+@lru_cache(maxsize=2)
+def _cpes_for(signature) -> Dict[str, Tuple[str, str, str]]:
+    from utils import fingerprints
     cpes = {}
-    for name, tech in data.get('technologies', data).items():
-        parsed = parse_cpe(tech.get('cpe') or '')
+    for name, cpe in fingerprints.cpe_map().items():
+        parsed = parse_cpe(cpe)
         if parsed:
             cpes[name.lower()] = parsed
     return cpes
@@ -228,6 +225,47 @@ def fetch_nvd(match_string: str) -> List[dict]:
         start += data.get('resultsPerPage', 0) or NVD_PAGE_SIZE
         if start >= data.get('totalResults', 0):
             return cves
+
+
+def lookup_cve_scores(cve_ids: List[str], use_cache: bool = True) -> Dict[str, dict]:
+    """
+    CVSS score and description for known CVE IDs (Retire.js findings), cached
+    like CPE lookups. IDs that are not CVEs or cannot be looked up are left out.
+
+    Returns:
+        {cve_id: {'cvss': float, 'description': str}}
+    """
+    from utils.db_utils import get_cached_cves, set_cached_cves
+
+    headers = {}
+    api_key = get_env('NVD_API_KEY', '')
+    if api_key:
+        headers['apiKey'] = api_key
+
+    found = {}
+    for cve_id in dict.fromkeys(c for c in cve_ids if c.upper().startswith('CVE-')):
+        key = f'cve:{cve_id}'
+        cached = get_cached_cves(key, max_age_hours=24 * 7) if use_cache else None
+        if cached is None:
+            try:
+                response = requests.get(NVD_URL, params={'cveId': cve_id}, headers=headers, timeout=60)
+                if response.status_code in (403, 429, 503):
+                    time.sleep(NVD_RETRY_DELAY)
+                    response = requests.get(NVD_URL, params={'cveId': cve_id}, headers=headers, timeout=60)
+                if response.status_code != 200:
+                    logger.warning(f"NVD lookup of {cve_id} returned HTTP {response.status_code}")
+                    continue
+                items = response.json().get('vulnerabilities', [])
+            except (requests.RequestException, ValueError) as e:
+                logger.warning(f"NVD lookup of {cve_id} failed: {e}")
+                continue
+            cached = [{'cvss': get_cvss_score(item['cve']), 'description': _get_description(item['cve'])}
+                      for item in items if 'cve' in item]
+            if use_cache:
+                set_cached_cves(key, cached)
+        if cached:
+            found[cve_id] = cached[0]
+    return found
 
 
 def find_cve(tech_name: str, version: str, min_cvss: float = 0.0, use_cache: bool = True) -> dict:

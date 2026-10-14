@@ -50,7 +50,7 @@
     <div class="flex justify-between items-start gap-3 mb-3">
         <div class="flex flex-col min-w-0">
             <div class="flex flex-wrap items-center gap-2">
-                <a href="https://nvd.nist.gov/vuln/detail/{{ cve.cve_id|urlencode }}" target="_blank" rel="noopener noreferrer"
+                <a href="{{ ('https://github.com/advisories/' if cve.cve_id.startswith('GHSA-') else 'https://nvd.nist.gov/vuln/detail/') ~ (cve.cve_id|urlencode) }}" target="_blank" rel="noopener noreferrer"
                    class="bg-red-500/10 text-red-500 text-[11px] font-bold px-2 py-1 rounded-md border border-red-500/20 hover:underline">{{ cve.cve_id }}</a>
                 <span class="text-[10px] text-slate-400 font-mono">{{ cve.tech_name }}</span>
             </div>
