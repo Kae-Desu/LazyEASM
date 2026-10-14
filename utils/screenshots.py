@@ -176,7 +176,7 @@ def capture_pages(targets: List[dict], resolver=None) -> List[Capture]:
         except PlaywrightError as e:
             if 'No usable sandbox' in str(e):
                 # Ubuntu 23.10+ blocks the user namespaces the sandbox needs for
-                # binaries without an AppArmor profile; see README > Web Screenshots
+                # binaries without an AppArmor profile; see README > Quick start (Ubuntu 23.10 or newer)
                 raise ScreenshotUnavailable(
                     'Chromium sandbox is blocked by the OS (AppArmor user namespace restriction). '
                     'Add an AppArmor profile for the Playwright Chromium binary; see README.') from e

@@ -1,6 +1,6 @@
 # LazyEASM
 
-External Attack Surface Management (EASM) tool for asset discovery, vulnerability scanning, and continuous security monitoring.
+External Attack Surface Management (EASM): discover what you expose on the internet, find what is vulnerable or misconfigured, and keep watching it.
 
 ---
 
@@ -13,265 +13,41 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
 
 ---
 
-## What's New
+## Highlights
 
-### v2.1.0
+- **Discovery** - Subdomains from certificate transparency, passive DNS sources and DNS brute force; IPs and CIDRs. A submitted domain is explored fully; a submitted subdomain is scanned on its own, so access to one host never turns into scanning a whole organization
+- **Scanning** - Open ports and services (Nmap), 7,600+ web technologies with versions, JavaScript libraries (Retire.js), directory discovery on demand
+- **Vulnerabilities, prioritized** - CVEs matched to exact versions, ranked by real-world exploitation (CISA Known Exploited Vulnerabilities, EPSS) instead of CVSS alone
+- **Security findings** - Exposed `.git`/`.env` and similar files, weak TLS, missing security headers, internet-exposed databases and admin services, subdomain takeovers, and hostnames pointing at servers that no longer serve them
+- **Continuous monitoring** - Up/down, new subdomains, certificate expiry and replacement, technology changes, page appearance changes (screenshots), all recorded in a change history
+- **Web screenshots** - Every web service captured in an isolated headless browser, so login portals, default pages and parked domains stand out
+- **Triage** - One findings list across all assets, most urgent first; mark findings fixed, accepted or false positive in bulk; resolved findings close themselves on rescan
+- **Alerts and export** - Discord, Slack, email or any webhook; CSV/JSON export; optional AI explanation of each CVE (Gemini, Claude, OpenAI or a local model)
+- **Install once and forget** - Configured from the dashboard, encrypted (HTTPS) out of the box, self-updating detection data, daily backups
 
-**Certificate Monitoring Overhaul**
-- Per-hostname expiry counting — only counts unique hostnames (deduplicates CT log entries), excludes wildcards and non-asset hostnames
-- Separate **expired** and **expiring** categories on dashboard (expired certs shown in red, expiring ≤7d in amber)
-- Days remaining uses `int()` (floor) instead of `round()` — `7.9` days shows as 7d, not 8d
-- 0-day certs display as **"Expired"** instead of "0d"
-- Dashboard labels show explicit thresholds: "expiring ≤7d" instead of ambiguous "expiring soon"
-- Active-only cert query filters out already-expired certificates from `_get_cert_expiry()`
-- Cert results ordered by `not_after ASC` (soonest expiry shown first)
-- Auto-cleanup of certificates expired >90 days (`_cleanup_expired_certs`)
-- Cascading cleanup: orphaned `cert_notifications` removed with expired certificates
+## Quick start
 
-**Wappalyzer Periodic Re-scanning (Phase 3)**
-- Automatic Wappalyzer re-scans on all up hosts with HTTP services (default: every 24 hours)
-- New `last_wappalyzer_scan` column on `domain_asset` and `subdomain_asset` tables
-- Dashboard "Last Checks" panel now includes "Tech Scan" timestamp
-- Asset detail panel shows "Last tech scan" timestamp with fingerprint icon
-- Manual trigger: `/api/phase3/wappalyzer/check` endpoint
-- New settings: `wappalyzer_interval_hr` (default: 24) and `last_wappalyzer_check`
-
-**Docker Deployment**
-- `.env` file mounted as Docker volume to persist configuration across rebuilds
-- HTTPS behavior is controlled by `FORCE_HTTPS` / `TRUST_PROXY` (see Environment Variables); debug mode is off unless `FLASK_DEBUG=true`
-
-**Bug Fixes**
-- Certificate expiry `days_remaining` uses `int()` (floor) instead of `round()` for accurate thresholds
-- Cancel scan bug: `request.form.get() or request.json.get()` had operator precedence issue — replaced with explicit if/else
-- Dashboard "expiring soon" count now shows per-hostname count (not per-certificate), excludes wildcards and non-asset hostnames
-- Certificate expiry summary now filters by assets only (`domain_asset` + `subdomain_asset`)
-
-### v2.0.0
-
-**SSL Certificate Monitoring**
-- Notifications at exactly **7, 5, 3, 1 days** before expiry (deduplicated per threshold)
-- Color-coded expiry indicators: 🔴 Red (≤7d), 🟠 Amber (≤30d), 🟢 Green (>30d)
-- Dashboard "expiring soon" count aligned with red threshold (≤7 days)
-- Certificate change detection (serial/fingerprint monitoring)
-- New `cert_notifications` table for tracking sent alerts
-
-**AI-Powered Vulnerability Analysis**
-- Personalized CVE recommendations with:
-  - CVSS severity score and label (Critical/High/Medium/Low)
-  - Affected port and protocol (HTTP/HTTPS)
-  - Tech stack context (other technologies on same port)
-- Indonesian output format (📋 APA INI? / 🔴 3 RISIKO UTAMA / 🛠️ PANDUAN PATCH)
-- Automatic model fallback: `gemini-2.5-flash` → `gemini-2.0-flash` → `gemini-2.5-pro`
-- Real error messages on failure (503, quota exceeded, etc.)
-- Newline formatting fixed for dashboard display
-
-**Security Enhancements**
-- Rate limiting: 5 failed login attempts → IP blocked (configurable duration)
-- CSRF token protection on all POST forms
-- XSS protection via HTML/JS escaping
-- Security headers: CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Permissions-Policy
-- Cache-Control headers on authenticated pages
-
-**Module Organization**
-- Renamed modules to consistent PascalCase:
-  - `Parser.py` (was `01-parse-input.py`)
-  - `Nmap.py` (was `02-port-scanner.py`)
-  - `ExpandAsset.py` (was `03-asset-expansion.py`)
-  - `FindDir.py` (was `05-dirsearch.py`)
-
-**Bug Fixes**
-- Certificate expiry used `int()` (floor) for accurate day thresholds
-- Gemini fallback models updated (removed deprecated `gemini-1.5-*`)
-- Dashboard "expiring ≤7d" count matches per-hostname expiry (excludes wildcards and non-asset hostnames)
-- AI recommendation newlines preserved in dashboard via `whitespace-pre-line`
-- Duplicate notifications for certificates fixed (deduplication per threshold)
-
-## Features
-
-### Phase 0: Asset Discovery
-- **Scope** - A submitted domain (`example.com`) is expanded: its subdomains are discovered, scanned and monitored. A submitted subdomain, IP or CIDR is scanned on its own; the parent of a subdomain is stored but not expanded, so access to one host never turns into scanning the whole organization. Expand it later from the subdomain's page (with a confirmation) or by submitting the domain
-- **Domain/Subdomain Discovery** - Passive: certificate transparency (CertSpotter first, crt.sh only as a fallback with a 30-minute cooldown after errors; optional `CERTSPOTTER_API_KEY` raises the quota), HackerTarget, Wayback Machine, SecurityTrails (key) and AlienVault OTX (`OTX_API_KEY`). Active: DNS brute force with a bundled wordlist plus permutations of known subdomains (`api` -> `api-staging`, `dev-api`, `api2`...), skipped on wildcard DNS; toggle it in the dashboard (Configuration > Discovery) or with `DNS_BRUTEFORCE=false`. A failing or rate-limited source never stops the others
-- **IP/CIDR Handling** - Automatic expansion and liveness detection
-- **DNS Resolution** - Parallel resolution with configurable workers
-- **Liveness Detection** - ICMP ping + TCP fallback (ports 80/443)
-- **TLS Certificate Tracking** - The certificate each HTTPS service actually presents is read directly (right after a scan and on the Certificates & CT logs schedule): issuer, validity, fingerprint
-- **Shared Hosting Detection** - Auto-detect Cloudflare and other CDNs
-
-### Phase 1: Active Scanning
-- **Port Scanning** - Nmap top 100 ports with service detection
-- **Technology Fingerprinting** - 7,600+ technologies from the community-maintained Wappalyzer fingerprints ([enthec/webappanalyzer](https://github.com/enthec/webappanalyzer)), matched against headers, cookies, meta tags, script URLs, inline scripts, HTML and the URL, with versions, implied technologies and categories. A snapshot ships in `data/fingerprints/`; a fresh copy is downloaded weekly (validated, with the snapshot as fallback), so detection keeps up without upgrading LazyEASM
-- **JavaScript Libraries** - [Retire.js](https://github.com/RetireJS/retire.js) detection by script URL, file name, file content and hash (script files the page loads are fetched through the same internal-address filter as screenshots), with exact vulnerable version ranges
-- **CVE Matching** - JavaScript libraries Retire.js tracks use its version ranges (CVSS looked up in NVD by CVE ID, cached; Retire.js severity when unavailable; GitHub advisory IDs when there is no CVE). Everything else uses NVD CPE + version-range matching. CVSS filter: minimum 5.0 by default, adjustable in the dashboard
-- **Finding Lifecycle** - Open / fixed / accepted / false positive; findings no longer seen on rescan are closed automatically and reopened if they return
-- **Exploit-Based Prioritization** - Each CVE is ranked by real-world exploitation, not just CVSS, using the CISA Known Exploited Vulnerabilities catalog and FIRST EPSS:
-  - **P1** - in CISA KEV (exploited in the wild); shows CISA's required action and due date
-  - **P2** - EPSS >= 10% (likely to be exploited in the next 30 days)
-  - **P3** - CVSS >= 7.0 with no exploitation signal
-  - **P4** - everything else
-- **AI Recommendations** - Vulnerability analysis with Google Gemini, Anthropic Claude, OpenAI, or any OpenAI-compatible endpoint (e.g. a local Ollama model)
-- **Notifications** - Discord, Slack, a generic JSON webhook (optionally HMAC-signed with `NOTIFY_WEBHOOK_SECRET`: header `X-LazyEASM-Signature: sha256=<hex>`), and email over SMTP. Every configured channel receives every alert; configure them in the dashboard and use "Send Test Notification"
-- **Export** - Assets and findings (CVEs + security findings with priority, EPSS, KEV, status) as CSV or JSON: `/api/export/assets.csv`, `/api/export/findings.csv?status=open`, `.json` variants. CSV cells that start with a formula character are neutralized
-
-### Phase 2: Deep Scanning
-- **On-Demand Queue** - User-initiated deep scans per asset from dashboard
-- **Full Port Enumeration** - Nmap all 65535 ports with `-T3` timing
-- **Directory Discovery** - Dirsearch (25 threads, non-recursive)
-- **CDN-Aware** - Skips nmap for CDN/Cloudflare IPs, still runs dirsearch on hostname
-- **Discord Notifications** - Alerts on scan start, completion, and nmap skip
-- **Queue Management** - Cancel pending scans, view queue status in real-time
-
-### Phase 3: Continuous Monitoring
-- **Liveness Monitoring** - ICMP/TCP checks every 5 minutes
-- **Certificates & CT Logs** - Default every 6 hours: new subdomains from certificate transparency logs (queued for discovery), the served certificate of every HTTPS service (a replaced certificate is recorded as a change, noting an issuer change), and expiry alerts. CT logs are used for discovery only: they keep listing certificates a renewal already replaced, which would raise false expiry alerts. Manual trigger: `/api/phase3/ctlogs/check`
-- **Wappalyzer Re-scanning** - Periodic technology re-fingerprinting (default: every 24 hours)
-- **Subdomain Takeover Detection** - Follows CNAME chains for every domain/subdomain (default: every 24 hours); flags services known to allow takeover (NXDOMAIN or unclaimed-page fingerprint) and dangling CNAMEs. Findings use the open / fixed / accepted / false positive lifecycle. Manual trigger: `/api/phase3/takeover/check`
-- **Exploit Intel Refresh** - Updates CISA KEV and EPSS data for all CVEs (default: every 24 hours) and right after scans that find new CVEs. Sends a Discord alert when a CVE with an open finding is (or becomes) known exploited. Manual trigger: `/api/phase3/intel/check`
-- **Change History** - Every change is recorded per host: new assets, up/down transitions, ports opened (and closed, detected by full-range deep scans), technologies added/removed/upgraded, certificate replacements, CVEs and findings opened/fixed/reopened, and status changes made in the dashboard. Shown as "Recent Changes" on the dashboard and per asset; queryable at `GET /api/changes?host=&type=&since=&limit=&offset=`. Entries older than 365 days are pruned daily
-- **Subdomain Discovery Monitor** - Re-runs all discovery sources daily for every root domain and queues new subdomains for scanning
-- **Misconfiguration Checks** - Runs daily on every HTTP service and on risky ports of public, non-CDN IPs, and right after an asset is scanned. Discord alert for new medium+ findings. Manual trigger: `/api/phase3/misconfig/check`
-  - Exposed `.git`, `.env`, `.htpasswd` (high), Apache `server-status`, `phpinfo.php`, directory listing (medium), `.DS_Store` (low). Every file check needs a content signature, not just HTTP 200, and redirects are not followed, so soft-404 and login pages do not trigger findings
-  - Invalid TLS certificate (expired, self-signed, wrong hostname) and TLS 1.0/1.1 still enabled (medium)
-  - HTTP served without redirect to HTTPS, missing HSTS / X-Content-Type-Options / frame protection headers (low)
-  - Internet-exposed Docker API, Redis, MongoDB, Elasticsearch, Memcached, etcd, Kubelet, CouchDB, RDP, SMB, VNC, Telnet (high/critical) and databases or FTP (medium); ports recorded by Nmap are re-confirmed with a live TCP connect so closed ports are auto-closed
-  - Hostnames that point to a server that does not serve them (low): DNS resolves to a non-CDN address whose web server rejects TLS for the name, or redirects to HTTPS that is not running. If the address is ever reassigned, the name serves the new owner's content (like a subdomain takeover, but through an A record, which the CNAME-based takeover check cannot see). Reported after two checks in a row agree; closed when the site is configured or the DNS record is removed. Hosts with no web server at all (mail, SSH) are not reported
-  - Timeouts leave a check inconclusive, so a slow host never closes or reopens findings
-- **Web Screenshots** - Every HTTP service is captured in headless Chromium (Playwright) right after its first scan and daily afterwards (interval in Schedule & Thresholds). Thumbnails appear in the Assets list and full captures in the asset's Screenshots tab, so login portals, default pages and parked domains stand out at a glance. A perceptual hash compares each capture with the previous one; a visibly different page is recorded as an `appearance_changed` event. The last 5 captures per service are kept in `db/screenshots/`. Toggle under Settings > Discovery & Screenshots or with `SCREENSHOTS_ENABLED=false`. Manual trigger: `/api/phase3/screenshots/check`
-  - The browser only talks to the asset itself: requests (including redirects and page resources) to loopback, private, link-local (cloud metadata) and other internal addresses are blocked unless they are the asset's own resolved IPs, and non-HTTP schemes are refused
-  - Each page gets a fresh browser context with downloads and service workers disabled; Chromium's sandbox stays on unless running as root
-  - Ubuntu 23.10+ (native install as a normal user): AppArmor blocks the user namespaces Chromium's sandbox needs, and screenshot runs fail with "Chromium sandbox is blocked by the OS". Allow it for the Playwright binary only, as root (adjust the home path):
-    ```
-    cat > /etc/apparmor.d/lazyeasm-chromium <<'EOF'
-    abi <abi/5.0>,
-    include <tunables/global>
-    profile lazyeasm-chromium /home/*/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
-      userns,
-    }
-    EOF
-    apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
-    ```
-- **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
-  - Each threshold notified exactly once per certificate; if the check did not run on a threshold day (long interval, worker down), the next run sends one alert at the threshold reached, with the days left
-  - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)
-- **Certificate History** - Replaced certificates are kept, so the change history shows when and how a certificate changed
-- **Expired Certificate Cleanup** - Replaced certificates expired more than 90 days are deleted with their notification records
-- **Certificate Change Detection** - A different certificate on the same host and port (fingerprint) is a `certificate_changed` event
-- **Stuck Queue Recovery** - Auto-resets items stuck in processing state; finished queue items (completed, failed, cancelled) older than 90 days are pruned daily
-- **Duplicate Prevention** - Tracks known subdomains across scan queue
-- **New Asset Classification** - Distinguishes new assets from recovered assets in notifications
-- **Auto-Discovery** - New subdomains from CT logs queued via Phase 0
-- **UI Toggle** - Enable/disable monitoring from dashboard
-- **Auto-Refresh** - Dashboard auto-updates every 60 seconds
-
-### AI-Powered Vulnerability Analysis
-
-LazyEASM generates personalized CVE recommendations with the AI provider you choose in the dashboard (or `AI_PROVIDER` in `.env`):
-
-| Provider | `AI_PROVIDER` | Default model | Notes |
-|----------|---------------|---------------|-------|
-| Google Gemini | `gemini` (default) | `gemini-2.5-flash`, falls back to `gemini-2.0-flash`, `gemini-2.5-pro` | `GEMINI_API_KEY` |
-| Anthropic Claude | `anthropic` | `claude-opus-5-5` | `ANTHROPIC_API_KEY`. Requests that Claude's safeguards decline are retried server-side on Anthropic's recommended fallback model |
-| OpenAI | `openai` | none, set `AI_MODEL` | `OPENAI_API_KEY` |
-| OpenAI-compatible | `openai_compatible` | none, set `AI_MODEL` | `AI_BASE_URL` (e.g. `http://localhost:11434/v1` for Ollama). Keeps findings on infrastructure you control |
-
-`AI_MODEL` overrides the default model for any provider. Findings sent for analysis include the hostname, port, technology versions and CVE details; use `openai_compatible` with a local model if that data must not leave your network.
-
-**Input Context:**
-- CVE ID, CVSS score, and description
-- Affected technology name and version
-- Asset hostname and port (e.g., `example.com:443`)
-- Tech stack context (other technologies running on same port)
-
-**Output Format (Indonesian):**
-
-```
-📋 APA INI?
-[1-sentence non-technical explanation]
-
-🔴 3 RISIKO UTAMA:
-1. [Risk 1 - max 20 words]
-2. [Risk 2 - max 20 words]
-3. [Risk 3 - max 20 words]
-
-🛠️ PANDUAN PATCH (3 LANGKAH):
-1. [Update to version X.X.X+ - max 25 words]
-2. [Mitigation step - max 25 words]
-3. [Monitoring step - max 25 words]
-
-Tech stack: [Other tech]. Pastikan kompatibilitas saat patch.
-
-_Generated by gemini-2.5-flash_
-```
-
-**Fallback Chain:**
-
-| Priority | Model | Use Case |
-|----------|-------|----------|
-| 1 | `gemini-2.5-flash` | Primary - fastest response |
-| 2 | `gemini-2.0-flash` | Fallback - when 2.5 is unavailable |
-| 3 | `gemini-2.5-pro` | Final fallback - most capable |
-
-**Error Handling:**
-- Actual API errors shown (503 unavailable, quota exceeded, etc.)
-- Model fallback automatic on failure
-- No silent failures
-
-### Dashboard
-Separate pages with a sidebar (tabs on small screens), so the UI stays usable with thousands of assets:
-
-- **Overview** - Headline numbers (open findings by severity, known-exploited CVEs, assets up/down/new, certificates expiring), the riskiest assets, the most widespread issues and recent changes, each linking to the matching filtered page. Optional auto-refresh (5/30/60s)
-- **Findings** - Every CVE and security finding across all assets in one paginated list, most urgent first (known exploited / critical, then EPSS, then CVSS). Filter by status, kind, severity, KEV, host or issue ("show this CVE on every host"); select rows and mark them fixed, accepted or false positive in one step, with a note
-- **Changes** - The full change history grouped by day, filterable by category (assets, ports, technologies, certificates, CVEs and findings, page appearance, status changes), period (24h / 7d / 30d), host and text. The asset page's History tab links here for that host
-- **Scans** - Submit targets; worker status; continuous monitoring on/off with every check's interval, last run and a "Run now" button; and one queue for discovery, scans, deep scans and manual monitor runs (running first, then newest) with duration, results or error, filters and auto-refresh every 10 seconds
-- **Assets** - Server-side paginated list with a screenshot thumbnail per row, search (name, domain, IP), filters (type, status, KEV / CVSS risk, certificate state, technology) and sorting (most KEV, highest CVSS/EPSS, most findings, recently scanned, newest). Filters live in the URL, so views can be bookmarked and shared
-- **Asset detail** (`/assets/<type>/<id>`) - Summary plus tabs for findings and CVEs (status changes, AI analysis), technologies, ports and IPs, screenshots, directories, change history and scan details; deep scan and delete actions
-- **Settings** - Tabs for General, AI, Notifications, Discovery & Screenshots, Schedule & Thresholds and Account. Changes apply without a restart
-- **Dark/Light Mode** - Persistent theme preference
-- **Exports** - Assets as CSV from the Assets page; findings as CSV/JSON from the Findings page
-
-### Security
-- **Token Refresh Authentication** - Access token (15 min) + Refresh token (7 days) with rotation
-- **Refresh Token Blacklisting** - Revoked tokens stored in database
-- **Token Reuse Detection** - Reused refresh tokens trigger full user session revocation
-- **Rate Limiting** - 5 failed login attempts blocks IP for configurable duration
-- **Hashed Admin Password** - Stored in the database as a scrypt hash, never in plain text. The generated `ADMIN_PASS` in `.env` is hashed on first start and removed from the file; change the password in the dashboard (Configuration > Change Admin Password), which signs out every other session. Lost it? Set `ADMIN_PASS=...` in `.env` and restart. Login stays disabled until a password exists, so an empty `ADMIN_PASS` can never log in
-- **CSRF Protection** - Token-based validation for all POST forms
-- **Secure Cookies** - HttpOnly, SameSite=Lax, Secure flag (HTTPS only)
-- **Security Headers** - X-Content-Type-Options, X-Frame-Options, CSP, HSTS, Permissions-Policy
-- **Cache-Control** - Authenticated pages never cached by browser
-- **XSS Protection** - HTML/JS escaping for all dynamic content
-- **SQL Injection Protection** - Parameterized queries throughout
-
-## Installation
-
-### Docker (Recommended)
+### Docker (recommended)
 
 ```bash
-# Clone repository
 git clone https://github.com/Kae-Desu/LazyEASM.git
 cd LazyEASM
-
-# Start (auto-installs Docker if missing on Linux)
-./start.sh
-
-# Access dashboard at http://localhost:10001
+./start.sh                    # installs Docker on Linux if missing
 ```
 
-> **Note:** The `.env` file is mounted as a Docker volume, so configuration persists across container rebuilds.
->
-> The image includes headless Chromium for web screenshots (about 400 MB extra). Native installs get it from `start.sh`; for a manual install run `python -m playwright install --with-deps chromium`. Without it, screenshots are skipped and everything else works.
+Open **https://&lt;server&gt;:10002** (or `https://localhost:10002`). The image includes a headless browser for screenshots (about 400 MB).
 
-### Native
+### Native (Linux)
 
 ```bash
-# Clone repository
 git clone https://github.com/Kae-Desu/LazyEASM.git
 cd LazyEASM
-
-# Start (auto-installs dependencies if missing)
-./start.sh --native
+./start.sh --native           # installs Python, Nmap and dependencies if missing
 ```
 
-> **Ubuntu 23.10 or newer:** Ubuntu blocks the user namespaces Chromium's sandbox needs, so web screenshots fail ("Chromium sandbox is blocked by the OS" on the Scans page) until you allow it for the Playwright Chromium binary. Run once as root, replacing `lazyeasm` with the user LazyEASM runs as:
+Open **https://&lt;server&gt;:10001**.
+
+> **Ubuntu 23.10 or newer:** web screenshots need one extra step, because Ubuntu blocks the sandbox Chromium uses. Run once as root, replacing `lazyeasm` with the user LazyEASM runs as:
 > ```bash
 > cat > /etc/apparmor.d/lazyeasm-chromium <<'EOF'
 > abi <abi/5.0>,
@@ -282,470 +58,103 @@ cd LazyEASM
 > EOF
 > apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
 > ```
-> This allows only that binary; the system-wide restriction stays on. Docker installs are not affected (Chromium runs as root in the container, without the sandbox).
+> This allows only that program; the rest of the system keeps the restriction. Docker installs do not need it.
 
-### start.sh Commands
+### First login
 
-| Command | Description |
-|---------|-------------|
-| `./start.sh` | Start in Docker mode (default) |
-| `./start.sh --native` | Start in native mode (no Docker) |
-| `./start.sh --stop` | Stop Docker containers |
-| `./start.sh --logs` | Follow Docker container logs |
-| `./start.sh --clean` | Remove Docker containers, images, and volumes |
-| `./start.sh --help` | Show help message |
+1. The installer prints the username (`lazymin`) and a generated password. **Save it**: it is stored hashed and removed from `.env` on first start. Change it in Settings > Account.
+2. The dashboard uses a self-signed HTTPS certificate, so the browser warns once. In the warning's certificate details, check that the SHA-256 fingerprint matches the one printed when LazyEASM starts, then accept it.
+3. Add targets on the **Scans** page.
 
-On first run (either mode), `start.sh` will:
-- **Docker**: Auto-install Docker + docker-compose on Linux if missing
-- **Native**: Auto-install Python 3, nmap, openssl, and create a virtual environment
-- Generate `.env` with random secrets via `utils/installation/install.sh`
+| `start.sh` | |
+|---|---|
+| `./start.sh` | Start with Docker (default) |
+| `./start.sh --native` | Start without Docker |
+| `./start.sh --stop` | Stop the Docker containers |
+| `./start.sh --logs` | Follow the Docker logs |
+| `./start.sh --clean` | Remove the Docker containers, images and volumes |
 
-### HTTPS
+<details>
+<summary>Manual installation</summary>
 
-New installs serve the dashboard over HTTPS on the same port (`https://<server>:10001`, Docker: `:10002`) with a **self-signed certificate** LazyEASM generates on first start for the server's addresses, stores in `db/tls/` and renews before it expires (the same approach as Wazuh or Proxmox). Browsers warn the first time: compare the SHA-256 fingerprint in the warning's certificate details with the one printed at startup (and shown in Settings > Account), then accept it. Traffic is encrypted either way.
+```bash
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python -m playwright install --with-deps chromium   # screenshots (optional)
+sudo apt install nmap                                # or: brew install nmap
+cp .env.example .env    # set ADMIN_PASS (secrets are generated on first start; TLS_MODE=self-signed is preset)
+python run.py
+```
+</details>
+
+## Using LazyEASM
+
+| Page | What it is for |
+|---|---|
+| **Overview** | Headline numbers (open findings by severity, known-exploited CVEs, assets, certificates), riskiest assets, most widespread issues, recent changes |
+| **Assets** | Every asset with a screenshot thumbnail; search, filter (type, status, risk, certificate, technology) and sort. Each asset has its own page: findings and CVEs, technologies, ports, screenshots, directories, history; deep scan and delete |
+| **Findings** | Every CVE and security finding across assets, most urgent first. Filter, open an issue on every host it affects, and set status (fixed, accepted, false positive) for many at once |
+| **Changes** | Everything that changed, by day: new assets, up/down, ports, technologies, certificates, page appearance, findings |
+| **Scans** | Add targets, see the worker and every queued or running job, switch monitoring on/off, run any check now |
+| **Settings** | API keys, AI provider, notifications, discovery and screenshots, check intervals and thresholds, backups, password and HTTPS status. Changes apply without a restart |
+
+**What gets scanned**: a domain you submit (`example.com`) is explored: its subdomains are found, scanned and monitored. A subdomain or IP you submit is scanned on its own; to explore its whole domain, use *Expand* on its page or submit the domain. Only scan what you are authorized to test.
+
+**Priorities**: P1 = known to be exploited in the wild (CISA KEV), P2 = likely to be exploited soon (EPSS >= 10%), P3 = high CVSS (>= 7.0) without an exploitation signal, P4 = everything else.
+
+## HTTPS
+
+New installs serve the dashboard over HTTPS with a certificate LazyEASM generates and renews itself (like Wazuh or Proxmox). Set `TLS_MODE` in `.env`:
 
 | `TLS_MODE` | |
 |---|---|
-| `self-signed` | Generated certificate (default for new installs). `TLS_HOSTNAMES` adds names or IPs it should cover, e.g. the public IP when it cannot be detected (in Docker, set `PUBLIC_IP` instead) |
-| `custom` | Your certificate: `TLS_CERT_FILE` and `TLS_KEY_FILE` (PEM), e.g. from Let's Encrypt or a company CA. No browser warning |
-| `off` | Plain HTTP: for use behind a reverse proxy (below). Installs created before this setting existed stay on plain HTTP until it is set |
+| `self-signed` | Default for new installs. The browser warns once; compare the fingerprint (shown at startup and in Settings > Account). Add names or IPs with `TLS_HOSTNAMES` (Docker: `PUBLIC_IP`) |
+| `custom` | Your own certificate (`TLS_CERT_FILE`, `TLS_KEY_FILE`), e.g. Let's Encrypt or a company CA. No warning |
+| `off` | Plain HTTP, for use behind a reverse proxy. Installs from before this setting stay on HTTP until it is set |
 
-If HTTPS is enabled but cannot start (e.g. a missing certificate file), LazyEASM refuses to start rather than fall back to plain HTTP. On plain HTTP the dashboard and login page show a warning when opened from another machine, and the server logs one at startup.
+**Behind a reverse proxy** (nginx, Caddy, Traefik...): set `TLS_MODE=off`, make LazyEASM reachable only from the proxy (`HOST=127.0.0.1`; Docker: publish `"127.0.0.1:10002:10001"`), have the proxy send `X-Forwarded-For/Proto/Host`, and set `TRUST_PROXY=true` and `FORCE_HTTPS=true`.
 
-**Behind a reverse proxy** (nginx, Caddy, Traefik, HAProxy, a cloud load balancer...):
+If the dashboard is ever opened over plain HTTP from another machine, it shows a "Not encrypted" warning.
 
-1. Set `TLS_MODE=off` and make LazyEASM reachable only from the proxy: `HOST=127.0.0.1` for a native install; for Docker, publish the port on localhost only (`"127.0.0.1:10002:10001"` in `docker-compose.yml`)
-2. Point the proxy at `http://127.0.0.1:<port>` and have it set `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`
-3. Set `TRUST_PROXY=true` and `FORCE_HTTPS=true` in `.env` and restart: client IPs (login rate limiting), redirects and Secure cookies then follow the proxy's view. Only enable `TRUST_PROXY` behind a proxy; without one, clients could forge these headers
+## Backups
 
-### Manual Installation (Advanced)
-
-If you prefer to set up manually without `start.sh`:
-
-```bash
-# Clone repository
-git clone https://github.com/Kae-Desu/LazyEASM.git
-cd LazyEASM
-
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-
-# Install dependencies
-pip install -r requirements.txt
-python -m playwright install --with-deps chromium  # web screenshots (optional)
-
-# Install external tools
-brew install nmap  # macOS
-# apt install nmap  # Linux
-
-# Configure environment
-cp .env.example .env
-# Edit .env: set ADMIN_PASS (login stays disabled until it is set); API keys can be added later in the dashboard
-
-# Initialize database
-python modules/InitDB.py
-
-# Run the application (web app + background worker as separate processes)
-python run.py
-```
-
-### How LazyEASM Runs
-
-`run.py` (used by Docker and `start.sh`) starts two processes:
-
-| Process | Command | Does |
-|---------|---------|------|
-| Web | `main.py` with `LAZYEASM_ROLE=web` | Serves the dashboard and API with [waitress](https://docs.pylonsproject.org/projects/waitress/) |
-| Worker | `worker.py` | Runs every queue (asset discovery, Phase 0/1/2) and the Phase 3 monitors |
-
-- The two share the SQLite database (WAL mode). Submitting assets queues a job that the worker picks up, so restarting the web app never interrupts a scan, and queued work survives restarts: jobs a crash left half-done are re-queued when the worker starts.
-- If either process exits, `run.py` stops the other and exits, so Docker's restart policy restarts LazyEASM.
-- The worker writes a heartbeat every 15 seconds; `/health` reports it per component (`phase0_worker`, `discovery_worker`, `phase1_worker`, `phase2_worker`, `phase3_worker`).
-- Run exactly one worker per database.
-- `POST /api/phase3/<check>/check` (`liveness`, `ctlogs`, `wappalyzer`, `takeover`, `intel`, `misconfig`, `discovery`, `screenshots`, `maintenance`) queues a run in the worker and returns `202` with a `job_id`; `GET /api/jobs/<job_id>` reports `pending` / `processing` / `completed` / `failed`. A manual run never overlaps the scheduled run of the same check.
-- A deep-scan phase lock older than 24 hours is treated as left behind by a crash and cleared.
-- For local development, `python main.py` runs the web app and the worker in one process. `FLASK_DEBUG=true` switches to Flask's debug server (never on a reachable host).
-- `HOST`, `PORT` (default `0.0.0.0:10001`) and `WEB_THREADS` (default `8`) configure the web server.
-
-### Backup & Restore
-
-| What | Backed up | |
-|---|---|---|
-| `db/lazyeasm.db` (assets, findings, history, settings, admin login) | Always | Cannot be recreated |
-| `db/screenshots/` | Optional (download) | Can be captured again, but the visual history is lost |
-| `.env` (API keys, webhook URLs, signing keys) | Optional (download) | Sensitive; without it sessions reset and keys must be entered again |
-| `db/tls/`, `db/fingerprints/`, `logs/` | No | Regenerated automatically |
-
-- **Automatic** - a consistent copy of the database (SQLite online backup, safe while scans run) is saved in `db/backups/` every day, keeping the newest 7 (Settings > Backup: on/off, how many). Before an upgrade changes the database, a `pre-upgrade` copy is made first, so a bad upgrade can be undone
-- **On demand** - Settings > Backup > *Back up now* (stays on the server) or *Download backup*: a zip with the database, optionally screenshots and `.env`. The password is asked again, and every download is logged
-- **Off the server** - `db/backups/` is on the same disk; copy it elsewhere too (rsync, your backup tool), or a lost disk takes the backups with it
-
-**Restore** replaces the whole database, so it runs on the server with LazyEASM stopped (Docker: `docker compose run --rm lazyeasm python -m utils.backup ...`). The current database is kept as a `pre-restore` backup first; the file must pass an integrity check and look like a LazyEASM database.
+- **Automatic**: a copy of the database every day in `db/backups/` (newest 7 kept), and one before an upgrade changes the database. Settings > Backup to change it.
+- **On demand**: Settings > Backup > *Back up now*, or *Download backup* (a zip; optionally with screenshots and the `.env` secrets; asks for your password again).
+- **Copy `db/backups/` off the server** as well (rsync, your backup tool): a lost disk takes local backups with it.
+- **Restore** with LazyEASM stopped (Docker: `docker compose run --rm lazyeasm python -m utils.backup ...`). The current database is kept as a `pre-restore` copy first.
 
 ```bash
 python -m utils.backup list
-python -m utils.backup restore db/backups/lazyeasm-20261014-020000-daily.db
-python -m utils.backup restore lazyeasm-backup.zip --with-env    # also restore .env from the zip
+python -m utils.backup restore db/backups/<file>.db
+python -m utils.backup restore lazyeasm-backup.zip --with-env    # also restore .env
 ```
 
 ## Configuration
 
-Create a `.env` file with the following keys:
+`.env` is created by the installer with random secrets; [.env.example](.env.example) documents every key. Most settings (API keys, AI provider, notifications, discovery, check intervals, minimum CVSS, backups) are changed in the dashboard. Optional keys that improve results:
 
-```env
-# Security (auto-generated on first run if empty)
-FLASK_SECRET_KEY=your_secret_key
-JWT_SECRET=your_jwt_secret
-FORCE_HTTPS=false                # true when users reach LazyEASM over HTTPS
-TRUST_PROXY=false                # true behind a reverse proxy setting X-Forwarded-*
+| Key | Effect |
+|---|---|
+| `NVD_API_KEY` | Faster CVE lookups (higher NVD rate limit) |
+| `SECURITYTRAILS_API_KEY`, `OTX_API_KEY`, `CERTSPOTTER_API_KEY` | More subdomain sources / higher quota |
+| `GEMINI_API_KEY`, `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` (`AI_PROVIDER`) | AI explanation of CVEs (`openai_compatible` + `AI_BASE_URL` for a local model) |
+| `DISCORD_WEBHOOK_URL`, `SLACK_WEBHOOK_URL`, `NOTIFY_WEBHOOK_URL`, `SMTP_*` | Alerts; every configured channel gets every alert |
 
-# Admin credentials
-ADMIN_USER=lazymin
-ADMIN_PASS=randomly_generated       # Set by install.sh; hashed into the DB and removed from .env on first start
+Full reference: [TECHNICAL.md > Configuration reference](TECHNICAL.md#configuration-reference).
 
-# API Keys (enhances discovery and CVE matching)
-SECURITYTRAILS_API_KEY=your_key    # Subdomain enumeration
-NVD_API_KEY=your_key               # Optional, raises NVD rate limit
-AI_PROVIDER=gemini                 # gemini | anthropic | openai | openai_compatible
-GEMINI_API_KEY=your_key            # AI recommendations (gemini)
-ANTHROPIC_API_KEY=your_key         # AI recommendations (anthropic)
-OPENAI_API_KEY=your_key            # AI recommendations (openai)
+## Good to know
 
-# Notifications
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
-DISCORD_USER_ID=your_discord_id    # User to ping on alerts
-SLACK_WEBHOOK_URL=https://hooks.slack.com/services/...
-NOTIFY_WEBHOOK_URL=https://example.com/hooks/lazyeasm
-NOTIFY_WEBHOOK_SECRET=            # Optional HMAC signing secret
-SMTP_HOST=smtp.example.com         # Email: also SMTP_PORT, SMTP_SECURITY,
-SMTP_TO=secops@example.com         # SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM
+- One instance per database (SQLite, one background worker); see TECHNICAL.md for the architecture.
+- CVE matching needs a detected version. Detection reads the HTTP response; fingerprints that need a running browser (JavaScript, DOM) are not evaluated yet.
+- CDN addresses (e.g. Cloudflare) are not port-scanned; their websites are still checked.
+- Certificate transparency lookups use CertSpotter's free quota (set `CERTSPOTTER_API_KEY` for more) and crt.sh as a fallback, which is often overloaded; discovery continues with the other sources.
+- Times are stored in UTC and shown in your browser's time zone.
+- After logout a session token stays valid for up to 15 minutes; changing the password ends every session at once.
 
-# Phase 3 check intervals and the minimum CVSS are set in the dashboard
-# (Continuous Monitoring > Schedule & Thresholds), not in .env
-```
+## Documentation
 
-### Environment Variables
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `FLASK_SECRET_KEY` | Yes | Flask session secret |
-| `JWT_SECRET` | Yes | JWT signing secret |
-| `FORCE_HTTPS` | No | `true` to always send Secure cookies and HSTS (use when served over HTTPS, including TLS terminated at a proxy). `FLASK_ENV=production` is treated the same for older installs |
-| `TRUST_PROXY` | No | `true` to trust `X-Forwarded-For/Proto/Host` from one reverse proxy |
-| `TLS_MODE` | No | `self-signed` (new installs), `custom` or `off`; see Installation > HTTPS |
-| `TLS_CERT_FILE`, `TLS_KEY_FILE` | With `custom` | Certificate and key (PEM) to serve |
-| `TLS_HOSTNAMES` | No | Extra names/IPs for the self-signed certificate (comma separated) |
-| `FLASK_DEBUG` | No | `true` enables the Werkzeug debugger. Development only; never on a reachable host (default: `false`) |
-| `ADMIN_USER` | Yes | Admin username |
-| `ADMIN_PASS` | First start / reset | Initial admin password. Hashed into the database and removed from `.env` at startup; set it again and restart to reset a lost password |
-| `SECURITYTRAILS_API_KEY` | No | SecurityTrails API key |
-| `NVD_API_KEY` | No | NVD API key (higher CVE lookup rate limit) |
-| `AI_PROVIDER` | No | `gemini` (default), `anthropic`, `openai`, or `openai_compatible` |
-| `AI_MODEL` | No | Model override; required for `openai` and `openai_compatible` |
-| `AI_BASE_URL` | No | Endpoint for `openai_compatible` |
-| `GEMINI_API_KEY` | No | Google Gemini API key |
-| `ANTHROPIC_API_KEY` | No | Anthropic API key |
-| `OPENAI_API_KEY` | No | OpenAI API key (optional for `openai_compatible`) |
-| `DISCORD_WEBHOOK_URL` | No | Discord webhook URL |
-| `DISCORD_USER_ID` | No | Discord user ID to ping |
-| `SLACK_WEBHOOK_URL` | No | Slack incoming webhook |
-| `NOTIFY_WEBHOOK_URL` | No | Generic JSON webhook (`source`, `title`, `message`, `markdown`, `sent_at`) |
-| `NOTIFY_WEBHOOK_SECRET` | No | Signs webhook bodies with HMAC-SHA256 |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_SECURITY` | No | Email server; security is `starttls` (default), `ssl` or `none` |
-| `SMTP_USERNAME` / `SMTP_PASSWORD` / `SMTP_FROM` / `SMTP_TO` | No | Email credentials, sender and comma-separated recipients |
-| `OTX_API_KEY` | No | AlienVault OTX key for passive DNS discovery |
-| `CERTSPOTTER_API_KEY` | No | CertSpotter key; raises the quota for certificate transparency lookups (works without one); also editable in the dashboard |
-| `DNS_BRUTEFORCE` | No | `false` disables DNS brute force and permutations (default `true`); also editable in the dashboard |
-| `SCREENSHOTS_ENABLED` | No | `false` disables web screenshots (default `true`); also editable in the dashboard |
-
-## Authentication
-
-LazyEASM uses a dual-token JWT authentication system:
-
-| Token | Lifetime | Storage | Validation |
-|-------|----------|---------|------------|
-| **Access Token** | 15 minutes | HttpOnly cookie | Stateless (JWT signature only) |
-| **Refresh Token** | 7 days | HttpOnly cookie | Stateful (checked against blacklist) |
-
-- Access tokens are refreshed automatically every 14 minutes via `/refresh-token`
-- Each refresh issues a new token pair and blacklists the old refresh token
-- If a blacklisted refresh token is reused (possible theft), all user sessions are revoked
-- Logout blacklists the refresh token and clears both cookies
-- Every request that changes data needs the session's CSRF token ("Required + CSRF" below): as the `csrf_token` form field, a `csrf_token` JSON field, or an `X-CSRF-Token` header. Pages expose it in `<meta name="csrf-token">`; scripts calling the API with a session cookie read it from there
-
-## API Reference
-
-All endpoints require authentication via JWT access token (cookie) unless noted.
-
-### Authentication
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/login` | GET, POST | None | Login page and authentication |
-| `/logout` | GET | Required | Logout and clear tokens |
-| `/refresh-token` | POST | Refresh token | Refresh access token |
-| `/health` | GET | None | Health check endpoint |
-
-### Assets & Processing
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/` | GET | Required | Dashboard (main UI) |
-| `/api/assets` | GET | Required | Searchable, filtered, paginated asset summaries |
-| `/api/assets/<type>/<id>` | GET | Required | Full details for one asset, loaded on demand |
-| `/api/findings` | GET | Required | CVEs (one row per host and CVE) and security findings across all assets, most urgent first. Params: `q`, `kind` (cve/finding), `severity`, `status` (open by default, or fixed/accepted/false_positive/all), `kev=1`, `identifier`, `host`, `sort` (urgency/newest/last_seen/host), `page`, `page_size` (max 100) |
-| `/api/findings/bulk_status` | POST | Required + CSRF | `{"items": [{"kind": "cve"\|"finding", "id": 1}], "status": "accepted", "note": "..."}`; up to 500 items, applied in one transaction |
-| `/api/domains/<id>/expand` | POST | Required + CSRF | Expand a domain stored only as the parent of a single submitted subdomain (queues discovery, `202`) |
-| `/api/vulnerabilities/<id>/status`, `/api/findings/<id>/status` | POST | Required + CSRF | Set the status of one CVE (all ports on that host) or finding |
-| `/process_assets` | POST | Required | Start Phase 0 processing |
-| `/delete_asset/<type>/<id>` | DELETE | Required + CSRF | Delete an asset |
-
-#### Asset Query API
-
-`GET /api/assets` is the read boundary for the next dashboard UI. It does not
-store cursor or pagination state in the Flask process, so requests can be routed
-to any application replica.
-
-| Parameter | Values | Description |
-|-----------|--------|-------------|
-| `q` | text | Search asset name, root domain, or resolved IP |
-| `type` / `types` | `domain`, `subdomain`, `ip` | Repeat or provide comma-separated values |
-| `status` | text | Exact asset status |
-| `root_domain` | hostname | Restrict results to one root-domain group |
-| `technology` | text | Partial, case-insensitive technology match |
-| `port` | `1`-`65535` | Match discovered ports or HTTP service ports |
-| `min_cvss` | number | Minimum highest CVSS score on the asset |
-| `kev` | `1` / `true` | Only assets with an open CVE in the CISA KEV catalog |
-| `cert_state` | `none`, `expired`, `expiring`, `valid` | Certificate state; expiring means active and due within 30 days |
-| `scan_state` | `scanned`, `unscanned`, `pending`, `processing` | Initial scan state or latest Phase 2 queue state |
-| `sort` | `name`, `type`, `status`, `first_seen`, `last_seen`, `last_scanned`, `max_cvss`, `max_epss`, `kev_count` | Sort field |
-| `order` | `asc`, `desc` | Sort direction |
-| `page` | positive integer | One-based page number |
-| `page_size` | positive integer | Page size, capped by `ASSET_API_MAX_PAGE_SIZE` |
-
-Example:
-
-```text
-/api/assets?q=api&type=subdomain&technology=nginx&min_cvss=7&page=1&page_size=25
-```
-
-The list response contains lightweight counts and summaries. Technologies,
-ports, directories, and vulnerability records are returned by the detail
-endpoint only, preventing collapsed UI rows from loading their entire finding
-graph.
-
-> **Kubernetes scaling note:** The asset API itself is stateless, but the full
-> application is not yet safe to scale to multiple replicas. SQLite storage and
-> the in-process Phase 0/1/2/3 workers must be moved to shared services (for
-> example PostgreSQL plus a durable job queue) before enabling horizontal pod
-> autoscaling. Until then, use one application replica with persistent storage.
-
-### Phase 2 (Deep Scanning)
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/phase2/scan` | POST | Required + CSRF | Queue a deep scan for asset |
-| `/api/phase2/cancel` | POST | Required + CSRF | Cancel a queued scan |
-| `/api/phase2/queue` | GET | Required | Get current queue status |
-| `/scans/queue` | GET | Required | Scan queue table partial (Scans page auto-refresh; same filters as `/scans`) |
-| `/queue/status` | GET | Required | Get queue status (JSON) |
-
-### Phase 3 (Continuous Monitoring)
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/api/phase3/status` | GET | Required | Get monitoring status and stats |
-| `/api/phase3/toggle` | POST | Required + CSRF | Enable/disable Phase 3 |
-| `/api/phase3/liveness/check` | POST | Required + CSRF | Trigger immediate liveness check |
-| `/api/phase3/ctlogs/check` | POST | Required + CSRF | Run the Certificates & CT logs check now |
-| `/api/phase3/wappalyzer/check` | POST | Required + CSRF | Trigger immediate Wappalyzer re-scan |
-| `/api/phase3/screenshots/check` | POST | Required + CSRF | Trigger immediate web screenshot run |
-| `/screenshots/<id>/full` or `/thumb` | GET | Required | Stored screenshot image (JPEG) |
-| `/phase_status` | GET | Required | Get phase status (legacy) |
-
-### AI Analysis
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/generate_ai` | POST | Required + CSRF | Generate AI recommendation for CVE |
-
-**Request Body:**
-```json
-{
-  "vuln_id": 123
-}
-```
-
-**Response:**
-```json
-{
-  "success": true,
-  "vuln_id": 123,
-  "recommendation": "📋 APA INI?\n..."
-}
-```
-
-### Configuration
-
-| Endpoint | Method | Auth | Description |
-|----------|--------|------|-------------|
-| `/save_config` | POST | Required | Update configuration values |
-| `/test_webhook` | POST | Required + CSRF | Test Discord webhook |
-
-## Project Structure
-
-```
-LazyEASM/
-├── run.py                      # Starts the web and worker processes
-├── main.py                     # Flask application & routes (web process)
-├── worker.py                   # Background worker process
-├── modules/
-│   ├── InitDB.py              # Database schema & migrations
-│   ├── Nmap.py                # Nmap integration
-│   ├── ExpandAsset.py         # Phase 0 discovery pipeline
-│   ├── FindDir.py             # Directory enumeration
-│   ├── phase1_runner.py       # Phase 1 scanning pipeline
-│   ├── phase2_dirsearch.py    # Phase 2 deep scan runner
-│   ├── Wappalyzer.py          # Technology scan of HTTP services + CVE matching
-│   ├── CVEmatch.py            # CVE lookup via NVD (CPE matching)
-│   ├── AskAI.py               # AI recommendations (Gemini / Claude / OpenAI / compatible)
-│   └── Notify.py              # Discord notifications
-├── utils/
-│   ├── config.py              # Environment config loader
-│   ├── db_utils.py            # Database CRUD + token blacklist
-│   ├── env_manager.py         # .env file management
-│   ├── parsing.py             # Input parsing utilities
-│   ├── utility.py             # DNS, Ping, shared hosting detection
-│   ├── queue_manager.py       # Database-backed Phase 1 queue and worker
-│   ├── pipeline.py            # Asset discovery and Phase 1 enqueueing
-│   ├── worker_runtime.py      # Starts background components, heartbeat, crash recovery
-│   ├── phase0_worker.py       # Background worker for Phase 0 queue
-│   ├── phase2_worker.py       # Background worker for Phase 2 queue
-│   ├── phase3_worker.py       # Phase 3 monitoring orchestrator
-│   ├── liveness_checker.py    # ICMP/TCP liveness checks
-│   ├── wappalyzer_monitor.py  # Periodic Wappalyzer re-scanning (Phase 3)
-│   ├── takeover_checker.py    # Subdomain takeover / dangling CNAME checks (Phase 3)
-│   ├── threat_intel.py        # CISA KEV + EPSS prioritization (Phase 3)
-│   ├── misconfig_checker.py   # Exposed files, TLS, headers, risky ports (Phase 3)
-│   ├── subdomain_discovery.py # Extra passive sources + DNS brute force / permutations
-│   ├── screenshots.py         # Headless Chromium captures, request filtering, perceptual hash
-│   ├── fingerprints.py        # Fingerprint data: bundled snapshot + weekly download
-│   ├── techdetect.py          # Technology detection (Wappalyzer format)
-│   ├── jslibs.py              # JavaScript libraries and vulnerabilities (Retire.js)
-│   ├── asset_repository.py    # Asset list / detail queries (Assets pages, /api/assets)
-│   ├── findings_repository.py # Cross-asset findings and Overview numbers
-│   ├── activity_repository.py # Change history and scan queue pages
-│   ├── process_utils.py       # Process detection utilities
-│   ├── tls_certs.py           # Reads the certificate each HTTPS service presents
-│   └── ct_monitor.py          # Certificates & CT logs monitor (discovery, expiry alerts)
-├── templates/
-│   ├── base.html              # Layout: header, sidebar, dialogs, toasts
-│   ├── dashboard.html         # Overview page
-│   ├── assets.html            # Paginated asset list (uses /api/assets)
-│   ├── findings.html          # Cross-asset findings triage (uses /api/findings)
-│   ├── changes.html           # Change history page
-│   ├── scans.html             # Targets, monitoring and scan queue
-│   ├── overview_partial.html  # Overview headline numbers
-│   ├── asset_detail.html      # One asset with tabs
-│   ├── settings.html          # Settings with tabs
-│   ├── _cards.html            # Finding / CVE card macros
-│   └── login.html             # Login page
-├── static/
-│   ├── images/                # Logo and icons
-│   └── js/app.js              # Shared front-end code (dialogs, actions, status updates)
-├── db/                        # SQLite database and screenshots/ (gitignored)
-├── logs/                      # Application logs (gitignored)
-├── requirements.txt
-├── .env.example               # Environment template
-├── start.sh                    # Main entry point (Docker / Native)
-├── utils/installation/
-│   ├── install.sh               # Secret generation script
-│   └── entrypoint.sh            # Docker entry point
-└── README.md
-```
-
-## Database Schema
-
-```
-domain_asset ─── domain_ip ───┬── ip_asset ─── ports
-              │               │              ├── http_services ─── technologies ─── vulnerabilities
-              │               │              └── directories
-              │               │
-subdomain_asset ─┬── subdomain_ip ──┘
-                │
-                └── certificates ─── cert_notifications
-                                  └── (expiry tracking: 7/5/3/1 days)
-
-domain_asset / subdomain_asset ─── last_wappalyzer_scan
-                                ├── last_liveness_check
-                                ├── last_deep_scan
-                                └── last_dirsearch
-
-settings ─── Phase 3 configuration (liveness_interval_min, ctlogs_interval_hr, wappalyzer_interval_hr)
-token_blacklist ─── Revoked refresh tokens (auto-cleaned)
-scan_queue ─── Pending/processing/completed scan tasks (ports_found, dirs_found, error_message)
-phase_status ─── Current phase tracking
-```
-
-**Key Tables:**
-- `cert_notifications` - Tracks sent certificate expiry notifications (deduplication per threshold)
-- `token_blacklist` - Revoked JWT refresh tokens
-- `scan_queue` - Background task queue for Phase 1/2 scans (`ports_found`, `dirs_found`, `error_message` columns)
-
-## Usage
-
-1. **Login** - Access dashboard at `http://localhost:10001` (credentials set via `./start.sh`)
-2. **Configure** - Add API keys via Settings panel
-3. **Add Assets** - Enter domains, IPs, or CIDRs (newline-separated)
-4. **Process** - Click "Process Queue" to start Phase 0 discovery
-5. **Monitor** - Watch queue progress and Discord for notifications
-6. **Review** - Expand assets to see tech stack, ports, CVEs, and AI recommendations
-7. **Deep Scan** - Click "Deep Scan" on any asset for full port scan + directory discovery
-8. **Enable Monitoring** - Toggle Phase 3 for continuous liveness and CT log monitoring
-
-## Testing
-
-```bash
-python -m tests        # add -v for each test name
-```
-
-Tests use temporary databases and write their log files to a temporary folder, so running them on a live install leaves its data and `logs/` untouched. (Plain `python -m unittest discover -s tests` also works but skips that setup; set `LAZYEASM_LOG_DIR` to send logs elsewhere.) The real-browser screenshot test is skipped when Chromium cannot start.
-
-## Tech Stack
-
-| Component | Technology |
-|-----------|------------|
-| **Backend** | Python Flask |
-| **Database** | SQLite |
-| **Frontend** | Tailwind CSS (via CDN) |
-| **Authentication** | JWT (access + refresh tokens) |
-| **AI** | Google Gemini, Anthropic Claude, OpenAI, or OpenAI-compatible endpoints |
-| **Notifications** | Discord Webhooks |
-| **Port Scanning** | Nmap |
-| **Tech Fingerprinting** | Wappalyzer-format fingerprints (enthec/webappanalyzer), Retire.js |
-| **Directory Discovery** | Dirsearch |
-| **CVE Database** | NVD API 2.0 (CPE matching) |
-
-## Known Limitations
-
-- Timestamps are stored in UTC and shown in the browser's local time (hover a time to see UTC). The Changes page groups entries by UTC date. Installs upgraded from a version that stored local time are converted once at startup, using the server's current UTC offset; rows written around a daylight-saving switch may be off by an hour
-- Certificate transparency lookups depend on CertSpotter (free quota; set `CERTSPOTTER_API_KEY` for more) and crt.sh, which often returns 502/503 under load. Discovery continues with the other sources when both are unavailable
-- Shared/CDN IPs skipped for port scanning
-- CVE matching requires version detection
-- Fingerprints that need a running browser (JavaScript globals, DOM) are not evaluated; detection uses what the HTTP response shows
-- Access tokens remain valid for up to 15 minutes after logout (stateless by design); changing the password revokes every session immediately
-- Browser must support cookies for authentication (no API key auth)
-- Gemini API free tier has rate limits (may need paid plan for heavy use)
-- Certificate expiry alerts run with the Certificates & CT logs check (default every 6 hours), not in real time
-
-## Roadmap
-
-- **Dockerization** ✅ - Dockerfile + docker-compose for containerized deployment
-- **Enhanced SSL Monitoring** - Certificate renewal detection, email notifications
-- **Improved AI** - CVSS vector breakdown, exploit availability indicator
-- **Performance** - Async/await for parallel scanning, Redis task queue
-- **Reporting** - CSV/PDF export, scheduled reports, executive summary
+- [TECHNICAL.md](TECHNICAL.md) - architecture, scanning pipeline, detection details, data and retention, security design, configuration and API reference, development and testing
+- Tests: `python -m tests`
 
 ## License
 
@@ -759,10 +168,8 @@ Releases published before this change remain available under the MIT License.
 
 ## Acknowledgments
 
-- SecurityTrails API for subdomain enumeration
-- CertSpotter (SSLMate) and crt.sh for certificate transparency lookups
-- NVD (National Vulnerability Database) for CVE information
-- [enthec/webappanalyzer](https://github.com/enthec/webappanalyzer), the community-maintained continuation of the Wappalyzer fingerprints (GPL-3.0), and [Retire.js](https://github.com/RetireJS/retire.js) for JavaScript library vulnerabilities (Apache-2.0); see [data/fingerprints/README.md](data/fingerprints/README.md)
-- [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) for exploited-in-the-wild CVEs
-- [FIRST EPSS](https://www.first.org/epss/) for exploit prediction scores
+- [enthec/webappanalyzer](https://github.com/enthec/webappanalyzer), the community-maintained continuation of the Wappalyzer fingerprints (GPL-3.0), and [Retire.js](https://github.com/RetireJS/retire.js) (Apache-2.0); see [data/fingerprints/README.md](data/fingerprints/README.md)
 - [can-i-take-over-xyz](https://github.com/EdOverflow/can-i-take-over-xyz) by EdOverflow and contributors for subdomain takeover fingerprints (CC BY 4.0, see [data/README.md](data/README.md))
+- [NVD](https://nvd.nist.gov/), the [CISA Known Exploited Vulnerabilities catalog](https://www.cisa.gov/known-exploited-vulnerabilities-catalog) and [FIRST EPSS](https://www.first.org/epss/)
+- CertSpotter (SSLMate), crt.sh, SecurityTrails, HackerTarget, the Wayback Machine and AlienVault OTX for discovery data
+- [Nmap](https://nmap.org/), [Dirsearch](https://github.com/maurosoria/dirsearch) and [Playwright](https://playwright.dev/)

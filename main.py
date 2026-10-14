@@ -1624,7 +1624,7 @@ def serve_web():
     if host not in LOOPBACK_HOSTS and not FORCE_HTTPS and not env_flag('TRUST_PROXY'):
         logger.warning(f"LazyEASM is reachable on {host}:{port} over plain HTTP: the login password and session "
                        f"cookie cross the network unencrypted. Set TLS_MODE=self-signed in .env and restart, "
-                       f"or put it behind a reverse proxy with HTTPS (README > Installation > HTTPS).")
+                       f"or put it behind a reverse proxy with HTTPS (README > HTTPS).")
     serve(app, host=host, port=port, threads=threads)
 
 
