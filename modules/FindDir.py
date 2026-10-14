@@ -217,75 +217,77 @@ def save_directories(asset_id: int, host: str, port: int, directories: List[Dict
         return []
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    # Find http_id for this host:port
-    cursor.execute('''
-        SELECT http_id FROM http_services WHERE host = ? AND port_num = ?
-    ''', (host, port))
+        # Find http_id for this host:port
+        cursor.execute('''
+            SELECT http_id FROM http_services WHERE host = ? AND port_num = ?
+        ''', (host, port))
     
-    result = cursor.fetchone()
-    if not result:
-        logger.warning(f"No http_services entry for {host}:{port}, cannot save directories")
-        conn.close()
-        return []
+        result = cursor.fetchone()
+        if not result:
+            logger.warning(f"No http_services entry for {host}:{port}, cannot save directories")
+            return []
     
-    http_id = result['http_id']
-    saved = []
-    now = utc_now_str()
+        http_id = result['http_id']
+        saved = []
+        now = utc_now_str()
     
-    for entry in directories:
-        if isinstance(entry, dict):
-            # Dirsearch JSON format: {"url": "https://host/path", "status": 200, "content-length": 1234, "redirect": ""}
-            full_url = entry.get('url', '')
-            if full_url:
-                # Extract path from full URL
-                try:
-                    from urllib.parse import urlparse
-                    parsed = urlparse(full_url)
-                    path = parsed.path
-                except:
-                    path = full_url
+        for entry in directories:
+            if isinstance(entry, dict):
+                # Dirsearch JSON format: {"url": "https://host/path", "status": 200, "content-length": 1234, "redirect": ""}
+                full_url = entry.get('url', '')
+                if full_url:
+                    # Extract path from full URL
+                    try:
+                        from urllib.parse import urlparse
+                        parsed = urlparse(full_url)
+                        path = parsed.path
+                    except:
+                        path = full_url
+                else:
+                    path = entry.get('path', '')
+            
+                status = entry.get('status', 0)
+                length = entry.get('content-length', entry.get('length', 0))
+                redirect = entry.get('redirect', '')
             else:
-                path = entry.get('path', '')
+                continue
+        
+            if not path or path == '/':
+                continue
+        
+            # Skip 404s (should already be filtered, but double check)
+            if status == 404:
+                continue
+        
+            # Ensure path starts with /
+            if not path.startswith('/'):
+                path = '/' + path
+        
+            try:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO directories (http_id, path, status_code, content_length, redirect_url, first_seen)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                ''', (http_id, path, status, length, redirect, now))
             
-            status = entry.get('status', 0)
-            length = entry.get('content-length', entry.get('length', 0))
-            redirect = entry.get('redirect', '')
-        else:
-            continue
-        
-        if not path or path == '/':
-            continue
-        
-        # Skip 404s (should already be filtered, but double check)
-        if status == 404:
-            continue
-        
-        # Ensure path starts with /
-        if not path.startswith('/'):
-            path = '/' + path
-        
-        try:
-            cursor.execute('''
-                INSERT OR IGNORE INTO directories (http_id, path, status_code, content_length, redirect_url, first_seen)
-                VALUES (?, ?, ?, ?, ?, ?)
-            ''', (http_id, path, status, length, redirect, now))
-            
-            if cursor.rowcount > 0:
-                saved.append({
-                    'path': path,
-                    'status': status,
-                    'length': length
-                })
-        except Exception as e:
-            logger.debug(f"Skip duplicate or error: {path} - {e}")
+                if cursor.rowcount > 0:
+                    saved.append({
+                        'path': path,
+                        'status': status,
+                        'length': length
+                    })
+            except Exception as e:
+                logger.debug(f"Skip duplicate or error: {path} - {e}")
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
     
-    logger.info(f"Saved {len(saved)} directories for {host}:{port}")
-    return saved
+        logger.info(f"Saved {len(saved)} directories for {host}:{port}")
+        return saved
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':

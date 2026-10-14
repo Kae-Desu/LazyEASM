@@ -33,22 +33,25 @@ def get_pending_phase0_item():
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT queue_id, target, target_type, queued_at
-        FROM scan_queue
-        WHERE scan_type = 'phase0_discovery' AND status = 'pending'
-        ORDER BY queued_at ASC
-        LIMIT 1
-    ''')
+        cursor.execute('''
+            SELECT queue_id, target, target_type, queued_at
+            FROM scan_queue
+            WHERE scan_type = 'phase0_discovery' AND status = 'pending'
+            ORDER BY queued_at ASC
+            LIMIT 1
+        ''')
     
-    row = cursor.fetchone()
-    conn.close()
+        row = cursor.fetchone()
+        conn.close()
     
-    if row:
-        return dict(row)
-    return None
+        if row:
+            return dict(row)
+        return None
+    finally:
+        conn.close()
 
 
 def reset_stuck_processing_items(timeout_minutes: int = 30):
@@ -68,27 +71,30 @@ def reset_stuck_processing_items(timeout_minutes: int = 30):
     from datetime import datetime, timedelta
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    # Calculate cutoff time in Python (handles timezone correctly)
-    cutoff = utc_ago(minutes=timeout_minutes)
+        # Calculate cutoff time in Python (handles timezone correctly)
+        cutoff = utc_ago(minutes=timeout_minutes)
     
-    cursor.execute('''
-        UPDATE scan_queue 
-        SET status = 'pending', started_at = NULL
-        WHERE scan_type = 'phase0_discovery'
-          AND status = 'processing'
-          AND started_at < ?
-    ''', (cutoff,))
+        cursor.execute('''
+            UPDATE scan_queue 
+            SET status = 'pending', started_at = NULL
+            WHERE scan_type = 'phase0_discovery'
+              AND status = 'processing'
+              AND started_at < ?
+        ''', (cutoff,))
     
-    reset_count = cursor.rowcount
-    conn.commit()
-    conn.close()
+        reset_count = cursor.rowcount
+        conn.commit()
+        conn.close()
     
-    if reset_count > 0:
-        logger.info(f"[Phase0] Reset {reset_count} stuck processing items (cutoff: {cutoff})")
+        if reset_count > 0:
+            logger.info(f"[Phase0] Reset {reset_count} stuck processing items (cutoff: {cutoff})")
     
-    return reset_count
+        return reset_count
+    finally:
+        conn.close()
 
 
 def mark_queue_item_processing(queue_id: int):
@@ -97,15 +103,17 @@ def mark_queue_item_processing(queue_id: int):
     from datetime import datetime
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    now = utc_now_str()
-    cursor.execute('''
-        UPDATE scan_queue SET status = ?, started_at = ? WHERE queue_id = ?
-    ''', ('processing', now, queue_id))
+        now = utc_now_str()
+        cursor.execute('''
+            UPDATE scan_queue SET status = ?, started_at = ? WHERE queue_id = ?
+        ''', ('processing', now, queue_id))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def mark_queue_item_completed(queue_id: int):
@@ -114,15 +122,17 @@ def mark_queue_item_completed(queue_id: int):
     from datetime import datetime
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    now = utc_now_str()
-    cursor.execute('''
-        UPDATE scan_queue SET status = ?, completed_at = ? WHERE queue_id = ?
-    ''', ('completed', now, queue_id))
+        now = utc_now_str()
+        cursor.execute('''
+            UPDATE scan_queue SET status = ?, completed_at = ? WHERE queue_id = ?
+        ''', ('completed', now, queue_id))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def mark_queue_item_failed(queue_id: int, error_message: str):
@@ -131,15 +141,17 @@ def mark_queue_item_failed(queue_id: int, error_message: str):
     from datetime import datetime
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    now = utc_now_str()
-    cursor.execute('''
-        UPDATE scan_queue SET status = ?, completed_at = ?, error_message = ? WHERE queue_id = ?
-    ''', ('failed', now, error_message, queue_id))
+        now = utc_now_str()
+        cursor.execute('''
+            UPDATE scan_queue SET status = ?, completed_at = ?, error_message = ? WHERE queue_id = ?
+        ''', ('failed', now, error_message, queue_id))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def process_phase0_item(item: dict):
@@ -163,76 +175,79 @@ def process_phase0_item(item: dict):
     
     # Check if already exists in subdomain_asset
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (subdomain,))
-    if cursor.fetchone():
-        conn.close()
-        logger.info(f"[Phase0] Skipping {subdomain} - already exists in subdomain_asset")
-        mark_queue_item_completed(queue_id)
-        return True
-    
-    # Check if it's a root domain in domain_asset
-    cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (subdomain,))
-    if cursor.fetchone():
-        conn.close()
-        logger.info(f"[Phase0] Skipping {subdomain} - is a root domain")
-        mark_queue_item_completed(queue_id)
-        return True
-    conn.close()
-    
-    # Extract root domain
-    root_domain = extract_root_domain(subdomain)
-    
-    if not root_domain:
-        logger.error(f"[Phase0] Could not extract root domain from {subdomain}")
-        mark_queue_item_failed(queue_id, f"Could not extract root domain")
-        return False
-    
-    logger.debug(f"[Phase0] Extracted root domain: {root_domain} from {subdomain}")
-    
-    # Look up domain ID
-    dom_id = get_domain_id(root_domain)
-    
-    if not dom_id:
-        logger.error(f"[Phase0] Root domain {root_domain} not found in database")
-        mark_queue_item_failed(queue_id, f"Root domain {root_domain} not found")
-        return False
-    
-    logger.debug(f"[Phase0] Found domain ID: {dom_id} for {root_domain}")
-    
-    # Mark as processing
-    mark_queue_item_processing(queue_id)
-    
     try:
-        # Import Phase1Expander
-        phase1_module = importlib.import_module('modules.ExpandAsset')
-        expander = phase1_module.Phase1Expander()
-        
-        # Run Phase 0 discovery for subdomain
-        stats = expander.process_subdomain(subdomain, root_domain)
-        
-        if stats.get('error'):
-            logger.error(f"[Phase0] Error processing {subdomain}: {stats['error']}")
-            mark_queue_item_failed(queue_id, stats['error'])
+        cursor = conn.cursor()
+        cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (subdomain,))
+        if cursor.fetchone():
+            conn.close()
+            logger.info(f"[Phase0] Skipping {subdomain} - already exists in subdomain_asset")
+            mark_queue_item_completed(queue_id)
+            return True
+    
+        # Check if it's a root domain in domain_asset
+        cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (subdomain,))
+        if cursor.fetchone():
+            conn.close()
+            logger.info(f"[Phase0] Skipping {subdomain} - is a root domain")
+            mark_queue_item_completed(queue_id)
+            return True
+        conn.close()
+    
+        # Extract root domain
+        root_domain = extract_root_domain(subdomain)
+    
+        if not root_domain:
+            logger.error(f"[Phase0] Could not extract root domain from {subdomain}")
+            mark_queue_item_failed(queue_id, f"Could not extract root domain")
             return False
+    
+        logger.debug(f"[Phase0] Extracted root domain: {root_domain} from {subdomain}")
+    
+        # Look up domain ID
+        dom_id = get_domain_id(root_domain)
+    
+        if not dom_id:
+            logger.error(f"[Phase0] Root domain {root_domain} not found in database")
+            mark_queue_item_failed(queue_id, f"Root domain {root_domain} not found")
+            return False
+    
+        logger.debug(f"[Phase0] Found domain ID: {dom_id} for {root_domain}")
+    
+        # Mark as processing
+        mark_queue_item_processing(queue_id)
+    
+        try:
+            # Import Phase1Expander
+            phase1_module = importlib.import_module('modules.ExpandAsset')
+            expander = phase1_module.Phase1Expander()
         
-        # Mark as completed
-        mark_queue_item_completed(queue_id)
+            # Run Phase 0 discovery for subdomain
+            stats = expander.process_subdomain(subdomain, root_domain)
         
-        logger.info(f"[Phase0] Completed: {subdomain} - {stats.get('ips_resolved', 0)} IPs resolved")
+            if stats.get('error'):
+                logger.error(f"[Phase0] Error processing {subdomain}: {stats['error']}")
+                mark_queue_item_failed(queue_id, stats['error'])
+                return False
         
-        # Enqueue for Phase 1
-        from utils.pipeline import enqueue_single_asset_for_phase1
-        enqueue_single_asset_for_phase1(subdomain, 'subdomain')
+            # Mark as completed
+            mark_queue_item_completed(queue_id)
         
-        return True
+            logger.info(f"[Phase0] Completed: {subdomain} - {stats.get('ips_resolved', 0)} IPs resolved")
         
-    except Exception as e:
-        logger.error(f"[Phase0] Exception processing {subdomain}: {e}")
-        import traceback
-        traceback.print_exc()
-        mark_queue_item_failed(queue_id, str(e))
-        return False
+            # Enqueue for Phase 1
+            from utils.pipeline import enqueue_single_asset_for_phase1
+            enqueue_single_asset_for_phase1(subdomain, 'subdomain')
+        
+            return True
+        
+        except Exception as e:
+            logger.error(f"[Phase0] Exception processing {subdomain}: {e}")
+            import traceback
+            traceback.print_exc()
+            mark_queue_item_failed(queue_id, str(e))
+            return False
+    finally:
+        conn.close()
 
 
 def phase0_worker_loop(interval_sec: int = 5):
@@ -319,30 +334,32 @@ def get_phase0_status() -> dict:
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM scan_queue
-        WHERE scan_type = 'phase0_discovery' AND status = 'pending'
-    ''')
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM scan_queue
+            WHERE scan_type = 'phase0_discovery' AND status = 'pending'
+        ''')
     
-    pending = cursor.fetchone()['count']
+        pending = cursor.fetchone()['count']
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM scan_queue
-        WHERE scan_type = 'phase0_discovery' AND status = 'processing'
-    ''')
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM scan_queue
+            WHERE scan_type = 'phase0_discovery' AND status = 'processing'
+        ''')
     
-    processing = cursor.fetchone()['count']
+        processing = cursor.fetchone()['count']
     
-    conn.close()
     
-    return {
-        'running': _phase0_running,
-        'thread_alive': _phase0_thread.is_alive() if _phase0_thread else False,
-        'pending': pending,
-        'processing': processing
-    }
+        return {
+            'running': _phase0_running,
+            'thread_alive': _phase0_thread.is_alive() if _phase0_thread else False,
+            'pending': pending,
+            'processing': processing
+        }
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':

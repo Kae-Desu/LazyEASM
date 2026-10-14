@@ -200,33 +200,35 @@ def get_liveness_summary() -> dict:
         }
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    summary = {'total': 0, 'up': 0, 'down': 0, 'unknown': 0}
+        summary = {'total': 0, 'up': 0, 'down': 0, 'unknown': 0}
     
-    # Count domains
-    cursor.execute("SELECT status FROM domain_asset WHERE expand = 1")
-    for row in cursor.fetchall():
-        summary['total'] += 1
-        status = row['status'] or 'unknown'
-        if status in summary:
-            summary[status] += 1
-        else:
-            summary['unknown'] += 1
+        # Count domains
+        cursor.execute("SELECT status FROM domain_asset WHERE expand = 1")
+        for row in cursor.fetchall():
+            summary['total'] += 1
+            status = row['status'] or 'unknown'
+            if status in summary:
+                summary[status] += 1
+            else:
+                summary['unknown'] += 1
     
-    # Count subdomains
-    cursor.execute("SELECT status FROM subdomain_asset")
-    for row in cursor.fetchall():
-        summary['total'] += 1
-        status = row['status'] or 'unknown'
-        if status in summary:
-            summary[status] += 1
-        else:
-            summary['unknown'] += 1
+        # Count subdomains
+        cursor.execute("SELECT status FROM subdomain_asset")
+        for row in cursor.fetchall():
+            summary['total'] += 1
+            status = row['status'] or 'unknown'
+            if status in summary:
+                summary[status] += 1
+            else:
+                summary['unknown'] += 1
     
-    conn.close()
     
-    return summary
+        return summary
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':

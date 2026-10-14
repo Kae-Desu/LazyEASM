@@ -51,17 +51,20 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
     
     # Filter out shared hosting and CDN IPs
     conn_filter = get_db_connection()
-    cursor_filter = conn_filter.cursor()
+    try:
+        shared = {}
+        for ip_info in ips:
+            shared[ip_info['ip_id']] = conn_filter.execute('''
+                SELECT is_shared, shared_provider 
+                FROM ip_asset 
+                WHERE ip_id = ?
+            ''', (ip_info['ip_id'],)).fetchone()
+    finally:
+        conn_filter.close()
     
     ips_to_scan = []
     for ip_info in ips:
-        cursor_filter.execute('''
-            SELECT is_shared, shared_provider 
-            FROM ip_asset 
-            WHERE ip_id = ?
-        ''', (ip_info['ip_id'],))
-        
-        ip_data = cursor_filter.fetchone()
+        ip_data = shared[ip_info['ip_id']]
         
         if ip_data and ip_data['is_shared']:
             provider = ip_data['shared_provider'] or 'Unknown'
@@ -72,8 +75,6 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
             continue
         
         ips_to_scan.append(ip_info)
-    
-    conn_filter.close()
     
     # Log skipped IPs
     if stats['skipped_ips'] > 0:
@@ -101,11 +102,12 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
                     if result.get('success'):
                         # Count unique port numbers only
                         conn = get_db_connection()
-                        cursor = conn.cursor()
-                        cursor.execute('SELECT DISTINCT port_num FROM ports WHERE ip_id = ?', (ip_info['ip_id'],))
-                        for row in cursor.fetchall():
-                            port_nums_seen.add(row['port_num'])
-                        conn.close()
+                        try:
+                            for row in conn.execute('SELECT DISTINCT port_num FROM ports WHERE ip_id = ?',
+                                                    (ip_info['ip_id'],)).fetchall():
+                                port_nums_seen.add(row['port_num'])
+                        finally:
+                            conn.close()
                 except Exception as e:
                     logger.error(f"Port scan failed for {ip_info['ip_value']}: {e}")
             
@@ -165,19 +167,21 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         # Update last_wappalyzer_scan timestamp
         try:
             conn_w = get_db_connection()
-            cursor_w = conn_w.cursor()
-            now_str = utc_now_str()
-            cursor_w.execute(
-                'UPDATE domain_asset SET last_wappalyzer_scan = ? WHERE domain_name = ?',
-                (now_str, asset_name)
-            )
-            if cursor_w.rowcount == 0:
+            try:
+                cursor_w = conn_w.cursor()
+                now_str = utc_now_str()
                 cursor_w.execute(
-                    'UPDATE subdomain_asset SET last_wappalyzer_scan = ? WHERE subdomain_name = ?',
+                    'UPDATE domain_asset SET last_wappalyzer_scan = ? WHERE domain_name = ?',
                     (now_str, asset_name)
                 )
-            conn_w.commit()
-            conn_w.close()
+                if cursor_w.rowcount == 0:
+                    cursor_w.execute(
+                        'UPDATE subdomain_asset SET last_wappalyzer_scan = ? WHERE subdomain_name = ?',
+                        (now_str, asset_name)
+                    )
+                conn_w.commit()
+            finally:
+                conn_w.close()
         except Exception as e:
             logger.error(f"Failed to update last_wappalyzer_scan for {asset_name}: {e}")
             
@@ -248,30 +252,32 @@ def get_ips_for_asset(asset_id: int, asset_type: str) -> List[Dict]:
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    if asset_type == 'domain':
-        cursor.execute('''
-            SELECT DISTINCT i.ip_id, i.ip_value 
-            FROM ip_asset i
-            JOIN domain_ip di ON i.ip_id = di.ip_id
-            WHERE di.dom_id = ?
-        ''', (asset_id,))
-    elif asset_type == 'subdomain':
-        cursor.execute('''
-            SELECT DISTINCT i.ip_id, i.ip_value 
-            FROM ip_asset i
-            JOIN subdomain_ip si ON i.ip_id = si.ip_id
-            WHERE si.sub_id = ?
-        ''', (asset_id,))
-    else:
-        # Direct IP
-        cursor.execute('SELECT ip_id, ip_value FROM ip_asset WHERE ip_id = ?', (asset_id,))
+        if asset_type == 'domain':
+            cursor.execute('''
+                SELECT DISTINCT i.ip_id, i.ip_value 
+                FROM ip_asset i
+                JOIN domain_ip di ON i.ip_id = di.ip_id
+                WHERE di.dom_id = ?
+            ''', (asset_id,))
+        elif asset_type == 'subdomain':
+            cursor.execute('''
+                SELECT DISTINCT i.ip_id, i.ip_value 
+                FROM ip_asset i
+                JOIN subdomain_ip si ON i.ip_id = si.ip_id
+                WHERE si.sub_id = ?
+            ''', (asset_id,))
+        else:
+            # Direct IP
+            cursor.execute('SELECT ip_id, ip_value FROM ip_asset WHERE ip_id = ?', (asset_id,))
     
-    results = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+        results = [dict(row) for row in cursor.fetchall()]
     
-    return results
+        return results
+    finally:
+        conn.close()
 
 
 def get_http_services_for_asset(asset_id: int, asset_type: str) -> List[Dict]:
@@ -288,31 +294,33 @@ def get_http_services_for_asset(asset_id: int, asset_type: str) -> List[Dict]:
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    if asset_type == 'domain':
-        cursor.execute('''
-            SELECT DISTINCT host, port_num 
-            FROM http_services
-            WHERE host IN (SELECT domain_name FROM domain_asset WHERE dom_id = ?)
-              AND port_num IN (80, 443)
-        ''', (asset_id,))
-    elif asset_type == 'subdomain':
-        cursor.execute('''
-            SELECT DISTINCT host, port_num 
-            FROM http_services
-            WHERE host IN (SELECT subdomain_name FROM subdomain_asset WHERE sub_id = ?)
-              AND port_num IN (80, 443)
-        ''', (asset_id,))
-    else:
-        cursor.execute('''
-            SELECT DISTINCT host, port_num 
-            FROM http_services 
-            WHERE (ip_id = ? OR host IN (SELECT ip_value FROM ip_asset WHERE ip_id = ?))
-              AND port_num IN (80, 443)
-        ''', (asset_id, asset_id))
+        if asset_type == 'domain':
+            cursor.execute('''
+                SELECT DISTINCT host, port_num 
+                FROM http_services
+                WHERE host IN (SELECT domain_name FROM domain_asset WHERE dom_id = ?)
+                  AND port_num IN (80, 443)
+            ''', (asset_id,))
+        elif asset_type == 'subdomain':
+            cursor.execute('''
+                SELECT DISTINCT host, port_num 
+                FROM http_services
+                WHERE host IN (SELECT subdomain_name FROM subdomain_asset WHERE sub_id = ?)
+                  AND port_num IN (80, 443)
+            ''', (asset_id,))
+        else:
+            cursor.execute('''
+                SELECT DISTINCT host, port_num 
+                FROM http_services 
+                WHERE (ip_id = ? OR host IN (SELECT ip_value FROM ip_asset WHERE ip_id = ?))
+                  AND port_num IN (80, 443)
+            ''', (asset_id, asset_id))
     
-    results = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+        results = [dict(row) for row in cursor.fetchall()]
     
-    return results
+        return results
+    finally:
+        conn.close()

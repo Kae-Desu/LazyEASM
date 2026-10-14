@@ -220,7 +220,7 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 
 `utils/tls.py`, `TLS_MODE`:
 
-- `self-signed`: EC P-256 certificate (825 days) with SANs for `localhost`, the host name and FQDN, `127.0.0.1`, `::1`, the outbound interface address, `HOST`, `PUBLIC_IP` and `TLS_HOSTNAMES`. Stored in `db/tls/` (key 0600, written atomically). Regenerated 30 days before expiry and when it no longer covers the server's current names. Fingerprint (SHA-256 of the DER certificate) printed by `run.py`, logged by the web process and shown in Settings > Account.
+- `self-signed`: EC P-256 certificate (825 days) with SANs for `localhost`, the host name, `127.0.0.1`, `::1`, the outbound interface address, `HOST`, `PUBLIC_IP` and `TLS_HOSTNAMES`. Stored in `db/tls/` (key 0600, written atomically). Regenerated 30 days before expiry and when it no longer covers the server's current names. Fingerprint (SHA-256 of the DER certificate) printed by `run.py`, logged by the web process and shown in Settings > Account.
 - `custom`: `TLS_CERT_FILE` / `TLS_KEY_FILE` (PEM). Setting `TLS_CERT_FILE` without `TLS_MODE` implies `custom`.
 - `off` (or unset): plain HTTP with waitress. Unset is the default for installs that predate the setting; `install.sh` writes `self-signed` for new ones.
 - Served by cheroot with a TLS 1.2+ context. If HTTPS is enabled but cannot start, the web process exits instead of falling back to plain HTTP.
@@ -432,12 +432,14 @@ python main.py           # web + worker in one process (development)
 - Regenerate the bundled fingerprint snapshot for a release: `python -m utils.fingerprints --bundle data/fingerprints` (records counts; update `data/fingerprints/README.md`). `python -m utils.fingerprints --refresh` downloads into `db/fingerprints/` now.
 - Look up CVEs for a technology: `python -m modules.CVEmatch Nginx 1.20.1`. Capture a page: `python -m utils.screenshots URL --out file.jpg`.
 - Keep authorization checks inside `token_required` in `main.py`, so a multi-user version can extend them in one place.
+- Close every `get_db_connection()` in a `finally` (`tests/connection_tests.py` checks the code base). A connection left open by a failing query is held by a reference cycle until the garbage collector runs; on a full disk every query fails, and such leaks exhausted the worker's file descriptors so it stayed down after space was freed. The worker heartbeat also runs the collector as a backstop.
 
 ---
 
 ## Platform notes
 
-- **Docker**: the image includes headless Chromium (about 400 MB extra). Chromium runs as root in the container, without its sandbox. `docker-compose.yml` publishes host port 10002 and persists `db/`, `logs/` and `.env`.
+- **Docker**: the image includes headless Chromium (about 400 MB extra). Chromium runs as root in the container, without its sandbox. `docker-compose.yml` publishes host port 10002 and persists `db/`, `logs/` and `.env`. `start.sh` uses Docker Compose v2 (`docker compose`; Ubuntu package `docker-compose-v2`) and falls back to v1 (`docker-compose`). Docker's published ports bypass ufw rules.
+- **Disk space**: a full disk stops every database write (the dashboard shows the worker as down). Keep an eye on other programs' logs on a shared server.
 - **Ubuntu 23.10+ native installs**: AppArmor blocks the user namespaces Chromium's sandbox needs; screenshot runs fail with "Chromium sandbox is blocked by the OS" until a profile allows the Playwright binary (README > Quick start).
 - **Nmap without root** uses connect scans (`-sV` works; SYN scans and OS detection are not used).
 - **Scaling**: one instance (SQLite, one worker). Multiple instances need a shared database and job claiming.

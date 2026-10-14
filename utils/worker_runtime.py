@@ -17,6 +17,7 @@ The runtime writes a heartbeat to the settings table so the web process can
 report worker health without sharing memory with it.
 """
 
+import gc
 import json
 import logging
 import os
@@ -181,6 +182,12 @@ def _heartbeat_loop():
             write_heartbeat()
         except Exception as e:
             logger.error(f"Heartbeat failed: {e}")
+        # An unclosed sqlite3 connection sits in a reference cycle (its statement
+        # cache) and keeps its file handles until the cyclic GC runs, which an
+        # idle worker rarely triggers. Collect regularly so a connection a
+        # failing query left open (e.g. while the disk is full) is released
+        # before the process runs out of file descriptors.
+        gc.collect()
         time.sleep(HEARTBEAT_SECONDS)
 
 

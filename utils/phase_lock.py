@@ -36,23 +36,26 @@ def get_current_phase() -> int:
         PHASE_NONE (0), PHASE_0_RUNNING (1), PHASE_1_RUNNING (2), or PHASE_2_RUNNING (3)
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('SELECT current_phase, started_at FROM phase_status WHERE id = 1')
-    result = cursor.fetchone()
-    conn.close()
+        cursor.execute('SELECT current_phase, started_at FROM phase_status WHERE id = 1')
+        result = cursor.fetchone()
+        conn.close()
     
-    if not result:
-        return PHASE_NONE
+        if not result:
+            return PHASE_NONE
     
-    phase = result['current_phase']
-    if phase != PHASE_NONE and _is_stale(result['started_at']):
-        # A crash during a batch deep scan never ran clear_phase(); without
-        # this, new assets would be refused forever
-        logger.warning(f"Clearing stale phase lock (phase {phase}, started {result['started_at']})")
-        clear_phase()
-        return PHASE_NONE
-    return phase
+        phase = result['current_phase']
+        if phase != PHASE_NONE and _is_stale(result['started_at']):
+            # A crash during a batch deep scan never ran clear_phase(); without
+            # this, new assets would be refused forever
+            logger.warning(f"Clearing stale phase lock (phase {phase}, started {result['started_at']})")
+            clear_phase()
+            return PHASE_NONE
+        return phase
+    finally:
+        conn.close()
 
 
 def _is_stale(started_at: Optional[str]) -> bool:
@@ -74,44 +77,50 @@ def set_phase(phase: int, total_assets: int = 0):
         total_assets: Total assets to process (for Phase 2)
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    now = utc_now_str()
+        now = utc_now_str()
     
-    cursor.execute('''
-        UPDATE phase_status 
-        SET current_phase = ?, 
-            started_at = ?, 
-            total_assets = ?, 
-            processed_assets = 0
-        WHERE id = 1
-    ''', (phase, now, total_assets))
+        cursor.execute('''
+            UPDATE phase_status 
+            SET current_phase = ?, 
+                started_at = ?, 
+                total_assets = ?, 
+                processed_assets = 0
+            WHERE id = 1
+        ''', (phase, now, total_assets))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
     
-    logger.info(f"Phase {phase} started at {now} with {total_assets} assets")
+        logger.info(f"Phase {phase} started at {now} with {total_assets} assets")
+    finally:
+        conn.close()
 
 
 def clear_phase():
     """Clear current phase lock."""
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        UPDATE phase_status 
-        SET current_phase = 0,
-            started_at = NULL,
-            total_assets = 0,
-            processed_assets = 0,
-            eta_minutes = NULL
-        WHERE id = 1
-    ''')
+        cursor.execute('''
+            UPDATE phase_status 
+            SET current_phase = 0,
+                started_at = NULL,
+                total_assets = 0,
+                processed_assets = 0,
+                eta_minutes = NULL
+            WHERE id = 1
+        ''')
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
     
-    logger.info("Phase lock cleared")
+        logger.info("Phase lock cleared")
+    finally:
+        conn.close()
 
 
 def is_phase2_running() -> bool:
@@ -127,11 +136,10 @@ def get_phase2_progress() -> Dict:
         Dict with 'total', 'processed', 'eta_minutes', 'phase'
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    cursor.execute('SELECT * FROM phase_status WHERE id = 1')
-    result = cursor.fetchone()
-    conn.close()
+    try:
+        result = conn.execute('SELECT * FROM phase_status WHERE id = 1').fetchone()
+    finally:
+        conn.close()
     
     if not result or result['current_phase'] != PHASE_2_RUNNING:
         return {
@@ -146,19 +154,12 @@ def get_phase2_progress() -> Dict:
     
     # Calculate ETA based on progress
     eta_minutes = 0
-    if processed > 0 and total > processed:
-        conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT started_at FROM phase_status WHERE id = 1')
-        started = cursor.fetchone()
-        conn.close()
-        
-        if started and started['started_at']:
-            started_time = datetime.strptime(started['started_at'], '%Y-%m-%d %H:%M:%S')
-            elapsed = (utc_now() - started_time).total_seconds()
-            avg_time_per_asset = elapsed / processed
-            remaining = total - processed
-            eta_minutes = int((avg_time_per_asset * remaining) / 60)
+    if processed > 0 and total > processed and result['started_at']:
+        started_time = datetime.strptime(result['started_at'], '%Y-%m-%d %H:%M:%S')
+        elapsed = (utc_now() - started_time).total_seconds()
+        avg_time_per_asset = elapsed / processed
+        remaining = total - processed
+        eta_minutes = int((avg_time_per_asset * remaining) / 60)
     
     return {
         'total': total,
@@ -176,16 +177,18 @@ def update_phase2_progress(processed: int):
         processed: Number of assets processed so far
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        UPDATE phase_status 
-        SET processed_assets = ?
-        WHERE id = 1
-    ''', (processed,))
+        cursor.execute('''
+            UPDATE phase_status 
+            SET processed_assets = ?
+            WHERE id = 1
+        ''', (processed,))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def get_next_phase2_time() -> str:

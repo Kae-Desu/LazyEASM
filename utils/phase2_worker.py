@@ -34,67 +34,72 @@ def get_next_queued_scan():
         None if no pending scans
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT queue_id, target, target_id, target_type, queued_at
-        FROM scan_queue
-        WHERE scan_type = 'phase2_deep_scan'
-          AND status = 'pending'
-        ORDER BY queued_at ASC
-        LIMIT 1
-    ''')
+        cursor.execute('''
+            SELECT queue_id, target, target_id, target_type, queued_at
+            FROM scan_queue
+            WHERE scan_type = 'phase2_deep_scan'
+              AND status = 'pending'
+            ORDER BY queued_at ASC
+            LIMIT 1
+        ''')
     
-    result = cursor.fetchone()
-    conn.close()
+        result = cursor.fetchone()
+        conn.close()
     
-    if result:
-        return dict(result)
-    return None
+        if result:
+            return dict(result)
+        return None
+    finally:
+        conn.close()
 
 
 def update_queue_status(queue_id: int, status: str, **kwargs):
     """Update scan queue status."""
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    updates = ['status = ?']
-    values = [status]
+        updates = ['status = ?']
+        values = [status]
     
-    if status == 'processing':
-        updates.append('started_at = ?')
-        values.append(utc_now_str())
+        if status == 'processing':
+            updates.append('started_at = ?')
+            values.append(utc_now_str())
     
-    if status == 'completed':
-        updates.append('completed_at = ?')
-        values.append(utc_now_str())
+        if status == 'completed':
+            updates.append('completed_at = ?')
+            values.append(utc_now_str())
         
-        if 'ports_found' in kwargs:
-            updates.append('ports_found = ?')
-            values.append(kwargs['ports_found'])
+            if 'ports_found' in kwargs:
+                updates.append('ports_found = ?')
+                values.append(kwargs['ports_found'])
         
-        if 'dirs_found' in kwargs:
-            updates.append('dirs_found = ?')
-            values.append(kwargs['dirs_found'])
+            if 'dirs_found' in kwargs:
+                updates.append('dirs_found = ?')
+                values.append(kwargs['dirs_found'])
     
-    if status == 'failed':
-        updates.append('completed_at = ?')
-        values.append(utc_now_str())
+        if status == 'failed':
+            updates.append('completed_at = ?')
+            values.append(utc_now_str())
         
-        if 'error_message' in kwargs:
-            updates.append('error_message = ?')
-            values.append(kwargs['error_message'])
+            if 'error_message' in kwargs:
+                updates.append('error_message = ?')
+                values.append(kwargs['error_message'])
     
-    values.append(queue_id)
+        values.append(queue_id)
     
-    cursor.execute(f'''
-        UPDATE scan_queue 
-        SET {', '.join(updates)}
-        WHERE queue_id = ?
-    ''', values)
+        cursor.execute(f'''
+            UPDATE scan_queue 
+            SET {', '.join(updates)}
+            WHERE queue_id = ?
+        ''', values)
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def run_phase2_on_asset(target: str, target_id: int, target_type: str) -> dict:
@@ -144,23 +149,25 @@ def run_phase2_on_asset(target: str, target_id: int, target_type: str) -> dict:
 def update_asset_last_scan(target: str, target_type: str, timestamp: str):
     """Update last_deep_scan timestamp on asset."""
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    if target_type == 'domain':
-        cursor.execute('''
-            UPDATE domain_asset 
-            SET last_deep_scan = ? 
-            WHERE domain_name = ?
-        ''', (timestamp, target))
-    else:
-        cursor.execute('''
-            UPDATE subdomain_asset 
-            SET last_deep_scan = ? 
-            WHERE subdomain_name = ?
-        ''', (timestamp, target))
+        if target_type == 'domain':
+            cursor.execute('''
+                UPDATE domain_asset 
+                SET last_deep_scan = ? 
+                WHERE domain_name = ?
+            ''', (timestamp, target))
+        else:
+            cursor.execute('''
+                UPDATE subdomain_asset 
+                SET last_deep_scan = ? 
+                WHERE subdomain_name = ?
+            ''', (timestamp, target))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def send_discord_notification(message: str):
@@ -291,27 +298,29 @@ def get_phase2_status() -> dict:
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM scan_queue
-        WHERE scan_type = 'phase2_deep_scan' AND status = 'pending'
-    ''')
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM scan_queue
+            WHERE scan_type = 'phase2_deep_scan' AND status = 'pending'
+        ''')
     
-    pending = cursor.fetchone()['count']
+        pending = cursor.fetchone()['count']
     
-    cursor.execute('''
-        SELECT COUNT(*) as count FROM scan_queue
-        WHERE scan_type = 'phase2_deep_scan' AND status = 'processing'
-    ''')
+        cursor.execute('''
+            SELECT COUNT(*) as count FROM scan_queue
+            WHERE scan_type = 'phase2_deep_scan' AND status = 'processing'
+        ''')
     
-    processing = cursor.fetchone()['count']
+        processing = cursor.fetchone()['count']
     
-    conn.close()
     
-    return {
-        'running': _phase2_thread is not None,
-        'thread_alive': _phase2_thread.is_alive() if _phase2_thread else False,
-        'pending': pending,
-        'processing': processing
-    }
+        return {
+            'running': _phase2_thread is not None,
+            'thread_alive': _phase2_thread.is_alive() if _phase2_thread else False,
+            'pending': pending,
+            'processing': processing
+        }
+    finally:
+        conn.close()

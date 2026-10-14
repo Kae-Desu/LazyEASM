@@ -2598,16 +2598,18 @@ def get_http_service_id(host: str, port: int) -> Optional[int]:
         http_id or None if not found
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT http_id FROM http_services WHERE host = ? AND port_num = ?
-    ''', (host, port))
+        cursor.execute('''
+            SELECT http_id FROM http_services WHERE host = ? AND port_num = ?
+        ''', (host, port))
     
-    result = cursor.fetchone()
-    conn.close()
+        result = cursor.fetchone()
     
-    return result['http_id'] if result else None
+        return result['http_id'] if result else None
+    finally:
+        conn.close()
 
 
 def clear_phase1_queue() -> int:
@@ -2620,19 +2622,21 @@ def clear_phase1_queue() -> int:
         Number of items deleted
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        DELETE FROM scan_queue
-        WHERE scan_type = 'phase1'
-          AND status IN ('pending', 'running')
-    ''')
+        cursor.execute('''
+            DELETE FROM scan_queue
+            WHERE scan_type = 'phase1'
+              AND status IN ('pending', 'running')
+        ''')
     
-    deleted = cursor.rowcount
-    conn.commit()
-    conn.close()
+        deleted = cursor.rowcount
+        conn.commit()
     
-    return deleted
+        return deleted
+    finally:
+        conn.close()
 
 
 # ============================================
@@ -2650,13 +2654,15 @@ def get_setting(key: str) -> str:
         Setting value or empty string if not found
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
-    result = cursor.fetchone()
-    conn.close()
+        cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+        result = cursor.fetchone()
     
-    return result['value'] if result else ''
+        return result['value'] if result else ''
+    finally:
+        conn.close()
 
 
 def set_setting(key: str, value: str) -> bool:
@@ -2671,20 +2677,22 @@ def set_setting(key: str, value: str) -> bool:
         True if successful
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    now = utc_now_str()
+        now = utc_now_str()
     
-    cursor.execute('''
-        INSERT INTO settings (key, value, updated_at)
-        VALUES (?, ?, ?)
-        ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
-    ''', (key, value, now, value, now))
+        cursor.execute('''
+            INSERT INTO settings (key, value, updated_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = ?, updated_at = ?
+        ''', (key, value, now, value, now))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
     
-    return True
+        return True
+    finally:
+        conn.close()
 
 
 def get_all_assets_for_liveness() -> list:
@@ -2696,35 +2704,37 @@ def get_all_assets_for_liveness() -> list:
         List of dicts with asset_id, asset_type, name, status, last_liveness_check
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    assets = []
+        assets = []
     
-    # Get domains
-    cursor.execute('''
-        SELECT dom_id as asset_id, 'domain' as asset_type, domain_name as name, status, last_liveness_check
-        FROM domain_asset WHERE expand = 1
-    ''')
-    assets.extend([dict(row) for row in cursor.fetchall()])
+        # Get domains
+        cursor.execute('''
+            SELECT dom_id as asset_id, 'domain' as asset_type, domain_name as name, status, last_liveness_check
+            FROM domain_asset WHERE expand = 1
+        ''')
+        assets.extend([dict(row) for row in cursor.fetchall()])
     
-    # Get subdomains
-    cursor.execute('''
-        SELECT sub_id as asset_id, 'subdomain' as asset_type, subdomain_name as name, status, last_liveness_check
-        FROM subdomain_asset
-    ''')
-    assets.extend([dict(row) for row in cursor.fetchall()])
+        # Get subdomains
+        cursor.execute('''
+            SELECT sub_id as asset_id, 'subdomain' as asset_type, subdomain_name as name, status, last_liveness_check
+            FROM subdomain_asset
+        ''')
+        assets.extend([dict(row) for row in cursor.fetchall()])
 
-    # IPs behind a hostname are covered by that hostname's check
-    cursor.execute('''
-        SELECT ip_id as asset_id, 'ip' as asset_type, ip_value as name, status, last_liveness_check
-        FROM ip_asset
-        WHERE ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
-    ''')
-    assets.extend([dict(row) for row in cursor.fetchall()])
+        # IPs behind a hostname are covered by that hostname's check
+        cursor.execute('''
+            SELECT ip_id as asset_id, 'ip' as asset_type, ip_value as name, status, last_liveness_check
+            FROM ip_asset
+            WHERE ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
+        ''')
+        assets.extend([dict(row) for row in cursor.fetchall()])
     
-    conn.close()
     
-    return assets
+        return assets
+    finally:
+        conn.close()
 
 
 def update_asset_status(asset_id: int, asset_type: str, status: str) -> bool:
@@ -2740,23 +2750,25 @@ def update_asset_status(asset_id: int, asset_type: str, status: str) -> bool:
         True if successful
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    now = utc_now_str()
+        now = utc_now_str()
     
-    if asset_type == 'domain':
-        cursor.execute('''
-            UPDATE domain_asset SET status = ?, last_seen = ? WHERE dom_id = ?
-        ''', (status, now, asset_id))
-    else:
-        cursor.execute('''
-            UPDATE subdomain_asset SET status = ?, last_seen = ? WHERE sub_id = ?
-        ''', (status, now, asset_id))
+        if asset_type == 'domain':
+            cursor.execute('''
+                UPDATE domain_asset SET status = ?, last_seen = ? WHERE dom_id = ?
+            ''', (status, now, asset_id))
+        else:
+            cursor.execute('''
+                UPDATE subdomain_asset SET status = ?, last_seen = ? WHERE sub_id = ?
+            ''', (status, now, asset_id))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
     
-    return cursor.rowcount > 0
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
 
 
 def get_all_monitored_domains() -> list:
@@ -2767,15 +2779,17 @@ def get_all_monitored_domains() -> list:
         List of domain names
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    # Containers (parents of subdomains submitted on their own) are not expanded
-    cursor.execute('SELECT domain_name FROM domain_asset WHERE expand = 1')
-    domains = [row['domain_name'] for row in cursor.fetchall()]
+        # Containers (parents of subdomains submitted on their own) are not expanded
+        cursor.execute('SELECT domain_name FROM domain_asset WHERE expand = 1')
+        domains = [row['domain_name'] for row in cursor.fetchall()]
     
-    conn.close()
     
-    return domains
+        return domains
+    finally:
+        conn.close()
 
 
 def get_known_subdomains() -> set:
@@ -2790,21 +2804,23 @@ def get_known_subdomains() -> set:
         Set of subdomain names
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('SELECT subdomain_name FROM subdomain_asset')
-    subdomains = {row['subdomain_name'] for row in cursor.fetchall()}
+        cursor.execute('SELECT subdomain_name FROM subdomain_asset')
+        subdomains = {row['subdomain_name'] for row in cursor.fetchall()}
     
-    cursor.execute('''
-        SELECT target FROM scan_queue 
-        WHERE scan_type = 'phase0_discovery' 
-          AND status IN ('pending', 'processing')
-    ''')
-    subdomains.update(row['target'] for row in cursor.fetchall())
+        cursor.execute('''
+            SELECT target FROM scan_queue 
+            WHERE scan_type = 'phase0_discovery' 
+              AND status IN ('pending', 'processing')
+        ''')
+        subdomains.update(row['target'] for row in cursor.fetchall())
     
-    conn.close()
     
-    return subdomains
+        return subdomains
+    finally:
+        conn.close()
 
 
 def queue_subdomain_discovery(subdomain_name: str, domain_name: str):
@@ -2816,29 +2832,29 @@ def queue_subdomain_discovery(subdomain_name: str, domain_name: str):
         domain_name: Parent domain
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    # Check if already exists in subdomain_asset
-    cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (subdomain_name,))
-    if cursor.fetchone():
+        # Check if already exists in subdomain_asset
+        cursor.execute('SELECT sub_id FROM subdomain_asset WHERE subdomain_name = ?', (subdomain_name,))
+        if cursor.fetchone():
+            return
+    
+        # Check if it's a root domain in domain_asset
+        cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (subdomain_name,))
+        if cursor.fetchone():
+            return
+    
+        # Add to scan_queue for Phase 0
+        now = utc_now_str()
+        cursor.execute('''
+            INSERT OR IGNORE INTO scan_queue (scan_type, target, target_type, status, cycle, queued_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', ('phase0_discovery', subdomain_name, 'subdomain', 'pending', 'continuous_monitoring', now))
+    
+        conn.commit()
+    finally:
         conn.close()
-        return
-    
-    # Check if it's a root domain in domain_asset
-    cursor.execute('SELECT dom_id FROM domain_asset WHERE domain_name = ?', (subdomain_name,))
-    if cursor.fetchone():
-        conn.close()
-        return
-    
-    # Add to scan_queue for Phase 0
-    now = utc_now_str()
-    cursor.execute('''
-        INSERT OR IGNORE INTO scan_queue (scan_type, target, target_type, status, cycle, queued_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-    ''', ('phase0_discovery', subdomain_name, 'subdomain', 'pending', 'continuous_monitoring', now))
-    
-    conn.commit()
-    conn.close()
 
 
 def blacklist_token(jti: str, user: str, expires_at: str) -> bool:
@@ -2886,13 +2902,15 @@ def is_token_blacklisted(jti: str) -> bool:
         True if token is blacklisted
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('SELECT 1 FROM token_blacklist WHERE jti = ?', (jti,))
-    result = cursor.fetchone()
+        cursor.execute('SELECT 1 FROM token_blacklist WHERE jti = ?', (jti,))
+        result = cursor.fetchone()
     
-    conn.close()
-    return result is not None
+        return result is not None
+    finally:
+        conn.close()
 
 
 def blacklist_all_user_tokens(user: str) -> int:
@@ -2907,29 +2925,32 @@ def blacklist_all_user_tokens(user: str) -> int:
         Number of tokens blacklisted
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
-    now = utc_now_str()
+    try:
+        cursor = conn.cursor()
+        now = utc_now_str()
     
-    # Find all non-expired, non-blacklisted tokens for this user
-    # Since we only blacklist refresh tokens, all entries belong to refresh tokens
-    cursor.execute('''
-        SELECT jti, expires_at FROM token_blacklist 
-        WHERE user = ? AND expires_at > ?
-    ''', (user, now))
+        # Find all non-expired, non-blacklisted tokens for this user
+        # Since we only blacklist refresh tokens, all entries belong to refresh tokens
+        cursor.execute('''
+            SELECT jti, expires_at FROM token_blacklist 
+            WHERE user = ? AND expires_at > ?
+        ''', (user, now))
     
-    # All user's tokens that aren't already blacklisted won't be in the table
-    # We need a different approach: add a catch-all blacklist entry
-    cursor.execute('''
-        INSERT OR IGNORE INTO token_blacklist (jti, user, expires_at, created_at)
-        VALUES (?, ?, ?, ?)
-    ''', (f'user_revoke:{user}:{now}', user, 
-          utc_in(days=7), now))
+        # All user's tokens that aren't already blacklisted won't be in the table
+        # We need a different approach: add a catch-all blacklist entry
+        cursor.execute('''
+            INSERT OR IGNORE INTO token_blacklist (jti, user, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+        ''', (f'user_revoke:{user}:{now}', user, 
+              utc_in(days=7), now))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+        conn.close()
     
-    logger.warning(f"All refresh tokens revoked for user: {user}")
-    return 1
+        logger.warning(f"All refresh tokens revoked for user: {user}")
+        return 1
+    finally:
+        conn.close()
 
 
 def is_user_revoked(user: str) -> bool:
@@ -2944,18 +2965,20 @@ def is_user_revoked(user: str) -> bool:
         True if user's tokens are revoked
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
-    now = utc_now_str()
+    try:
+        cursor = conn.cursor()
+        now = utc_now_str()
     
-    cursor.execute('''
-        SELECT 1 FROM token_blacklist 
-        WHERE jti LIKE ? AND expires_at > ?
-        LIMIT 1
-    ''', (f'user_revoke:{user}:%', now))
+        cursor.execute('''
+            SELECT 1 FROM token_blacklist 
+            WHERE jti LIKE ? AND expires_at > ?
+            LIMIT 1
+        ''', (f'user_revoke:{user}:%', now))
     
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
+        result = cursor.fetchone()
+        return result is not None
+    finally:
+        conn.close()
 
 
 def mark_cert_notified(cert_id: int, hostname: str, threshold: int) -> bool:
@@ -2999,16 +3022,18 @@ def is_cert_notified(cert_id: int, threshold: int) -> bool:
         True if already notified
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT 1 FROM cert_notifications
-        WHERE cert_id = ? AND days_threshold = ?
-    ''', (cert_id, threshold))
+        cursor.execute('''
+            SELECT 1 FROM cert_notifications
+            WHERE cert_id = ? AND days_threshold = ?
+        ''', (cert_id, threshold))
     
-    result = cursor.fetchone()
-    conn.close()
-    return result is not None
+        result = cursor.fetchone()
+        return result is not None
+    finally:
+        conn.close()
 
 
 def cleanup_cert_notifications():
@@ -3017,15 +3042,17 @@ def cleanup_cert_notifications():
     that no longer exist or have been renewed (new cert_id).
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        DELETE FROM cert_notifications
-        WHERE cert_id NOT IN (SELECT cert_id FROM certificates)
-    ''')
+        cursor.execute('''
+            DELETE FROM cert_notifications
+            WHERE cert_id NOT IN (SELECT cert_id FROM certificates)
+        ''')
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':

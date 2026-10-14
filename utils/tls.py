@@ -64,9 +64,10 @@ def _primary_ip() -> Optional[str]:
 def server_names() -> Tuple[List[str], List[str]]:
     """(DNS names, IP addresses) the self-signed certificate should cover."""
     names, ips = {'localhost'}, {'127.0.0.1', '::1'}
-    for name in (socket.gethostname(), socket.getfqdn()):
-        if name:
-            names.add(name.lower())
+    # Not socket.getfqdn(): it is a reverse DNS lookup that can take seconds
+    # on every start where DNS is slow; add other names with TLS_HOSTNAMES
+    if socket.gethostname():
+        names.add(socket.gethostname().lower())
     for candidate in [_primary_ip(), get_env('HOST', ''), get_env('PUBLIC_IP', '')] + \
             [v.strip() for v in (get_env('TLS_HOSTNAMES', '') or '').split(',')]:
         if not candidate or candidate in ('0.0.0.0', '::'):

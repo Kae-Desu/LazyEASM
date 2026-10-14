@@ -57,7 +57,14 @@ install_docker() {
             sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen 2>/dev/null || true
             locale-gen en_US.UTF-8 2>/dev/null || true
             export LANG=en_US.UTF-8
-            apt-get install -y docker.io docker-compose
+            apt-get install -y docker.io
+            # Compose v2 plugin (`docker compose`); the package name differs by
+            # distro and release, and older releases only have v1 (`docker-compose`)
+            if ! docker compose version &> /dev/null; then
+                apt-get install -y docker-compose-v2 \
+                    || apt-get install -y docker-compose-plugin \
+                    || apt-get install -y docker-compose
+            fi
             systemctl start docker
             systemctl enable docker
             DOCKER_USER="${SUDO_USER:-$USER}"
@@ -119,7 +126,17 @@ install_native_deps() {
 }
 
 check_docker() {
-    command -v docker &> /dev/null && command -v docker-compose &> /dev/null
+    command -v docker &> /dev/null \
+        && { docker compose version &> /dev/null || command -v docker-compose &> /dev/null; }
+}
+
+# Docker Compose v2 (`docker compose`) when available, v1 (`docker-compose`) otherwise
+compose() {
+    if docker compose version &> /dev/null; then
+        docker compose "$@"
+    else
+        docker-compose "$@"
+    fi
 }
 
 check_native() {
@@ -172,7 +189,7 @@ start_docker() {
     fi
 
     echo -e "${GREEN}Starting LazyEASM in Docker mode...${NC}"
-    docker-compose up -d
+    compose up -d
 
     echo ""
     echo -e "${GREEN}LazyEASM started!${NC}"
@@ -205,20 +222,20 @@ for arg in "$@"; do
         --native) MODE="native" ;;
         --stop)
             cd "$SCRIPT_DIR"
-            docker-compose down
+            compose down
             echo -e "${GREEN}LazyEASM stopped.${NC}"
             exit 0
             ;;
         --clean)
             cd "$SCRIPT_DIR"
             echo -e "${YELLOW}Removing LazyEASM Docker containers and images...${NC}"
-            docker-compose down --rmi all --volumes
+            compose down --rmi all --volumes
             echo -e "${GREEN}LazyEASM Docker resources removed.${NC}"
             exit 0
             ;;
         --logs)
             cd "$SCRIPT_DIR"
-            docker-compose logs -f lazyeasm
+            compose logs -f lazyeasm
             exit 0
             ;;
         --help)

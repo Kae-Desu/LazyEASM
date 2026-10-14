@@ -50,60 +50,62 @@ def get_hosts_for_wappalyzer() -> list:
         List of dicts: [{host: str, ports: [int]}, ...]
     """
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    hosts = {}
+        hosts = {}
 
-    cursor.execute('''
-        SELECT DISTINCT s.subdomain_name, h.port_num, h.is_https
-        FROM http_services h
-        JOIN subdomain_asset s ON s.subdomain_name = h.host
-        WHERE s.status = 'up'
-    ''')
-    for row in cursor.fetchall():
-        host = row['subdomain_name']
-        if host not in hosts:
-            hosts[host] = {'host': host, 'ports': []}
-        hosts[host]['ports'].append({
-            'port_num': row['port_num'],
-            'is_https': row['is_https']
-        })
+        cursor.execute('''
+            SELECT DISTINCT s.subdomain_name, h.port_num, h.is_https
+            FROM http_services h
+            JOIN subdomain_asset s ON s.subdomain_name = h.host
+            WHERE s.status = 'up'
+        ''')
+        for row in cursor.fetchall():
+            host = row['subdomain_name']
+            if host not in hosts:
+                hosts[host] = {'host': host, 'ports': []}
+            hosts[host]['ports'].append({
+                'port_num': row['port_num'],
+                'is_https': row['is_https']
+            })
 
-    cursor.execute('''
-        SELECT DISTINCT d.domain_name, h.port_num, h.is_https
-        FROM http_services h
-        JOIN domain_asset d ON d.domain_name = h.host
-        WHERE d.status = 'up'
-    ''')
-    for row in cursor.fetchall():
-        host = row['domain_name']
-        if host not in hosts:
-            hosts[host] = {'host': host, 'ports': []}
-        hosts[host]['ports'].append({
-            'port_num': row['port_num'],
-            'is_https': row['is_https']
-        })
+        cursor.execute('''
+            SELECT DISTINCT d.domain_name, h.port_num, h.is_https
+            FROM http_services h
+            JOIN domain_asset d ON d.domain_name = h.host
+            WHERE d.status = 'up'
+        ''')
+        for row in cursor.fetchall():
+            host = row['domain_name']
+            if host not in hosts:
+                hosts[host] = {'host': host, 'ports': []}
+            hosts[host]['ports'].append({
+                'port_num': row['port_num'],
+                'is_https': row['is_https']
+            })
 
-    # IPs behind a hostname are scanned through that hostname
-    cursor.execute('''
-        SELECT DISTINCT i.ip_value, h.port_num, h.is_https
-        FROM http_services h
-        JOIN ip_asset i ON i.ip_value = h.host
-        WHERE i.status = 'up'
-          AND i.ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
-    ''')
-    for row in cursor.fetchall():
-        host = row['ip_value']
-        if host not in hosts:
-            hosts[host] = {'host': host, 'ports': []}
-        hosts[host]['ports'].append({
-            'port_num': row['port_num'],
-            'is_https': row['is_https']
-        })
+        # IPs behind a hostname are scanned through that hostname
+        cursor.execute('''
+            SELECT DISTINCT i.ip_value, h.port_num, h.is_https
+            FROM http_services h
+            JOIN ip_asset i ON i.ip_value = h.host
+            WHERE i.status = 'up'
+              AND i.ip_id NOT IN (SELECT ip_id FROM domain_ip UNION SELECT ip_id FROM subdomain_ip)
+        ''')
+        for row in cursor.fetchall():
+            host = row['ip_value']
+            if host not in hosts:
+                hosts[host] = {'host': host, 'ports': []}
+            hosts[host]['ports'].append({
+                'port_num': row['port_num'],
+                'is_https': row['is_https']
+            })
 
-    conn.close()
 
-    return list(hosts.values())
+        return list(hosts.values())
+    finally:
+        conn.close()
 
 
 def run_wappalyzer_scan() -> dict:
@@ -139,92 +141,95 @@ def run_wappalyzer_scan() -> dict:
     logger.info(f"Starting Wappalyzer re-scan for {len(hosts)} hosts")
 
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
 
-    existing_cves = set()
-    cursor.execute('SELECT cve_id FROM vulnerabilities')
-    for row in cursor.fetchall():
-        existing_cves.add(row['cve_id'])
-    conn.close()
+        existing_cves = set()
+        cursor.execute('SELECT cve_id FROM vulnerabilities')
+        for row in cursor.fetchall():
+            existing_cves.add(row['cve_id'])
+        conn.close()
 
-    from utils.scan_settings import get_cve_min_cvss
-    scanner = WappalyzerScanner(enable_cve=True, cvss_min=get_cve_min_cvss())
+        from utils.scan_settings import get_cve_min_cvss
+        scanner = WappalyzerScanner(enable_cve=True, cvss_min=get_cve_min_cvss())
 
-    result = {
-        'hosts_scanned': 0,
-        'technologies_found': 0,
-        'cves_found': 0,
-        'new_cves': [],
-        'errors': []
-    }
+        result = {
+            'hosts_scanned': 0,
+            'technologies_found': 0,
+            'cves_found': 0,
+            'new_cves': [],
+            'errors': []
+        }
 
-    now_str = utc_now_str()
+        now_str = utc_now_str()
 
-    for host_info in hosts:
-        host = host_info['host']
-        ports = host_info['ports']
-        host_scan_success = False
+        for host_info in hosts:
+            host = host_info['host']
+            ports = host_info['ports']
+            host_scan_success = False
 
-        if not ports:
-            ports = [
-                {'port_num': 80, 'is_https': 0},
-                {'port_num': 443, 'is_https': 1}
-            ]
+            if not ports:
+                ports = [
+                    {'port_num': 80, 'is_https': 0},
+                    {'port_num': 443, 'is_https': 1}
+                ]
 
-        for port_info in ports:
-            port = port_info['port_num']
-            is_https = port_info['is_https']
+            for port_info in ports:
+                port = port_info['port_num']
+                is_https = port_info['is_https']
 
-            try:
-                scan_result = scanner.scan_target(
-                    host=host,
-                    port=port,
-                    ip_id=None,
-                    is_https=is_https
-                )
+                try:
+                    scan_result = scanner.scan_target(
+                        host=host,
+                        port=port,
+                        ip_id=None,
+                        is_https=is_https
+                    )
 
-                if scan_result.get('success', False):
-                    host_scan_success = True
-                    result['hosts_scanned'] += 1
-                    result['technologies_found'] += len(scan_result.get('technologies', []))
+                    if scan_result.get('success', False):
+                        host_scan_success = True
+                        result['hosts_scanned'] += 1
+                        result['technologies_found'] += len(scan_result.get('technologies', []))
 
-                    for cve in scan_result.get('cves', []):
-                        result['cves_found'] += 1
+                        for cve in scan_result.get('cves', []):
+                            result['cves_found'] += 1
 
-                        if cve['cve_id'] not in existing_cves:
-                            existing_cves.add(cve['cve_id'])
-                            result['new_cves'].append({
-                                'cve_id': cve['cve_id'],
-                                'cvss': cve.get('cvss', 0),
-                                'host': host,
-                                'tech_name': cve.get('tech_name', '')
-                            })
-                else:
-                    error = scan_result.get('error_info', {})
-                    error_msg = error.get('error_category', 'unknown') if error else 'unknown'
-                    result['errors'].append(f"{host}:{port} ({error_msg})")
+                            if cve['cve_id'] not in existing_cves:
+                                existing_cves.add(cve['cve_id'])
+                                result['new_cves'].append({
+                                    'cve_id': cve['cve_id'],
+                                    'cvss': cve.get('cvss', 0),
+                                    'host': host,
+                                    'tech_name': cve.get('tech_name', '')
+                                })
+                    else:
+                        error = scan_result.get('error_info', {})
+                        error_msg = error.get('error_category', 'unknown') if error else 'unknown'
+                        result['errors'].append(f"{host}:{port} ({error_msg})")
 
-            except Exception as e:
-                logger.error(f"Wappalyzer scan failed for {host}:{port} - {e}")
-                result['errors'].append(f"{host}:{port} (exception: {str(e)[:80]})")
+                except Exception as e:
+                    logger.error(f"Wappalyzer scan failed for {host}:{port} - {e}")
+                    result['errors'].append(f"{host}:{port} (exception: {str(e)[:80]})")
 
-        if host_scan_success:
-            _update_wappalyzer_timestamp(host, now_str)
+            if host_scan_success:
+                _update_wappalyzer_timestamp(host, now_str)
 
-    set_setting('last_wappalyzer_check', now_str)
+        set_setting('last_wappalyzer_check', now_str)
 
-    from utils.threat_intel import refresh_quietly
-    refresh_quietly([cve['cve_id'] for cve in result['new_cves']])
+        from utils.threat_intel import refresh_quietly
+        refresh_quietly([cve['cve_id'] for cve in result['new_cves']])
 
-    logger.info(
-        f"Wappalyzer re-scan complete: "
-        f"{result['hosts_scanned']} hosts, "
-        f"{result['technologies_found']} techs, "
-        f"{result['cves_found']} CVEs, "
-        f"{len(result['new_cves'])} new CVEs"
-    )
+        logger.info(
+            f"Wappalyzer re-scan complete: "
+            f"{result['hosts_scanned']} hosts, "
+            f"{result['technologies_found']} techs, "
+            f"{result['cves_found']} CVEs, "
+            f"{len(result['new_cves'])} new CVEs"
+        )
 
-    return result
+        return result
+    finally:
+        conn.close()
 
 
 if __name__ == '__main__':

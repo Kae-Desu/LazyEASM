@@ -172,40 +172,43 @@ class PortScanner:
             List of dicts with target info
         """
         conn = get_db_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
         
-        query = """
-            SELECT ip_id, ip_value, is_shared, shared_provider, status, last_scanned
-            FROM ip_asset
-            WHERE 1=1
-        """
-        params = []
+            query = """
+                SELECT ip_id, ip_value, is_shared, shared_provider, status, last_scanned
+                FROM ip_asset
+                WHERE 1=1
+            """
+            params = []
         
-        # Skip down IPs
-        if self.skip_down:
-            query += " AND status = 'up'"
+            # Skip down IPs
+            if self.skip_down:
+                query += " AND status = 'up'"
         
-        # Skip shared hosting
-        if self.skip_shared:
-            query += " AND (is_shared = 0 OR is_shared IS NULL)"
+            # Skip shared hosting
+            if self.skip_shared:
+                query += " AND (is_shared = 0 OR is_shared IS NULL)"
         
-        cursor.execute(query, params)
-        results = cursor.fetchall()
-        conn.close()
+            cursor.execute(query, params)
+            results = cursor.fetchall()
+            conn.close()
         
-        targets = []
-        for row in results:
-            target = dict(row)
+            targets = []
+            for row in results:
+                target = dict(row)
             
-            # Always skip Cloudflare (hardcoded check)
-            if self.skip_cloudflare:
-                if target.get('shared_provider') and 'cloudflare' in target.get('shared_provider', '').lower():
-                    self.logger.info(f"Skipping Cloudflare IP: {target['ip_value']}")
-                    continue
+                # Always skip Cloudflare (hardcoded check)
+                if self.skip_cloudflare:
+                    if target.get('shared_provider') and 'cloudflare' in target.get('shared_provider', '').lower():
+                        self.logger.info(f"Skipping Cloudflare IP: {target['ip_value']}")
+                        continue
             
-            targets.append(target)
+                targets.append(target)
         
-        return targets
+            return targets
+        finally:
+            conn.close()
     
     def run_nmap(self, target: str, profile: str = 'medium') -> Tuple[bool, Optional[str], List[Dict]]:
         """
@@ -353,78 +356,82 @@ class PortScanner:
             return 0
         
         conn = get_db_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
         
-        saved_count = 0
-        timestamp = utc_now_str()
+            saved_count = 0
+            timestamp = utc_now_str()
         
-        for port in ports:
-            try:
-                # Check if port already exists
-                cursor.execute('''
-                    SELECT port_id FROM ports 
-                    WHERE ip_id = ? AND port_num = ? AND protocol = ?
-                ''', (ip_id, port['port_num'], port['protocol']))
-                
-                existing = cursor.fetchone()
-                
-                if existing:
-                    # Update existing port
+            for port in ports:
+                try:
+                    # Check if port already exists
                     cursor.execute('''
-                        UPDATE ports 
-                        SET service_name = ?, banner = ?
-                        WHERE port_id = ?
-                    ''', (port['service'], port['banner'], existing['port_id']))
-                else:
-                    # Insert new port
-                    cursor.execute('''
-                        INSERT INTO ports (ip_id, port_num, protocol, service_name, banner, first_seen)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                    ''', (ip_id, port['port_num'], port['protocol'], port['service'], port['banner'], timestamp))
-                    if ip_value:
-                        service = f" ({port['service']})" if port.get('service') else ''
-                        _record_change(cursor, ip_value, 'port_opened',
-                                       f"Port {port['port_num']}/{port['protocol']} opened{service}",
-                                       {'port': port['port_num'], 'protocol': port['protocol'],
-                                        'service': port.get('service')})
+                        SELECT port_id FROM ports 
+                        WHERE ip_id = ? AND port_num = ? AND protocol = ?
+                    ''', (ip_id, port['port_num'], port['protocol']))
                 
-                saved_count += 1
+                    existing = cursor.fetchone()
                 
-            except Exception as e:
-                self.logger.error(f"Error saving port {port['port_num']} for ip_id {ip_id}: {e}")
+                    if existing:
+                        # Update existing port
+                        cursor.execute('''
+                            UPDATE ports 
+                            SET service_name = ?, banner = ?
+                            WHERE port_id = ?
+                        ''', (port['service'], port['banner'], existing['port_id']))
+                    else:
+                        # Insert new port
+                        cursor.execute('''
+                            INSERT INTO ports (ip_id, port_num, protocol, service_name, banner, first_seen)
+                            VALUES (?, ?, ?, ?, ?, ?)
+                        ''', (ip_id, port['port_num'], port['protocol'], port['service'], port['banner'], timestamp))
+                        if ip_value:
+                            service = f" ({port['service']})" if port.get('service') else ''
+                            _record_change(cursor, ip_value, 'port_opened',
+                                           f"Port {port['port_num']}/{port['protocol']} opened{service}",
+                                           {'port': port['port_num'], 'protocol': port['protocol'],
+                                            'service': port.get('service')})
+                
+                    saved_count += 1
+                
+                except Exception as e:
+                    self.logger.error(f"Error saving port {port['port_num']} for ip_id {ip_id}: {e}")
         
-        # Only a full-range scan can tell that a previously open port is closed
-        if self.cycle == 'long' and ip_value:
-            open_now = {(p['port_num'], p['protocol']) for p in ports}
-            cursor.execute('SELECT port_id, port_num, protocol, service_name FROM ports WHERE ip_id = ?', (ip_id,))
-            for row in cursor.fetchall():
-                if (row['port_num'], row['protocol']) not in open_now:
-                    cursor.execute('DELETE FROM ports WHERE port_id = ?', (row['port_id'],))
-                    _record_change(cursor, ip_value, 'port_closed',
-                                   f"Port {row['port_num']}/{row['protocol']} closed",
-                                   {'port': row['port_num'], 'protocol': row['protocol'],
-                                    'service': row['service_name']})
+            # Only a full-range scan can tell that a previously open port is closed
+            if self.cycle == 'long' and ip_value:
+                open_now = {(p['port_num'], p['protocol']) for p in ports}
+                cursor.execute('SELECT port_id, port_num, protocol, service_name FROM ports WHERE ip_id = ?', (ip_id,))
+                for row in cursor.fetchall():
+                    if (row['port_num'], row['protocol']) not in open_now:
+                        cursor.execute('DELETE FROM ports WHERE port_id = ?', (row['port_id'],))
+                        _record_change(cursor, ip_value, 'port_closed',
+                                       f"Port {row['port_num']}/{row['protocol']} closed",
+                                       {'port': row['port_num'], 'protocol': row['protocol'],
+                                        'service': row['service_name']})
         
-        conn.commit()
-        conn.close()
+            conn.commit()
         
-        return saved_count
+            return saved_count
+        finally:
+            conn.close()
     
     def update_scan_timestamp(self, ip_id: int):
         """Update last_scanned timestamp for an IP."""
         conn = get_db_connection()
-        cursor = conn.cursor()
+        try:
+            cursor = conn.cursor()
         
-        timestamp = utc_now_str()
+            timestamp = utc_now_str()
         
-        cursor.execute('''
-            UPDATE ip_asset 
-            SET last_scanned = ? 
-            WHERE ip_id = ?
-        ''', (timestamp, ip_id))
+            cursor.execute('''
+                UPDATE ip_asset 
+                SET last_scanned = ? 
+                WHERE ip_id = ?
+            ''', (timestamp, ip_id))
         
-        conn.commit()
-        conn.close()
+            conn.commit()
+        finally:
+            conn.close()
     
     def scan_single_ip(self, ip_id: int, ip_value: str) -> Dict:
         """

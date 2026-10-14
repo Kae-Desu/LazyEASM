@@ -39,55 +39,58 @@ def get_assets_for_phase2() -> List[Dict]:
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    # Get subdomains with http_services
-    cursor.execute('''
-        SELECT DISTINCT
-            sa.sub_id as asset_id,
-            'subdomain' as asset_type,
-            sa.subdomain_name as name
-        FROM subdomain_asset sa
-        INNER JOIN http_services hs ON hs.host = sa.subdomain_name
-        ORDER BY sa.sub_id
-    ''')
+        # Get subdomains with http_services
+        cursor.execute('''
+            SELECT DISTINCT
+                sa.sub_id as asset_id,
+                'subdomain' as asset_type,
+                sa.subdomain_name as name
+            FROM subdomain_asset sa
+            INNER JOIN http_services hs ON hs.host = sa.subdomain_name
+            ORDER BY sa.sub_id
+        ''')
     
-    subdomains = [dict(row) for row in cursor.fetchall()]
+        subdomains = [dict(row) for row in cursor.fetchall()]
     
-    # Get domains with http_services
-    cursor.execute('''
-        SELECT DISTINCT
-            da.dom_id as asset_id,
-            'domain' as asset_type,
-            da.domain_name as name
-        FROM domain_asset da
-        INNER JOIN http_services hs ON hs.host = da.domain_name
-        ORDER BY da.dom_id
-    ''')
+        # Get domains with http_services
+        cursor.execute('''
+            SELECT DISTINCT
+                da.dom_id as asset_id,
+                'domain' as asset_type,
+                da.domain_name as name
+            FROM domain_asset da
+            INNER JOIN http_services hs ON hs.host = da.domain_name
+            ORDER BY da.dom_id
+        ''')
     
-    domains = [dict(row) for row in cursor.fetchall()]
+        domains = [dict(row) for row in cursor.fetchall()]
     
-    # Get standalone IP assets (not linked to any domain/subdomain)
-    cursor.execute('''
-        SELECT DISTINCT
-            i.ip_id as asset_id,
-            'ip' as asset_type,
-            i.ip_value as name
-        FROM ip_asset i
-        LEFT JOIN domain_ip di ON di.ip_id = i.ip_id
-        LEFT JOIN subdomain_ip si ON si.ip_id = i.ip_id
-        WHERE di.ip_id IS NULL AND si.ip_id IS NULL
-        ORDER BY i.ip_id
-    ''')
+        # Get standalone IP assets (not linked to any domain/subdomain)
+        cursor.execute('''
+            SELECT DISTINCT
+                i.ip_id as asset_id,
+                'ip' as asset_type,
+                i.ip_value as name
+            FROM ip_asset i
+            LEFT JOIN domain_ip di ON di.ip_id = i.ip_id
+            LEFT JOIN subdomain_ip si ON si.ip_id = i.ip_id
+            WHERE di.ip_id IS NULL AND si.ip_id IS NULL
+            ORDER BY i.ip_id
+        ''')
     
-    ips = [dict(row) for row in cursor.fetchall()]
+        ips = [dict(row) for row in cursor.fetchall()]
     
-    conn.close()
+        conn.close()
     
-    all_assets = subdomains + domains + ips
-    logger.info(f"Found {len(all_assets)} assets for Phase 2 scan")
+        all_assets = subdomains + domains + ips
+        logger.info(f"Found {len(all_assets)} assets for Phase 2 scan")
     
-    return all_assets
+        return all_assets
+    finally:
+        conn.close()
 
 
 def get_http_ports_for_asset(asset_id: int, asset_type: str, asset_name: str) -> List[int]:
@@ -105,33 +108,36 @@ def get_http_ports_for_asset(asset_id: int, asset_type: str, asset_name: str) ->
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    if asset_type == 'ip':
-        cursor.execute('''
-            SELECT DISTINCT hs.port_num
-            FROM http_services hs
-            WHERE hs.ip_id = ? OR hs.host = ?
-            UNION
-            SELECT DISTINCT p.port_num
-            FROM ports p
-            WHERE p.ip_id = ? AND p.service_name IN ('http', 'https', 'http-alt', 'http-proxy', 'jetty', 'nginx', 'apache', 'tomcat')
-        ''', (asset_id, asset_name, asset_id))
-    else:
-        cursor.execute('''
-            SELECT DISTINCT hs.port_num
-            FROM http_services hs
-            WHERE hs.host = ?
-        ''', (asset_name,))
+        if asset_type == 'ip':
+            cursor.execute('''
+                SELECT DISTINCT hs.port_num
+                FROM http_services hs
+                WHERE hs.ip_id = ? OR hs.host = ?
+                UNION
+                SELECT DISTINCT p.port_num
+                FROM ports p
+                WHERE p.ip_id = ? AND p.service_name IN ('http', 'https', 'http-alt', 'http-proxy', 'jetty', 'nginx', 'apache', 'tomcat')
+            ''', (asset_id, asset_name, asset_id))
+        else:
+            cursor.execute('''
+                SELECT DISTINCT hs.port_num
+                FROM http_services hs
+                WHERE hs.host = ?
+            ''', (asset_name,))
     
-    ports = [row[0] for row in cursor.fetchall()]
-    conn.close()
+        ports = [row[0] for row in cursor.fetchall()]
+        conn.close()
     
-    if not ports:
-        ports = [80, 443]
+        if not ports:
+            ports = [80, 443]
     
-    logger.info(f"Dirsearch ports for {asset_name}: {ports}")
-    return ports
+        logger.info(f"Dirsearch ports for {asset_name}: {ports}")
+        return ports
+    finally:
+        conn.close()
 
 
 def get_asset_ips(asset_id: int, asset_type: str) -> List[Dict]:
@@ -148,33 +154,35 @@ def get_asset_ips(asset_id: int, asset_type: str) -> List[Dict]:
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    if asset_type == 'domain':
-        cursor.execute('''
-            SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
-            FROM ip_asset i
-            INNER JOIN domain_ip di ON di.ip_id = i.ip_id
-            WHERE di.dom_id = ?
-        ''', (asset_id,))
-    elif asset_type == 'subdomain':
-        cursor.execute('''
-            SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
-            FROM ip_asset i
-            INNER JOIN subdomain_ip si ON si.ip_id = i.ip_id
-            WHERE si.sub_id = ?
-        ''', (asset_id,))
-    else:
-        cursor.execute('''
-            SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
-            FROM ip_asset i
-            WHERE i.ip_id = ?
-        ''', (asset_id,))
+        if asset_type == 'domain':
+            cursor.execute('''
+                SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
+                FROM ip_asset i
+                INNER JOIN domain_ip di ON di.ip_id = i.ip_id
+                WHERE di.dom_id = ?
+            ''', (asset_id,))
+        elif asset_type == 'subdomain':
+            cursor.execute('''
+                SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
+                FROM ip_asset i
+                INNER JOIN subdomain_ip si ON si.ip_id = i.ip_id
+                WHERE si.sub_id = ?
+            ''', (asset_id,))
+        else:
+            cursor.execute('''
+                SELECT DISTINCT i.ip_id, i.ip_value, i.is_shared, i.shared_provider
+                FROM ip_asset i
+                WHERE i.ip_id = ?
+            ''', (asset_id,))
     
-    ips = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+        ips = [dict(row) for row in cursor.fetchall()]
     
-    return ips
+        return ips
+    finally:
+        conn.close()
 
 
 def should_skip_nmap(ip_value: str, is_shared: int, shared_provider: str = '') -> Tuple[bool, str]:
@@ -336,19 +344,21 @@ def update_last_dirsearch(asset_id: int, asset_type: str):
     from utils.db_utils import get_db_connection
     
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    timestamp = utc_now_str()
+        timestamp = utc_now_str()
     
-    if asset_type == 'domain':
-        cursor.execute('UPDATE domain_asset SET last_dirsearch = ? WHERE dom_id = ?', (timestamp, asset_id))
-    elif asset_type == 'subdomain':
-        cursor.execute('UPDATE subdomain_asset SET last_dirsearch = ? WHERE sub_id = ?', (timestamp, asset_id))
-    elif asset_type == 'ip':
-        cursor.execute('UPDATE ip_asset SET last_scanned = ? WHERE ip_id = ?', (timestamp, asset_id))
+        if asset_type == 'domain':
+            cursor.execute('UPDATE domain_asset SET last_dirsearch = ? WHERE dom_id = ?', (timestamp, asset_id))
+        elif asset_type == 'subdomain':
+            cursor.execute('UPDATE subdomain_asset SET last_dirsearch = ? WHERE sub_id = ?', (timestamp, asset_id))
+        elif asset_type == 'ip':
+            cursor.execute('UPDATE ip_asset SET last_scanned = ? WHERE ip_id = ?', (timestamp, asset_id))
     
-    conn.commit()
-    conn.close()
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def send_asset_notification(asset: Dict, nmap_result: Dict, dirsearch_result: Dict):

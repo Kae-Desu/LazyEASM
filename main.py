@@ -449,9 +449,10 @@ def health():
     # 1. Database check
     try:
         conn = get_db_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT 1")
-        conn.close()
+        try:
+            conn.execute("SELECT 1")
+        finally:
+            conn.close()
         checks['database'] = 'ok'
     except Exception as e:
         checks['database'] = f'error: {str(e)[:50]}'
@@ -1339,51 +1340,53 @@ def queue_phase2_scan():
         return jsonify({'success': False, 'error': 'asset_id must be an integer'}), 400
     
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Check if already queued or processing
-    cursor.execute('''
-        SELECT queue_id, status FROM scan_queue 
-        WHERE target = ? AND scan_type = 'phase2_deep_scan' 
-          AND status IN ('pending', 'processing')
-    ''', (asset_name,))
-    
-    existing = cursor.fetchone()
-    if existing:
-        conn.close()
-        return jsonify({
-            'success': False, 
-            'error': f'Asset already in queue with status: {existing["status"]}'
-        }), 400
-    
-    # Add to queue
-    cursor.execute('''
-        INSERT INTO scan_queue (scan_type, cycle, target, target_id, target_type, status, queued_at)
-        VALUES (?, 'phase2', ?, ?, ?, 'pending', datetime('now'))
-    ''', ('phase2_deep_scan', asset_name, asset_id, asset_type))
-    
-    queue_id = cursor.lastrowid
-    conn.commit()
-    conn.close()
-    
-    # Send Discord notification
     try:
-        from modules.Notify import send_message
-        send_message(
-            f"**Deep Scan Queued**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Asset: {asset_name}\n"
-            f"Type: {asset_type}\n"
-            f"Queue ID: {queue_id}"
-        )
-    except Exception as e:
-        print(f"[Phase2] Discord notification failed: {e}")
+        cursor = conn.cursor()
     
-    return jsonify({
-        'success': True, 
-        'message': f'Deep scan queued for {asset_name}',
-        'queue_id': queue_id
-    })
+        # Check if already queued or processing
+        cursor.execute('''
+            SELECT queue_id, status FROM scan_queue 
+            WHERE target = ? AND scan_type = 'phase2_deep_scan' 
+              AND status IN ('pending', 'processing')
+        ''', (asset_name,))
+    
+        existing = cursor.fetchone()
+        if existing:
+            return jsonify({
+                'success': False, 
+                'error': f'Asset already in queue with status: {existing["status"]}'
+            }), 400
+    
+        # Add to queue
+        cursor.execute('''
+            INSERT INTO scan_queue (scan_type, cycle, target, target_id, target_type, status, queued_at)
+            VALUES (?, 'phase2', ?, ?, ?, 'pending', datetime('now'))
+        ''', ('phase2_deep_scan', asset_name, asset_id, asset_type))
+    
+        queue_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+    
+        # Send Discord notification
+        try:
+            from modules.Notify import send_message
+            send_message(
+                f"**Deep Scan Queued**\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Asset: {asset_name}\n"
+                f"Type: {asset_type}\n"
+                f"Queue ID: {queue_id}"
+            )
+        except Exception as e:
+            print(f"[Phase2] Discord notification failed: {e}")
+    
+        return jsonify({
+            'success': True, 
+            'message': f'Deep scan queued for {asset_name}',
+            'queue_id': queue_id
+        })
+    finally:
+        conn.close()
 
 
 @app.route('/api/phase2/cancel', methods=['POST'])
@@ -1405,45 +1408,46 @@ def cancel_phase2_scan():
         return jsonify({'success': False, 'error': 'Missing asset_name'}), 400
     
     conn = get_db_connection()
-    cursor = conn.cursor()
-    
-    # Find pending scan
-    cursor.execute('''
-        SELECT queue_id, status FROM scan_queue 
-        WHERE target = ? AND scan_type = 'phase2_deep_scan' 
-          AND status = 'pending'
-    ''', (asset_name,))
-    
-    scan = cursor.fetchone()
-    
-    if not scan:
-        conn.close()
-        return jsonify({'success': False, 'error': 'No pending scan found for this asset'}), 404
-    
-    if scan['status'] != 'pending':
-        conn.close()
-        return jsonify({'success': False, 'error': f'Cannot cancel scan with status: {scan["status"]}'}), 400
-    
-    # Delete from queue
-    cursor.execute('DELETE FROM scan_queue WHERE queue_id = ?', (scan['queue_id'],))
-    conn.commit()
-    conn.close()
-    
-    # Send Discord notification
     try:
-        from modules.Notify import send_message
-        send_message(
-            f"**Deep Scan Cancelled**\n"
-            f"━━━━━━━━━━━━━━━━━━\n"
-            f"Asset: {asset_name}"
-        )
-    except Exception as e:
-        print(f"[Phase2] Discord notification failed: {e}")
+        cursor = conn.cursor()
     
-    return jsonify({
-        'success': True, 
-        'message': f'Scan cancelled for {asset_name}'
-    })
+        # Find pending scan
+        cursor.execute('''
+            SELECT queue_id, status FROM scan_queue 
+            WHERE target = ? AND scan_type = 'phase2_deep_scan' 
+              AND status = 'pending'
+        ''', (asset_name,))
+    
+        scan = cursor.fetchone()
+    
+        if not scan:
+            return jsonify({'success': False, 'error': 'No pending scan found for this asset'}), 404
+    
+        if scan['status'] != 'pending':
+            return jsonify({'success': False, 'error': f'Cannot cancel scan with status: {scan["status"]}'}), 400
+    
+        # Delete from queue
+        cursor.execute('DELETE FROM scan_queue WHERE queue_id = ?', (scan['queue_id'],))
+        conn.commit()
+        conn.close()
+    
+        # Send Discord notification
+        try:
+            from modules.Notify import send_message
+            send_message(
+                f"**Deep Scan Cancelled**\n"
+                f"━━━━━━━━━━━━━━━━━━\n"
+                f"Asset: {asset_name}"
+            )
+        except Exception as e:
+            print(f"[Phase2] Discord notification failed: {e}")
+    
+        return jsonify({
+            'success': True, 
+            'message': f'Scan cancelled for {asset_name}'
+        })
+    finally:
+        conn.close()
 
 
 @app.route('/api/phase2/queue', methods=['GET'])
@@ -1451,24 +1455,26 @@ def cancel_phase2_scan():
 def get_phase2_queue():
     """Get all Phase 2 scans in queue."""
     conn = get_db_connection()
-    cursor = conn.cursor()
+    try:
+        cursor = conn.cursor()
     
-    cursor.execute('''
-        SELECT queue_id, target, target_id, target_type, status, 
-               queued_at, started_at, completed_at, ports_found, dirs_found, error_message
-        FROM scan_queue
-        WHERE scan_type = 'phase2_deep_scan'
-        ORDER BY queued_at DESC
-        LIMIT 50
-    ''')
+        cursor.execute('''
+            SELECT queue_id, target, target_id, target_type, status, 
+                   queued_at, started_at, completed_at, ports_found, dirs_found, error_message
+            FROM scan_queue
+            WHERE scan_type = 'phase2_deep_scan'
+            ORDER BY queued_at DESC
+            LIMIT 50
+        ''')
     
-    queue_items = [dict(row) for row in cursor.fetchall()]
-    conn.close()
+        queue_items = [dict(row) for row in cursor.fetchall()]
     
-    return jsonify({
-        'success': True,
-        'queue': queue_items
-    })
+        return jsonify({
+            'success': True,
+            'queue': queue_items
+        })
+    finally:
+        conn.close()
 
 
 # ============================================
