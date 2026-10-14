@@ -47,6 +47,15 @@ def main() -> int:
     init_db()
     bootstrap_admin_from_env()
 
+    from utils.tls import TLSConfigError, certificate_files, describe
+    try:
+        tls_files = certificate_files()
+    except TLSConfigError as e:
+        print(f"[run] HTTPS is enabled but cannot start: {e}", flush=True)
+        return 1
+    if tls_files:
+        print(f"[run] HTTPS certificate SHA-256 fingerprint: {describe(tls_files[0])['fingerprint']}", flush=True)
+
     processes = {
         'worker': _spawn('worker.py'),
         'web': _spawn('main.py', {'LAZYEASM_ROLE': 'web'}),

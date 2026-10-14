@@ -108,3 +108,6 @@ db/screenshots/
 
 # Downloaded fingerprint updates (utils/fingerprints.py)
 db/fingerprints/
+
+# Generated HTTPS certificate and private key (utils/tls.py)
+db/tls/

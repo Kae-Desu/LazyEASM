@@ -671,8 +671,9 @@ def screenshot_image(screenshot_id, kind):
 @app.route('/settings')
 @token_required
 def settings_page():
+    from utils.tls import status as tls_status
     return render_template('settings.html', active_page='settings', config=get_config_for_ui(),
-                           schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss())
+                           schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss(), tls=tls_status())
 
 
 @app.route('/api/assets', methods=['GET'])
@@ -1517,21 +1518,47 @@ def job_status(job_id):
 
 def serve_web():
     """Serve the app with waitress (production WSGI server), or Flask's debug server if FLASK_DEBUG."""
+    from utils.tls import TLSConfigError, certificate_files, describe, ssl_context, tls_mode
+
     host = get_env('HOST', '0.0.0.0')
     port = int(get_env('PORT', '10001'))
+    threads = int(get_env('WEB_THREADS', '8'))
+    try:
+        tls_files = certificate_files()
+    except TLSConfigError as e:
+        # Fail closed: never fall back to plain HTTP when HTTPS was asked for
+        logger.error(f"HTTPS is enabled but cannot start: {e}")
+        raise SystemExit(1)
+
     if env_flag('FLASK_DEBUG'):
         # Debug mode exposes the Werkzeug debugger; it is opt-in only. The
         # reloader stays off because it runs this module twice.
-        app.run(debug=True, use_reloader=False, host=host, port=port)
+        app.run(debug=True, use_reloader=False, host=host, port=port, ssl_context=tls_files)
         return
+
+    if tls_files:
+        from cheroot import wsgi
+        from cheroot.ssl.builtin import BuiltinSSLAdapter
+        info = describe(tls_files[0])
+        logger.info(f"Serving LazyEASM on https://{host}:{port} ({tls_mode()} certificate, "
+                    f"SHA-256 fingerprint {info['fingerprint']}, valid until {info['not_after']} UTC)")
+        server = wsgi.Server((host, port), app, numthreads=threads)
+        adapter = BuiltinSSLAdapter(*tls_files)
+        adapter.context = ssl_context(*tls_files)     # TLS 1.2 or newer
+        server.ssl_adapter = adapter
+        try:
+            server.start()
+        finally:
+            server.stop()
+        return
+
     from waitress import serve
     logger.info(f"Serving LazyEASM on http://{host}:{port}")
     if host not in LOOPBACK_HOSTS and not FORCE_HTTPS and not env_flag('TRUST_PROXY'):
         logger.warning(f"LazyEASM is reachable on {host}:{port} over plain HTTP: the login password and session "
-                       f"cookie cross the network unencrypted. Put it behind a reverse proxy with HTTPS and set "
-                       f"HOST=127.0.0.1, TRUST_PROXY=true, FORCE_HTTPS=true (README > Installation > HTTPS), "
-                       f"or reach it through an SSH tunnel.")
-    serve(app, host=host, port=port, threads=int(get_env('WEB_THREADS', '8')))
+                       f"cookie cross the network unencrypted. Set TLS_MODE=self-signed in .env and restart, "
+                       f"or put it behind a reverse proxy with HTTPS (README > Installation > HTTPS).")
+    serve(app, host=host, port=port, threads=threads)
 
 
 if __name__ == '__main__':

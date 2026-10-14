@@ -15,24 +15,36 @@ detect_access_ip() {
     echo "<your-ip>"
 }
 
+print_access() {
+    # Port as published on the host (docker-compose sets PUBLIC_PORT), scheme from TLS_MODE
+    local port="${PUBLIC_PORT:-10001}"
+    local scheme="http"
+    local tls_mode
+    tls_mode=$(grep -E '^TLS_MODE=' /app/.env 2>/dev/null | tail -1 | cut -d= -f2 | tr -d '[:space:]')
+    if [ -n "$tls_mode" ] && [ "$tls_mode" != "off" ]; then
+        scheme="https"
+    fi
+    ACCESS_IP=$(detect_access_ip)
+    echo ""
+    echo "Access:  $scheme://$ACCESS_IP:$port"
+    echo "         $scheme://localhost:$port"
+    if [ "$tls_mode" = "self-signed" ]; then
+        echo "         (self-signed certificate: the browser warns once; compare the"
+        echo "          SHA-256 fingerprint printed below before accepting it)"
+    fi
+}
+
 if [ ! -f /app/.env ]; then
     echo "===================================================="
     echo "          LazyEASM - First Run Detected             "
     echo "===================================================="
     bash /app/utils/installation/install.sh
-    echo ""
-    ACCESS_IP=$(detect_access_ip)
-    echo "Access:  http://$ACCESS_IP:10001"
-    echo "         http://localhost:10001"
 else
     echo "===================================================="
     echo "          LazyEASM - Starting                       "
     echo "===================================================="
-    ACCESS_IP=$(detect_access_ip)
-    echo ""
-    echo "Access:  http://$ACCESS_IP:10001"
-    echo "         http://localhost:10001"
 fi
+print_access
 
 # Web app and background worker run as separate processes (see run.py)
 exec python /app/run.py

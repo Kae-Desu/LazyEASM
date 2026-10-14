@@ -302,13 +302,21 @@ On first run (either mode), `start.sh` will:
 
 ### HTTPS
 
-LazyEASM itself serves plain HTTP. Anything reached from another machine should go through a reverse proxy that terminates HTTPS (nginx, Caddy, Traefik, HAProxy, a cloud load balancer...), otherwise the login password and session cookie cross the network unencrypted. Until then the dashboard and login page show a warning when opened over plain HTTP from another machine, and the server logs one at startup.
+New installs serve the dashboard over HTTPS on the same port (`https://<server>:10001`, Docker: `:10002`) with a **self-signed certificate** LazyEASM generates on first start for the server's addresses, stores in `db/tls/` and renews before it expires (the same approach as Wazuh or Proxmox). Browsers warn the first time: compare the SHA-256 fingerprint in the warning's certificate details with the one printed at startup (and shown in Settings > Account), then accept it. Traffic is encrypted either way.
 
-1. Make LazyEASM reachable only from the proxy: `HOST=127.0.0.1` for a native install; for Docker, publish the port on localhost only (`"127.0.0.1:10002:10001"` in `docker-compose.yml`)
+| `TLS_MODE` | |
+|---|---|
+| `self-signed` | Generated certificate (default for new installs). `TLS_HOSTNAMES` adds names or IPs it should cover, e.g. the public IP when it cannot be detected (in Docker, set `PUBLIC_IP` instead) |
+| `custom` | Your certificate: `TLS_CERT_FILE` and `TLS_KEY_FILE` (PEM), e.g. from Let's Encrypt or a company CA. No browser warning |
+| `off` | Plain HTTP: for use behind a reverse proxy (below). Installs created before this setting existed stay on plain HTTP until it is set |
+
+If HTTPS is enabled but cannot start (e.g. a missing certificate file), LazyEASM refuses to start rather than fall back to plain HTTP. On plain HTTP the dashboard and login page show a warning when opened from another machine, and the server logs one at startup.
+
+**Behind a reverse proxy** (nginx, Caddy, Traefik, HAProxy, a cloud load balancer...):
+
+1. Set `TLS_MODE=off` and make LazyEASM reachable only from the proxy: `HOST=127.0.0.1` for a native install; for Docker, publish the port on localhost only (`"127.0.0.1:10002:10001"` in `docker-compose.yml`)
 2. Point the proxy at `http://127.0.0.1:<port>` and have it set `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`
 3. Set `TRUST_PROXY=true` and `FORCE_HTTPS=true` in `.env` and restart: client IPs (login rate limiting), redirects and Secure cookies then follow the proxy's view. Only enable `TRUST_PROXY` behind a proxy; without one, clients could forge these headers
-
-No proxy yet? Open the dashboard through an SSH tunnel, which is encrypted: `ssh -L 10001:127.0.0.1:10001 user@server`, then browse to `http://localhost:10001`.
 
 ### Manual Installation (Advanced)
 
@@ -404,6 +412,9 @@ SMTP_TO=secops@example.com         # SMTP_USERNAME, SMTP_PASSWORD, SMTP_FROM
 | `JWT_SECRET` | Yes | JWT signing secret |
 | `FORCE_HTTPS` | No | `true` to always send Secure cookies and HSTS (use when served over HTTPS, including TLS terminated at a proxy). `FLASK_ENV=production` is treated the same for older installs |
 | `TRUST_PROXY` | No | `true` to trust `X-Forwarded-For/Proto/Host` from one reverse proxy |
+| `TLS_MODE` | No | `self-signed` (new installs), `custom` or `off`; see Installation > HTTPS |
+| `TLS_CERT_FILE`, `TLS_KEY_FILE` | With `custom` | Certificate and key (PEM) to serve |
+| `TLS_HOSTNAMES` | No | Extra names/IPs for the self-signed certificate (comma separated) |
 | `FLASK_DEBUG` | No | `true` enables the Werkzeug debugger. Development only; never on a reachable host (default: `false`) |
 | `ADMIN_USER` | Yes | Admin username |
 | `ADMIN_PASS` | First start / reset | Initial admin password. Hashed into the database and removed from `.env` at startup; set it again and restart to reset a lost password |

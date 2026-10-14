@@ -18,6 +18,8 @@ FLASK_SECRET_KEY=$RANDOM_FLASK
 JWT_SECRET=$RANDOM_JWT
 ADMIN_USER=lazymin
 ADMIN_PASS=$RANDOM_PASS
+# HTTPS with a certificate generated on first start (see .env.example)
+TLS_MODE=self-signed
 EOF
 
 chmod 600 "$PROJECT_ROOT/.env"
