@@ -103,7 +103,7 @@ class SettingsPageTests(PagesTestCase):
         self.assertTrue(response.headers['Location'].endswith('/settings#account'))
 
         with patch.object(self.main, 'test_webhook', return_value=(True, 'ok')):
-            response = self.client.post('/test_webhook')
+            response = self.client.post('/test_webhook', data={'csrf_token': self.csrf})
         self.assertTrue(response.headers['Location'].endswith('/settings#notifications'))
 
     def test_submitting_the_untouched_form_changes_nothing(self):
@@ -131,6 +131,43 @@ class SettingsPageTests(PagesTestCase):
             self.assertIn(f'name="{key}"', html, key)
             self.assertIn(f'name="CLEAR_{key}"', html, key)
 
+
+
+class CsrfCoverageTests(PagesTestCase):
+    EXEMPT = {'/login', '/refresh-token'}   # no session yet / token rotation
+
+    def test_every_route_that_changes_data_checks_csrf(self):
+        import re
+        source = open(self.main.__file__, encoding='utf8').read()
+        unprotected = []
+        pattern = r"@app\.route\('([^']+)'(?:, methods=\[([^\]]+)\])?\)\n((?:@[^\n]+\n)*)def "
+        for m in re.finditer(pattern, source):
+            methods = m.group(2) or ''
+            if ('POST' in methods or 'DELETE' in methods) and m.group(1) not in self.EXEMPT \
+                    and 'csrf_protected' not in m.group(3):
+                unprotected.append(m.group(1))
+        self.assertEqual(unprotected, [])
+
+    def test_requests_without_a_token_are_refused(self):
+        for method, url, kwargs in (
+                ('delete', f'/delete_asset/subdomain/{self.sub_id}', {}),
+                ('post', '/test_webhook', {}),
+                ('post', '/generate_ai', {'json': {'vuln_id': 1}}),
+                ('post', '/api/phase2/scan', {'data': {'asset_id': self.sub_id, 'asset_type': 'subdomain'}}),
+                ('post', '/api/phase2/cancel', {'data': {'asset_name': 'shop.example.com'}}),
+                ('post', '/api/phase3/toggle', {'json': {'enabled': False}}),
+                ('post', '/api/phase3/liveness/check', {'json': {}})):
+            response = getattr(self.client, method)(url, **kwargs)
+            self.assertEqual(response.status_code, 403, url)
+
+    def test_header_token_works_for_requests_without_a_body(self):
+        response = self.client.delete(f'/delete_asset/subdomain/{self.sub_id}', headers={'X-CSRF-Token': self.csrf})
+        self.assertEqual(response.status_code, 200, response.get_json())
+        self.assertEqual(self.client.delete('/delete_asset/subdomain/1', headers={'X-CSRF-Token': 'forged'}).status_code, 403)
+
+    def test_pages_expose_the_token_to_scripts(self):
+        html = self.client.get('/scans').get_data(as_text=True)
+        self.assertIn(f'<meta name="csrf-token" content="{self.csrf}">', html)
 
 if __name__ == '__main__':
     unittest.main()

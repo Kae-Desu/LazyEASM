@@ -8,7 +8,18 @@
  *   data-domain-id + data-csrf (expand_domain)
  *   data-field (clear_field), data-vuln-id + data-cve-id (AI)
  * Status selects use data-status-url and data-csrf.
+ * Every request that changes data sends the CSRF token (csrfHeaders()).
  */
+
+// CSRF token of this login session (meta tag in base.html)
+function csrfToken() {
+    const meta = document.querySelector('meta[name="csrf-token"]');
+    return meta ? meta.content : '';
+}
+
+function csrfHeaders(extra = {}) {
+    return { 'X-CSRF-Token': csrfToken(), ...extra };
+}
 
 // --- Theme ---
 function initTheme() {
@@ -54,12 +65,9 @@ function testWebhook() {
     const form = document.createElement('form');
     form.method = 'POST';
     form.action = '/test_webhook';
-    const csrf = document.querySelector('input[name="csrf_token"]');
-    if (csrf) {
-        const input = document.createElement('input');
-        input.type = 'hidden'; input.name = 'csrf_token'; input.value = csrf.value;
-        form.appendChild(input);
-    }
+    const input = document.createElement('input');
+    input.type = 'hidden'; input.name = 'csrf_token'; input.value = csrfToken();
+    form.appendChild(input);
     document.body.appendChild(form);
     form.submit();
 }
@@ -70,7 +78,7 @@ let currentActionCallback = null;
 function postForm(url, fields) {
     const formData = new FormData();
     Object.entries(fields).forEach(([k, v]) => formData.append(k, v));
-    return fetch(url, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: formData })
+    return fetch(url, { method: 'POST', headers: csrfHeaders({ 'X-Requested-With': 'XMLHttpRequest' }), body: formData })
         .then(res => res.json());
 }
 
@@ -108,7 +116,7 @@ function openConfirmModal(type, extraData = null) {
             title: 'Remove Asset?',
             desc: `Remove ${name} from LazyEASM?`,
             action: () => {
-                fetch(`/delete_asset/${encodeURIComponent(extraData.type)}/${encodeURIComponent(extraData.id)}`, { method: 'DELETE' })
+                fetch(`/delete_asset/${encodeURIComponent(extraData.type)}/${encodeURIComponent(extraData.id)}`, { method: 'DELETE', headers: csrfHeaders() })
                     .then(res => res.json())
                     .then(data => {
                         if (!data.success) return showToast(data.error || 'Delete failed', 'error');
@@ -263,7 +271,7 @@ async function generateAIInternal(vulnId, cveId) {
     try {
         const response = await fetch('/generate_ai', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: csrfHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify({ vuln_id: vulnId })
         });
         const data = await response.json();

@@ -119,6 +119,20 @@ class ScanListTests(ActivityTestCase):
             conn.close()
             self.assertGreaterEqual(queued_at, before)        # not SQLite's UTC default
 
+    def test_old_finished_items_are_pruned(self):
+        conn = db_utils.get_db_connection()
+        conn.executemany("INSERT INTO scan_queue (scan_type, cycle, target, status, queued_at, completed_at) VALUES (?, 'standard', ?, ?, ?, ?)", [
+            ('phase1', 'old-done.example.com', 'completed', ago(days=120), ago(days=120)),
+            ('phase1', 'old-failed.example.com', 'failed', ago(days=100), ago(days=100)),
+            ('phase2_deep_scan', 'old-pending.example.com', 'pending', ago(days=200), None),   # still waiting: kept
+        ])
+        conn.commit()
+        conn.close()
+        self.assertEqual(db_utils.prune_scan_queue(days=90), 2)
+        targets = [s['target'] for s in list_scans(page_size=50)['items']]
+        self.assertIn('old-pending.example.com', targets)
+        self.assertEqual(len(targets), 6)                                  # the 5 recent ones + the pending one
+
     def test_duration(self):
         self.assertEqual(_duration('2026-01-01 10:00:00', '2026-01-01 11:04:30'), '1h 4m')
         self.assertEqual(_duration('2026-01-01T10:00:00', '2026-01-01 10:00:08'), '8s')

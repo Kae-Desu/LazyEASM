@@ -413,10 +413,13 @@ def _run_screenshots():
 
 
 def _run_maintenance():
-    from utils.db_utils import prune_changes
+    from utils.db_utils import prune_changes, prune_scan_queue
     removed = prune_changes(days=365)
     if removed:
         logger.info(f"Pruned {removed} change history entries older than 365 days")
+    removed = prune_scan_queue(days=90)
+    if removed:
+        logger.info(f"Pruned {removed} finished queue items older than 90 days")
 
 
 # name -> (setting key, default, seconds per unit, run function)

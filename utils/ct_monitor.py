@@ -48,11 +48,13 @@ def _cleanup_old_certs(days_expired: int = 90) -> int:
 
 def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
     """
-    Served certificates exactly 7, 5, 3 or 1 days from expiry that were not
-    yet notified at that threshold.
+    Served certificates that reached a threshold (7, 5, 3 or 1 days left) and
+    were not yet notified at it. Each certificate is placed at the tightest
+    threshold it reached, so a check that does not run on a given day (long
+    interval, worker down) catches up with one alert instead of missing it.
 
     Returns:
-        {7: [{'cert_id': int, 'hostname': str}, ...], 5: [...], 3: [...], 1: [...]}
+        {7: [{'cert_id', 'hostname', 'days'}, ...], 5: [...], 3: [...], 1: [...]}
     """
     now = datetime.now(timezone.utc)
     results = {t: [] for t in EXPIRY_THRESHOLDS}
@@ -66,8 +68,11 @@ def check_certificate_expiry_thresholds() -> Dict[int, List[Dict]]:
             days = _days_left(row['not_after'], now)
         except (TypeError, ValueError):
             continue
-        if days in results and not is_cert_notified(row['cert_id'], days):
-            results[days].append({'cert_id': row['cert_id'], 'hostname': row['hostname']})
+        if days < 0 or days > max(EXPIRY_THRESHOLDS):
+            continue   # expired (reported by the misconfiguration check) or not due yet
+        threshold = min(t for t in EXPIRY_THRESHOLDS if days <= t)
+        if not is_cert_notified(row['cert_id'], threshold):
+            results[threshold].append({'cert_id': row['cert_id'], 'hostname': row['hostname'], 'days': days})
     return results
 
 

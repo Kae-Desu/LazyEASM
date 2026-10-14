@@ -51,11 +51,12 @@ class ManualCheckTests(TempDbTestCase):
         self.client = main.app.test_client()
         token = access_token(main)
         self.client.set_cookie('access_token', token)
+        self.headers = {'X-CSRF-Token': main.generate_csrf_token(token)}
 
     def test_route_queues_instead_of_running_in_the_request(self):
         with patch.object(phase3_worker, 'run_monitor') as run:
-            first = self.client.post('/api/phase3/takeover/check')
-            second = self.client.post('/api/phase3/takeover/check')
+            first = self.client.post('/api/phase3/takeover/check', headers=self.headers)
+            second = self.client.post('/api/phase3/takeover/check', headers=self.headers)
         run.assert_not_called()
         self.assertEqual(first.status_code, 202)
         self.assertTrue(first.get_json()['queued'])
@@ -64,7 +65,7 @@ class ManualCheckTests(TempDbTestCase):
 
         job = self.client.get(f"/api/jobs/{first.get_json()['job_id']}").get_json()['job']
         self.assertEqual((job['target'], job['status']), ('takeover', 'pending'))
-        self.assertEqual(self.client.post('/api/phase3/bogus/check').status_code, 404)
+        self.assertEqual(self.client.post('/api/phase3/bogus/check', headers=self.headers).status_code, 404)
         self.assertEqual(self.client.get('/api/jobs/9999').status_code, 404)
 
     def test_worker_runs_queued_checks_and_records_failures(self):

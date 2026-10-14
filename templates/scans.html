@@ -127,7 +127,7 @@
         button.disabled = true;
         try {
             const response = await fetch(`/api/phase3/${encodeURIComponent(button.dataset.runCheck)}/check`, {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+                method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/json' }), body: '{}'
             });
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || 'Failed to queue check');
@@ -144,7 +144,7 @@
         const enabled = event.target.checked;
         try {
             const response = await fetch('/api/phase3/toggle', {
-                method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ enabled })
+                method: 'POST', headers: csrfHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ enabled })
             });
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error();

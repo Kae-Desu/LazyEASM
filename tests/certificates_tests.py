@@ -149,6 +149,20 @@ class ExpiryTests(DatabaseTestCase):
         db_utils.mark_cert_notified(alerts[7][0]['cert_id'], 'shop.example.com', 7)
         self.assertEqual(ct_monitor.check_certificate_expiry_thresholds()[7], [])   # notified once
 
+    def test_missed_days_catch_up_with_one_alert(self):
+        """A check that did not run on day 7 or 5 (weekly interval, worker down) still alerts, once."""
+        db_utils.record_served_certificate(served(days=4.04))         # 4 days left, never notified
+        alerts = ct_monitor.check_certificate_expiry_thresholds()
+        self.assertEqual({t: [(a['hostname'], a['days']) for a in v] for t, v in alerts.items() if v},
+                         {5: [('shop.example.com', 4)]})                # not 7 and 5 at once
+        db_utils.mark_cert_notified(alerts[5][0]['cert_id'], 'shop.example.com', 5)
+        self.assertFalse(any(ct_monitor.check_certificate_expiry_thresholds().values()))
+
+    def test_no_alert_outside_the_window(self):
+        db_utils.record_served_certificate(served('a.example.com', days=10))
+        db_utils.record_served_certificate(served('b.example.com', days=-1))   # expired: misconfig check reports it
+        self.assertFalse(any(ct_monitor.check_certificate_expiry_thresholds().values()))
+
     def test_summary_buckets(self):
         for host, days in (('a.example.com', -2), ('b.example.com', 2), ('c.example.com', 6), ('d.example.com', 20),
                            ('e.example.com', 80)):

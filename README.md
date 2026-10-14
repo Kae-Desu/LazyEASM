@@ -149,12 +149,12 @@ External Attack Surface Management (EASM) tool for asset discovery, vulnerabilit
     apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
     ```
 - **Certificate Expiry Alerts** - Notifications at 7, 5, 3, 1 days before expiry
-  - Each threshold notified exactly once per certificate
+  - Each threshold notified exactly once per certificate; if the check did not run on a threshold day (long interval, worker down), the next run sends one alert at the threshold reached, with the days left
   - Dashboard shows separate "expired" and "expiring ≤7d" counts (per unique hostname)
 - **Certificate History** - Replaced certificates are kept, so the change history shows when and how a certificate changed
 - **Expired Certificate Cleanup** - Replaced certificates expired more than 90 days are deleted with their notification records
 - **Certificate Change Detection** - A different certificate on the same host and port (fingerprint) is a `certificate_changed` event
-- **Stuck Queue Recovery** - Auto-resets items stuck in processing state
+- **Stuck Queue Recovery** - Auto-resets items stuck in processing state; finished queue items (completed, failed, cancelled) older than 90 days are pruned daily
 - **Duplicate Prevention** - Tracks known subdomains across scan queue
 - **New Asset Classification** - Distinguishes new assets from recovered assets in notifications
 - **Auto-Discovery** - New subdomains from CT logs queued via Phase 0
@@ -429,6 +429,7 @@ LazyEASM uses a dual-token JWT authentication system:
 - Each refresh issues a new token pair and blacklists the old refresh token
 - If a blacklisted refresh token is reused (possible theft), all user sessions are revoked
 - Logout blacklists the refresh token and clears both cookies
+- Every request that changes data needs the session's CSRF token ("Required + CSRF" below): as the `csrf_token` form field, a `csrf_token` JSON field, or an `X-CSRF-Token` header. Pages expose it in `<meta name="csrf-token">`; scripts calling the API with a session cookie read it from there
 
 ## API Reference
 
@@ -455,7 +456,7 @@ All endpoints require authentication via JWT access token (cookie) unless noted.
 | `/api/domains/<id>/expand` | POST | Required + CSRF | Expand a domain stored only as the parent of a single submitted subdomain (queues discovery, `202`) |
 | `/api/vulnerabilities/<id>/status`, `/api/findings/<id>/status` | POST | Required + CSRF | Set the status of one CVE (all ports on that host) or finding |
 | `/process_assets` | POST | Required | Start Phase 0 processing |
-| `/delete_asset/<type>/<id>` | DELETE | Required | Delete an asset |
+| `/delete_asset/<type>/<id>` | DELETE | Required + CSRF | Delete an asset |
 
 #### Asset Query API
 
@@ -501,8 +502,8 @@ graph.
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/api/phase2/scan` | POST | Required | Queue a deep scan for asset |
-| `/api/phase2/cancel` | POST | Required | Cancel a queued scan |
+| `/api/phase2/scan` | POST | Required + CSRF | Queue a deep scan for asset |
+| `/api/phase2/cancel` | POST | Required + CSRF | Cancel a queued scan |
 | `/api/phase2/queue` | GET | Required | Get current queue status |
 | `/scans/queue` | GET | Required | Scan queue table partial (Scans page auto-refresh; same filters as `/scans`) |
 | `/queue/status` | GET | Required | Get queue status (JSON) |
@@ -512,11 +513,11 @@ graph.
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/api/phase3/status` | GET | Required | Get monitoring status and stats |
-| `/api/phase3/toggle` | POST | Required | Enable/disable Phase 3 |
-| `/api/phase3/liveness/check` | POST | Required | Trigger immediate liveness check |
-| `/api/phase3/ctlogs/check` | POST | Required | Run the Certificates & CT logs check now |
-| `/api/phase3/wappalyzer/check` | POST | Required | Trigger immediate Wappalyzer re-scan |
-| `/api/phase3/screenshots/check` | POST | Required | Trigger immediate web screenshot run |
+| `/api/phase3/toggle` | POST | Required + CSRF | Enable/disable Phase 3 |
+| `/api/phase3/liveness/check` | POST | Required + CSRF | Trigger immediate liveness check |
+| `/api/phase3/ctlogs/check` | POST | Required + CSRF | Run the Certificates & CT logs check now |
+| `/api/phase3/wappalyzer/check` | POST | Required + CSRF | Trigger immediate Wappalyzer re-scan |
+| `/api/phase3/screenshots/check` | POST | Required + CSRF | Trigger immediate web screenshot run |
 | `/screenshots/<id>/full` or `/thumb` | GET | Required | Stored screenshot image (JPEG) |
 | `/phase_status` | GET | Required | Get phase status (legacy) |
 
@@ -524,7 +525,7 @@ graph.
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
-| `/generate_ai` | POST | Required | Generate AI recommendation for CVE |
+| `/generate_ai` | POST | Required + CSRF | Generate AI recommendation for CVE |
 
 **Request Body:**
 ```json
@@ -547,7 +548,7 @@ graph.
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/save_config` | POST | Required | Update configuration values |
-| `/test_webhook` | POST | Required | Test Discord webhook |
+| `/test_webhook` | POST | Required + CSRF | Test Discord webhook |
 
 ## Project Structure
 

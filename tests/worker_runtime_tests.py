@@ -265,7 +265,7 @@ class WebIntegrationTests(TempDbTestCase):
         token = access_token(self.main)
         self.client.set_cookie('access_token', token)
         with patch.object(phase3_worker, 'start_phase3_workers') as start:
-            response = self.client.post('/api/phase3/toggle', json={'enabled': True})
+            response = self.client.post('/api/phase3/toggle', json={'enabled': True, 'csrf_token': self.main.generate_csrf_token(token)})
         start.assert_not_called()
         self.assertTrue(response.get_json()['enabled'])
         self.assertEqual(db_utils.get_setting('phase3_enabled'), '1')

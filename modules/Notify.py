@@ -351,9 +351,9 @@ def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
 
         level = severity[threshold]
         day_text = "1 day" if threshold == 1 else f"{threshold} days"
-        title = f"{level}: {day_text} until expiry"
+        title = f"{level}: {day_text} or less until expiry"
 
-        cert_lines = [f"• {c['hostname']}" for c in certs[:10]]
+        cert_lines = [f"• {c['hostname']}" + (f" ({c['days']}d left)" if 'days' in c else '') for c in certs[:10]]
         if len(certs) > 10:
             cert_lines.append(f"• ... and {len(certs) - 10} more")
 

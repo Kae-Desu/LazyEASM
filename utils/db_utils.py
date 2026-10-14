@@ -169,6 +169,22 @@ def prune_changes(days: int = 365) -> int:
         conn.close()
 
 
+def prune_scan_queue(days: int = 90) -> int:
+    """Delete finished queue items (completed, failed, cancelled) older than `days`."""
+    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    conn = get_db_connection()
+    try:
+        cursor = conn.execute('''
+            DELETE FROM scan_queue
+            WHERE status IN ('completed', 'failed', 'cancelled')
+              AND COALESCE(completed_at, started_at, queued_at) < ?
+        ''', (cutoff,))
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
 def _host_for_tech(cursor, tech_id: int):
     row = cursor.execute('''
         SELECT h.host, t.tech_name, t.tech_version

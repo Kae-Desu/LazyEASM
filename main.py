@@ -204,7 +204,9 @@ def csrf_protected(f):
     @wraps(f)
     def decorated(*args, **kwargs):
         session_token = request.cookies.get('access_token') or ''
-        csrf_token = request.form.get('csrf_token') or (request.get_json(silent=True) or {}).get('csrf_token')
+        # Form field, JSON body, or X-CSRF-Token header (requests without a body, e.g. DELETE)
+        csrf_token = (request.form.get('csrf_token') or (request.get_json(silent=True) or {}).get('csrf_token')
+                      or request.headers.get('X-CSRF-Token'))
         
         if not csrf_token:
             return jsonify({'success': False, 'error': 'CSRF token required'}), 403
@@ -214,54 +216,6 @@ def csrf_protected(f):
         
         return f(*args, **kwargs)
     return decorated
-
-assets_data = [
-    {
-        "id": 1,
-        "name": "192.168.1.15",
-        "type": "ip",
-        "status": "Critical",
-        "last_scanned": "12:39",
-        "findings": [
-            {"port": "102/TCP", "service": "S7Comm", "version": "Siemens S7-PLC"},
-            {"port": "502/TCP", "service": "Modbus", "version": "Schneider Electric"}
-        ],
-        "cves": [
-            {
-                "id": "CVE-2023-35078",
-                "cvss": "10.0",
-                "title": "Remote Unauthenticated API Access",
-                "ai_reco": "Isolasi port industri segera."
-            },
-            {
-                "id": "CVE-2021-44228",
-                "cvss": "10.0",
-                "title": "Log4Shell Vulnerability",
-                "ai_reco": "Update Java runtime dan patch library log4j ke versi terbaru."
-            }
-        ]
-    },
-    {
-        "id": 2,
-        "name": "internal.dev.local",
-        "type": "hostname",
-        "status": "Medium Risk",
-        "last_scanned": "14:20",
-        "directories": [
-            {"path": "/admin", "status": "403", "size": "0B"},
-            {"path": "/.env", "status": "200", "size": "1.2KB"}
-        ],
-        "cves": [
-            {
-                "id": "CVE-2023-35078, CVE-2023-35078, CVE-2023-35078",
-                "cvss": "10.0",
-                "title": "Remote Unauthenticated API Access",
-                "ai_reco": "Isolasi port industri segera."
-            }
-        ]
-    }
-]
-
 
 def token_required(f):
     @wraps(f)
@@ -807,6 +761,7 @@ def api_asset_detail(asset_type, asset_id):
 
 @app.route('/delete_asset/<asset_type>/<int:asset_id>', methods=['DELETE'])
 @token_required
+@csrf_protected
 def delete_asset(asset_type, asset_id):
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -937,6 +892,7 @@ def save_config():
 
 @app.route('/test_webhook', methods=['POST'])
 @token_required
+@csrf_protected
 def test_webhook_endpoint():
     success, message = test_webhook()
     
@@ -1054,6 +1010,7 @@ def phase_status():
 
 @app.route('/generate_ai', methods=['POST'])
 @token_required
+@csrf_protected
 def generate_ai():
     data = request.get_json()
     vuln_id = data.get('vuln_id')
@@ -1241,6 +1198,7 @@ def process_assets():
 
 @app.route('/api/phase2/scan', methods=['POST'])
 @token_required
+@csrf_protected
 def queue_phase2_scan():
     """
     Queue a Phase 2 deep scan for an asset.
@@ -1319,6 +1277,7 @@ def queue_phase2_scan():
 
 @app.route('/api/phase2/cancel', methods=['POST'])
 @token_required
+@csrf_protected
 def cancel_phase2_scan():
     """
     Cancel a pending Phase 2 scan.
@@ -1454,6 +1413,7 @@ def phase3_status():
 
 @app.route('/api/phase3/toggle', methods=['POST'])
 @token_required
+@csrf_protected
 def phase3_toggle():
     """Enable or disable Phase 3 monitoring."""
     from utils.db_utils import set_setting
@@ -1477,6 +1437,7 @@ def phase3_toggle():
 
 @app.route('/api/phase3/<name>/check', methods=['POST'])
 @token_required
+@csrf_protected
 def phase3_manual_check(name):
     """
     Queue a Phase 3 check to run now in the worker process.
