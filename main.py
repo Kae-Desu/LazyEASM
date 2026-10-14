@@ -491,6 +491,33 @@ def health():
     }), status_code
 
 
+LOOPBACK_HOSTS = {'localhost', '127.0.0.1', '::1'}
+
+
+def _request_hostname() -> str:
+    host = (request.host or '').strip().lower()
+    if host.startswith('['):                       # [::1]:10001
+        return host[1:host.find(']')] if ']' in host else host
+    return host.split(':')[0]
+
+
+def plain_http_exposed() -> bool:
+    """
+    True when this page reached the browser over plain HTTP from another
+    machine, so the password and session cookie crossed the network
+    unencrypted. Localhost (including an SSH tunnel) is not exposed.
+    """
+    if is_https_request():
+        return False
+    host = _request_hostname()
+    return host not in LOOPBACK_HOSTS and not host.endswith('.localhost')
+
+
+@app.context_processor
+def inject_transport_warning():
+    return dict(plain_http_exposed=plain_http_exposed())
+
+
 @app.template_filter('localtime')
 def localtime_filter(value, part: str = 'datetime'):
     """
@@ -1499,6 +1526,11 @@ def serve_web():
         return
     from waitress import serve
     logger.info(f"Serving LazyEASM on http://{host}:{port}")
+    if host not in LOOPBACK_HOSTS and not FORCE_HTTPS and not env_flag('TRUST_PROXY'):
+        logger.warning(f"LazyEASM is reachable on {host}:{port} over plain HTTP: the login password and session "
+                       f"cookie cross the network unencrypted. Put it behind a reverse proxy with HTTPS and set "
+                       f"HOST=127.0.0.1, TRUST_PROXY=true, FORCE_HTTPS=true (README > Installation > HTTPS), "
+                       f"or reach it through an SSH tunnel.")
     serve(app, host=host, port=port, threads=int(get_env('WEB_THREADS', '8')))
 
 

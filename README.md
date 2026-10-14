@@ -299,6 +299,16 @@ On first run (either mode), `start.sh` will:
 - **Native**: Auto-install Python 3, nmap, openssl, and create a virtual environment
 - Generate `.env` with random secrets via `utils/installation/install.sh`
 
+### HTTPS
+
+LazyEASM itself serves plain HTTP. Anything reached from another machine should go through a reverse proxy that terminates HTTPS (nginx, Caddy, Traefik, HAProxy, a cloud load balancer...), otherwise the login password and session cookie cross the network unencrypted. Until then the dashboard and login page show a warning when opened over plain HTTP from another machine, and the server logs one at startup.
+
+1. Make LazyEASM reachable only from the proxy: `HOST=127.0.0.1` for a native install; for Docker, publish the port on localhost only (`"127.0.0.1:10002:10001"` in `docker-compose.yml`)
+2. Point the proxy at `http://127.0.0.1:<port>` and have it set `X-Forwarded-For`, `X-Forwarded-Proto` and `X-Forwarded-Host`
+3. Set `TRUST_PROXY=true` and `FORCE_HTTPS=true` in `.env` and restart: client IPs (login rate limiting), redirects and Secure cookies then follow the proxy's view. Only enable `TRUST_PROXY` behind a proxy; without one, clients could forge these headers
+
+No proxy yet? Open the dashboard through an SSH tunnel, which is encrypted: `ssh -L 10001:127.0.0.1:10001 user@server`, then browse to `http://localhost:10001`.
+
 ### Manual Installation (Advanced)
 
 If you prefer to set up manually without `start.sh`:

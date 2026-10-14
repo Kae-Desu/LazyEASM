@@ -136,6 +136,34 @@ class StorageTests(StorageTestCase):
         with patch.object(ss, 'screenshots_enabled', return_value=False):
             phase3_worker.run_monitor('screenshots')          # turned off: not a failure
 
+    def test_http_redirect_to_the_same_https_page_is_not_stored_twice(self):
+        import dataclasses
+        conn = db_utils.get_db_connection()
+        conn.executescript("""
+            INSERT INTO http_services (http_id, host, port_num, is_https) VALUES (2, 'shop.example.com', 80, 0);
+            INSERT INTO http_services (http_id, host, port_num, is_https) VALUES (3, 'blog.example.com', 80, 0);
+            INSERT INTO http_services (http_id, host, port_num, is_https) VALUES (4, 'blog.example.com', 443, 1);
+        """)
+        conn.commit()
+        conn.close()
+        https = self.capture(lambda d: None)                                  # http_id 1, https://shop.example.com/
+        http = dataclasses.replace(https, http_id=2, url='http://shop.example.com/')   # redirected to the same page
+        # blog: HTTP serves its own page (no redirect), so both are kept
+        blog_https = dataclasses.replace(https, http_id=4, host='blog.example.com', url='https://blog.example.com/',
+                                         final_url='https://blog.example.com/')
+        blog_http = dataclasses.replace(https, http_id=3, host='blog.example.com', url='http://blog.example.com/',
+                                        final_url='http://blog.example.com/')
+
+        db_utils.store_screenshot(http, 'a' * 32 + '.jpg', 'a' * 32 + '_thumb.jpg', ss.CHANGE_THRESHOLD_BITS, 5,
+                                  delete_file=lambda n: None)                # stored by an earlier run
+        with patch.object(ss, 'capture_pages', return_value=[https, http, blog_https, blog_http]):
+            result = ss.run_screenshots()
+        self.assertEqual((result['captured'], result['duplicates']), (3, 1))
+        conn = db_utils.get_db_connection()
+        stored = sorted(r[0] for r in conn.execute('SELECT http_id FROM screenshots'))
+        conn.close()
+        self.assertEqual(stored, [1, 3, 4])                                   # the earlier HTTP copy is gone too
+
     def test_run_writes_files_and_records(self):
         with patch.object(ss, 'capture_pages', return_value=[self.capture(lambda d: None)]):
             result = ss.run_screenshots()

@@ -242,11 +242,13 @@ def run_screenshots(hosts: List[str] = None) -> dict:
 
     Returns:
         {'available': bool, 'captured': int, 'failed': int, 'changed': [host],
-         'blocked_requests': int, 'error': str | None}
+         'blocked_requests': int, 'duplicates': int, 'error': str | None}
+        duplicates: HTTP services skipped because they redirect to an HTTPS page captured in the same run
     """
-    from utils.db_utils import get_screenshot_targets, store_screenshot, set_setting
+    from utils.db_utils import delete_screenshots, get_screenshot_targets, store_screenshot, set_setting
 
-    summary = {'available': True, 'captured': 0, 'failed': 0, 'changed': [], 'blocked_requests': 0, 'error': None}
+    summary = {'available': True, 'captured': 0, 'failed': 0, 'changed': [], 'blocked_requests': 0, 'duplicates': 0,
+               'error': None}
     if not screenshots_enabled():
         summary.update(available=False, error='Screenshots are disabled in settings')
         return summary
@@ -263,6 +265,10 @@ def run_screenshots(hosts: List[str] = None) -> dict:
         summary.update(available=False, error=str(e))
         return summary
 
+    # An HTTP service that redirects to the HTTPS page captured in this run
+    # would only store the same picture twice
+    https_pages = {(c.host, c.final_url) for c in captures if c.ok and c.url.startswith('https://')}
+
     for capture in captures:
         summary['blocked_requests'] += len(capture.blocked)
         if capture.blocked:
@@ -270,6 +276,11 @@ def run_screenshots(hosts: List[str] = None) -> dict:
         if not capture.ok:
             summary['failed'] += 1
             logger.info(f"Screenshot failed for {capture.url}: {capture.error}")
+            continue
+        if capture.url.startswith('http://') and (capture.host, capture.final_url) in https_pages:
+            for name in delete_screenshots(capture.http_id):   # earlier copies of the same page
+                _remove(name)
+            summary['duplicates'] += 1
             continue
         token = secrets.token_hex(16)
         image_name, thumb_name = f'{token}.jpg', f'{token}_thumb.jpg'
@@ -284,7 +295,8 @@ def run_screenshots(hosts: List[str] = None) -> dict:
 
     if hosts is None:
         set_setting('last_screenshot_check', utc_now_str())
-    logger.info(f"Screenshots: {summary['captured']} captured, {summary['failed']} failed, "
+    logger.info(f"Screenshots: {summary['captured']} captured, {summary['duplicates']} HTTP redirects to an "
+                f"HTTPS page already captured, {summary['failed']} failed, "
                 f"{len(summary['changed'])} changed, {summary['blocked_requests']} internal requests blocked")
     return summary
 

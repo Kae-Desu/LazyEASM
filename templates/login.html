@@ -44,7 +44,7 @@
     </button>
 
     <main class="w-full max-w-md">
-        
+        {% include '_insecure_banner.html' %}
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for category, message in messages %}

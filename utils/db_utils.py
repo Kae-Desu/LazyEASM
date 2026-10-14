@@ -1573,6 +1573,18 @@ def get_screenshot(screenshot_id: int):
         conn.close()
 
 
+def delete_screenshots(http_id: int) -> list:
+    """Delete every screenshot of an HTTP service; returns the file names to remove."""
+    conn = get_db_connection()
+    try:
+        rows = conn.execute('SELECT image_file, thumb_file FROM screenshots WHERE http_id = ?', (http_id,)).fetchall()
+        conn.execute('DELETE FROM screenshots WHERE http_id = ?', (http_id,))
+        conn.commit()
+        return [name for row in rows for name in (row['image_file'], row['thumb_file']) if name]
+    finally:
+        conn.close()
+
+
 def _get_screenshots_for_host(cursor, host: str) -> list:
     """Latest screenshot per HTTP service of a host, plus how many captures each has."""
     try:

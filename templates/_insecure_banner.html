@@ -1,0 +1,9 @@
+{# Shown when the page arrived over plain HTTP from another machine (main.plain_http_exposed) #}
+{% if plain_http_exposed %}
+<div class="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs leading-relaxed flex gap-3" role="alert">
+    <i class="fas fa-lock-open mt-0.5" aria-hidden="true"></i>
+    <p><span class="font-bold">Not encrypted.</span> This page is served over plain HTTP, so the login password and
+        session travel over the network in the clear. Put LazyEASM behind a reverse proxy with HTTPS
+        (README &rsaquo; Installation &rsaquo; HTTPS), or open it through an SSH tunnel.</p>
+</div>
+{% endif %}
