@@ -24,6 +24,16 @@ EOF
 
 chmod 600 "$PROJECT_ROOT/.env"
 
+# The address users open LazyEASM at: shown at startup and included in the
+# HTTPS certificate. Inside a container the outbound address is Docker's
+# internal one, so it is detected only on the host (start.sh runs this there).
+if [ -z "$PUBLIC_IP" ] && [ ! -f /.dockerenv ] && command -v ip &> /dev/null; then
+    PUBLIC_IP=$(ip -4 route get 1 2>/dev/null | grep -oP '(?<=src\s)\d+\.\d+\.\d+\.\d+' | head -1)
+fi
+if [ -n "$PUBLIC_IP" ]; then
+    echo "PUBLIC_IP=$PUBLIC_IP" >> "$PROJECT_ROOT/.env"
+fi
+
 echo "===================================================="
 echo "          LazyEASM Security Initialized             "
 echo "===================================================="

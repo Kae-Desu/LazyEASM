@@ -189,7 +189,9 @@ start_docker() {
     fi
 
     echo -e "${GREEN}Starting LazyEASM in Docker mode...${NC}"
-    compose up -d
+    # --build: after `git pull` the image is rebuilt with the new code (cached
+    # layers keep it quick when nothing changed)
+    compose up -d --build
 
     echo ""
     echo -e "${GREEN}LazyEASM started!${NC}"

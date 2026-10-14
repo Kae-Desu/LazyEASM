@@ -2,6 +2,8 @@ services:
   lazyeasm:
     build: .
     container_name: lazyeasm
+    # Stable across container recreates (it is one of the certificate's names)
+    hostname: lazyeasm
     ports:
       - "10002:10001"
     volumes:

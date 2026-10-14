@@ -61,15 +61,24 @@ def _primary_ip() -> Optional[str]:
         return None
 
 
-def server_names() -> Tuple[List[str], List[str]]:
-    """(DNS names, IP addresses) the self-signed certificate should cover."""
+def server_names(detected: bool = True) -> Tuple[List[str], List[str]]:
+    """
+    (DNS names, IP addresses) the self-signed certificate should cover.
+
+    detected=False leaves out what is detected rather than configured (host
+    name, outbound address): those change with a container recreate or a new
+    DHCP lease, and a new certificate means a new fingerprint to verify.
+    """
     names, ips = {'localhost'}, {'127.0.0.1', '::1'}
-    # Not socket.getfqdn(): it is a reverse DNS lookup that can take seconds
-    # on every start where DNS is slow; add other names with TLS_HOSTNAMES
-    if socket.gethostname():
-        names.add(socket.gethostname().lower())
-    for candidate in [_primary_ip(), get_env('HOST', ''), get_env('PUBLIC_IP', '')] + \
-            [v.strip() for v in (get_env('TLS_HOSTNAMES', '') or '').split(',')]:
+    candidates = [get_env('HOST', ''), get_env('PUBLIC_IP', '')] + \
+        [v.strip() for v in (get_env('TLS_HOSTNAMES', '') or '').split(',')]
+    if detected:
+        # Not socket.getfqdn(): it is a reverse DNS lookup that can take
+        # seconds on every start where DNS is slow; add names with TLS_HOSTNAMES
+        if socket.gethostname():
+            names.add(socket.gethostname().lower())
+        candidates.append(_primary_ip())
+    for candidate in candidates:
         if not candidate or candidate in ('0.0.0.0', '::'):
             continue
         try:
@@ -98,7 +107,8 @@ def _covers(cert, names: List[str], ips: List[str]) -> bool:
 def ensure_self_signed() -> Tuple[str, str, bool]:
     """
     The self-signed certificate, generated when missing, expiring within 30
-    days, or no longer covering this server's names.
+    days, or no longer covering the configured names (HOST, PUBLIC_IP,
+    TLS_HOSTNAMES). A new certificate also covers the detected names.
 
     Returns:
         (cert path, key path, newly created)
@@ -108,15 +118,16 @@ def ensure_self_signed() -> Tuple[str, str, bool]:
     from cryptography.hazmat.primitives.asymmetric import ec
     from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
-    names, ips = server_names()
     if os.path.exists(CERT_FILE) and os.path.exists(KEY_FILE):
         try:
             cert = _load_cert(CERT_FILE)
-            if cert.not_valid_after_utc.replace(tzinfo=None) - utc_now() > RENEW_BEFORE and _covers(cert, names, ips):
+            if cert.not_valid_after_utc.replace(tzinfo=None) - utc_now() > RENEW_BEFORE and \
+                    _covers(cert, *server_names(detected=False)):
                 return CERT_FILE, KEY_FILE, False
         except (OSError, ValueError):
             pass
 
+    names, ips = server_names()
     key = ec.generate_private_key(ec.SECP256R1())
     now = utc_now()
     subject = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'LazyEASM'),

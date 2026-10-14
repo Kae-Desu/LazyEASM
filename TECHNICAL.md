@@ -229,7 +229,7 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 
 `utils/tls.py`, `TLS_MODE`:
 
-- `self-signed`: EC P-256 certificate (825 days) with SANs for `localhost`, the host name, `127.0.0.1`, `::1`, the outbound interface address, `HOST`, `PUBLIC_IP` and `TLS_HOSTNAMES`. Stored in `db/tls/` (key 0600, written atomically). Regenerated 30 days before expiry and when it no longer covers the server's current names. Fingerprint (SHA-256 of the DER certificate) printed by `run.py`, logged by the web process and shown in Settings > Account.
+- `self-signed`: EC P-256 certificate (825 days) with SANs for `localhost`, the host name, `127.0.0.1`, `::1`, the outbound interface address, `HOST`, `PUBLIC_IP` and `TLS_HOSTNAMES`. Stored in `db/tls/` (key 0600, written atomically). Regenerated 30 days before expiry and when it no longer covers `HOST`, `PUBLIC_IP` or `TLS_HOSTNAMES`; a changed host name or detected address alone does not replace it, so the fingerprint stays the same across container recreates and DHCP changes. The installer writes the server's address to `.env` as `PUBLIC_IP` (on the host, not inside a container); Docker Compose reads it from the same file. The container's host name is fixed (`lazyeasm`). Fingerprint (SHA-256 of the DER certificate) printed by `run.py`, logged by the web process and shown in Settings > Account.
 - `custom`: `TLS_CERT_FILE` / `TLS_KEY_FILE` (PEM). Setting `TLS_CERT_FILE` without `TLS_MODE` implies `custom`.
 - `off` (or unset): plain HTTP with waitress. Unset is the default for installs that predate the setting; `install.sh` writes `self-signed` for new ones.
 - Served by cheroot with a TLS 1.2+ context. If HTTPS is enabled but cannot start, the web process exits instead of falling back to plain HTTP.
@@ -264,7 +264,7 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 | `TLS_MODE` | No | `self-signed`, `custom` or `off` (see [HTTPS internals](#https-internals)) |
 | `TLS_CERT_FILE`, `TLS_KEY_FILE` | With `custom` | Certificate and key (PEM) |
 | `TLS_HOSTNAMES` | No | Extra names/IPs for the self-signed certificate (comma separated) |
-| `PUBLIC_IP`, `PUBLIC_PORT` | No (Docker) | Shown in the startup address; `PUBLIC_IP` is also added to the self-signed certificate |
+| `PUBLIC_IP`, `PUBLIC_PORT` | No | Shown in the startup address (`PUBLIC_PORT`: Docker); `PUBLIC_IP` is also added to the self-signed certificate. Written by the installer |
 | `FORCE_HTTPS` | No | `true`: always Secure cookies and HSTS (TLS terminated at a proxy). `FLASK_ENV=production` is treated the same for older installs |
 | `TRUST_PROXY` | No | `true`: trust `X-Forwarded-For/Proto/Host` from one reverse proxy |
 | `FLASK_DEBUG` | No | `true` enables the Werkzeug debugger. Development only, never on a reachable host |

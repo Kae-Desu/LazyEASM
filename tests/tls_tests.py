@@ -78,6 +78,18 @@ class SelfSignedTests(TLSTestCase):
             self.assertTrue(tls.ensure_self_signed()[2])
         self.assertNotEqual(tls.describe(cert)['fingerprint'], second)
 
+    def test_detected_names_do_not_force_a_new_certificate(self):
+        # A recreated container has a new host name and internal address;
+        # regenerating would change the fingerprint the user verified
+        with patch.object(tls.socket, 'gethostname', return_value='1c81c7b57266'), \
+                patch.object(tls, '_primary_ip', return_value='172.18.0.2'):
+            cert, _, created = tls.ensure_self_signed()
+        self.assertTrue(created)
+        self.assertIn('1c81c7b57266', tls.describe(cert)['names'])
+        with patch.object(tls.socket, 'gethostname', return_value='90c527ad9b6d'), \
+                patch.object(tls, '_primary_ip', return_value='172.18.0.3'):
+            self.assertFalse(tls.ensure_self_signed()[2])
+
     def test_status_for_settings(self):
         self.env['TLS_MODE'] = 'self-signed'
         tls.ensure_self_signed()
