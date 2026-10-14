@@ -672,8 +672,75 @@ def screenshot_image(screenshot_id, kind):
 @token_required
 def settings_page():
     from utils.tls import status as tls_status
+    from utils import backup
     return render_template('settings.html', active_page='settings', config=get_config_for_ui(),
-                           schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss(), tls=tls_status())
+                           schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss(), tls=tls_status(),
+                           backup=backup.get_settings(), backups=backup.list_backups())
+
+
+@app.route('/save_backup_settings', methods=['POST'])
+@token_required
+@csrf_protected
+def save_backup_settings():
+    from utils import backup
+    errors = backup.save_settings(request.form)
+    for error in errors:
+        flash(error, 'error')
+    if not errors:
+        flash('Backup settings saved.', 'success')
+    return redirect(url_for('settings_page', _anchor='backup'))
+
+
+@app.route('/backup/create', methods=['POST'])
+@token_required
+@csrf_protected
+def create_backup_now():
+    """Snapshot into db/backups/ (stays on the server)."""
+    from utils import backup
+    try:
+        path = backup.create_backup('manual')
+        flash(f"Backup created: {os.path.basename(path)}", 'success')
+    except (backup.BackupError, OSError) as e:
+        flash(f"Backup failed: {e}", 'error')
+    return redirect(url_for('settings_page', _anchor='backup'))
+
+
+@app.route('/backup/download', methods=['POST'])
+@token_required
+@csrf_protected
+def download_backup():
+    """
+    Download the database (and optionally screenshots and .env) as a zip. The
+    admin password is asked again: a stolen session alone must not be enough
+    to take the whole inventory.
+    """
+    from flask import send_file
+    from utils import backup
+
+    client_ip = request.remote_addr or 'unknown'
+    blocked, _, remaining = is_rate_limited(client_ip)
+    if blocked:
+        flash(f"Too many failed attempts. Try again in {remaining} seconds.", 'error')
+        return redirect(url_for('settings_page', _anchor='backup'))
+    admin = auth.get_admin()
+    if not admin or not auth.verify_login(admin['username'], request.form.get('password', '')):
+        record_failed_login(client_ip, admin['username'] if admin else '')
+        flash('Password is incorrect.', 'error')
+        return redirect(url_for('settings_page', _anchor='backup'))
+    reset_failed_login(client_ip)
+
+    try:
+        archive = backup.build_archive(include_screenshots=bool(request.form.get('include_screenshots')),
+                                       include_env=bool(request.form.get('include_env')))
+    except (backup.BackupError, OSError) as e:
+        flash(f"Backup failed: {e}", 'error')
+        return redirect(url_for('settings_page', _anchor='backup'))
+    logger.warning(f"Backup downloaded from {client_ip} (screenshots={bool(request.form.get('include_screenshots'))}, "
+                   f"env={bool(request.form.get('include_env'))})")
+    response = send_file(archive, mimetype='application/zip', as_attachment=True,
+                         download_name=f"lazyeasm-backup-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M')}.zip")
+    response.call_on_close(lambda: os.remove(archive) if os.path.exists(archive) else None)
+    return response
 
 
 @app.route('/api/assets', methods=['GET'])

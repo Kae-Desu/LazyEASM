@@ -422,6 +422,10 @@ def _run_maintenance():
         logger.info(f"Pruned {removed} finished queue items older than 90 days")
     from utils.fingerprints import refresh
     refresh()   # downloads new fingerprints when the current ones are a week old
+    from utils.backup import run_daily
+    backup = run_daily()
+    if backup['created']:
+        logger.info(f"Daily backup: {backup['created']}")
 
 
 # name -> (setting key, default, seconds per unit, run function)

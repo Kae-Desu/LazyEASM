@@ -44,7 +44,16 @@ def main() -> int:
 
     from modules.InitDB import init_db
     from utils.auth import bootstrap_admin_from_env
+    from utils.backup import BackupError, backup_before_upgrade, record_schema_signature
+    try:
+        snapshot = backup_before_upgrade()      # before migrations change an existing database
+        if snapshot:
+            print(f"[run] Database changes after an upgrade; backed up first: {snapshot}", flush=True)
+    except (BackupError, OSError) as e:
+        print(f"[run] Could not back up the database before upgrading it: {e}", flush=True)
+        return 1
     init_db()
+    record_schema_signature()
     bootstrap_admin_from_env()
 
     from utils.tls import TLSConfigError, certificate_files, describe

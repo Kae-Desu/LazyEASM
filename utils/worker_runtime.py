@@ -262,4 +262,11 @@ def stop_background_workers():
     phase1_worker.stop()
     stop_phase0_worker()
     stop_phase3_workers()
+    # A clean stop is visible right away (e.g. to `utils.backup restore`), not
+    # only when the last heartbeat goes stale
+    try:
+        from utils.db_utils import set_setting
+        set_setting(HEARTBEAT_KEY, '')
+    except Exception as e:
+        logger.warning(f"Could not clear the worker heartbeat: {e}")
     logger.info("Background workers stopped")

@@ -368,6 +368,27 @@ python run.py
 - For local development, `python main.py` runs the web app and the worker in one process. `FLASK_DEBUG=true` switches to Flask's debug server (never on a reachable host).
 - `HOST`, `PORT` (default `0.0.0.0:10001`) and `WEB_THREADS` (default `8`) configure the web server.
 
+### Backup & Restore
+
+| What | Backed up | |
+|---|---|---|
+| `db/lazyeasm.db` (assets, findings, history, settings, admin login) | Always | Cannot be recreated |
+| `db/screenshots/` | Optional (download) | Can be captured again, but the visual history is lost |
+| `.env` (API keys, webhook URLs, signing keys) | Optional (download) | Sensitive; without it sessions reset and keys must be entered again |
+| `db/tls/`, `db/fingerprints/`, `logs/` | No | Regenerated automatically |
+
+- **Automatic** - a consistent copy of the database (SQLite online backup, safe while scans run) is saved in `db/backups/` every day, keeping the newest 7 (Settings > Backup: on/off, how many). Before an upgrade changes the database, a `pre-upgrade` copy is made first, so a bad upgrade can be undone
+- **On demand** - Settings > Backup > *Back up now* (stays on the server) or *Download backup*: a zip with the database, optionally screenshots and `.env`. The password is asked again, and every download is logged
+- **Off the server** - `db/backups/` is on the same disk; copy it elsewhere too (rsync, your backup tool), or a lost disk takes the backups with it
+
+**Restore** replaces the whole database, so it runs on the server with LazyEASM stopped (Docker: `docker compose run --rm lazyeasm python -m utils.backup ...`). The current database is kept as a `pre-restore` backup first; the file must pass an integrity check and look like a LazyEASM database.
+
+```bash
+python -m utils.backup list
+python -m utils.backup restore db/backups/lazyeasm-20261014-020000-daily.db
+python -m utils.backup restore lazyeasm-backup.zip --with-env    # also restore .env from the zip
+```
+
 ## Configuration
 
 Create a `.env` file with the following keys:

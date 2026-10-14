@@ -47,6 +47,7 @@
     ('notifications', 'fa-bell', 'Notifications'),
     ('discovery', 'fa-satellite-dish', 'Discovery & Screenshots'),
     ('schedule', 'fa-clock', 'Schedule & Thresholds'),
+    ('backup', 'fa-box-archive', 'Backup'),
     ('account', 'fa-key', 'Account'),
 ] %}
 
@@ -151,6 +152,80 @@
                 <p class="text-xs text-slate-400">Changes apply to the running worker within seconds; no restart needed. The CVSS minimum applies to the next scans; raising it does not close findings already recorded below it.</p>
                 <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-save mr-2"></i>Save schedule</button>
             </form>
+        </section>
+
+        <section id="panel-backup" role="tabpanel" aria-labelledby="tab-backup" class="tab-panel hidden space-y-8 text-sm">
+            <form action="/save_backup_settings" method="POST" class="space-y-4 max-w-2xl">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <h2 class="font-bold dark:text-white">Automatic backups</h2>
+                <p class="text-xs text-slate-500">A consistent copy of the database is saved in <span class="font-mono">db/backups/</span> every day, and before an upgrade changes the database. They stay on this server: copy that folder elsewhere too (rsync, your backup tool), or a lost disk takes them with it.</p>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="backup_enabled" value="1" {% if backup.enabled %}checked{% endif %} class="w-4 h-4 accent-[#CC9ACC]">
+                    <span class="dark:text-slate-200">Back up the database every day</span>
+                </label>
+                <div class="space-y-1.5 max-w-xs">
+                    <label for="backup_keep" class="{{ label_cls }}">Daily backups to keep</label>
+                    <input type="number" id="backup_keep" name="backup_keep" value="{{ backup.keep }}" min="1" max="60" step="1" required class="{{ input_cls }}">
+                </div>
+                <p class="text-xs text-slate-500">Last daily backup: {{ backup.last|localtime if backup.last else 'none yet' }}</p>
+                <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-save mr-2"></i>Save</button>
+            </form>
+
+            <div class="max-w-2xl">
+                <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+                    <h2 class="font-bold dark:text-white">Backups on this server</h2>
+                    <form action="/backup/create" method="POST">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                        <button type="submit" class="px-4 py-2 text-xs font-bold rounded-xl border border-border dark:border-white/10 hover:text-accent"><i class="fas fa-plus mr-1"></i>Back up now</button>
+                    </form>
+                </div>
+                {% if backups %}
+                <table class="w-full text-xs">
+                    <thead class="text-[10px] uppercase tracking-wider text-slate-500 text-left">
+                        <tr><th class="py-2 pr-3">Created</th><th class="py-2 pr-3">Kind</th><th class="py-2 pr-3 text-right">Size</th><th class="py-2">File</th></tr>
+                    </thead>
+                    <tbody class="divide-y divide-slate-100 dark:divide-white/5">
+                        {% for b in backups %}
+                        <tr>
+                            <td class="py-2 pr-3 whitespace-nowrap">{{ b.created_at|localtime }}</td>
+                            <td class="py-2 pr-3 text-slate-500">{{ b.kind }}</td>
+                            <td class="py-2 pr-3 text-right font-mono whitespace-nowrap">{{ '%.1f'|format(b.size / 1048576) }} MB</td>
+                            <td class="py-2 font-mono text-slate-500 break-all">{{ b.name }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <p class="text-xs text-slate-400">No backups yet.</p>
+                {% endif %}
+            </div>
+
+            <form action="/backup/download" method="POST" class="space-y-4 max-w-2xl">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <h2 class="font-bold dark:text-white">Download a backup</h2>
+                <p class="text-xs text-slate-500">A zip with a current copy of the database: your whole attack-surface inventory. Your password is asked again.</p>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="include_screenshots" value="1" class="w-4 h-4 accent-[#CC9ACC]">
+                    <span class="dark:text-slate-200">Include screenshots</span>
+                </label>
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" name="include_env" value="1" class="w-4 h-4 accent-[#CC9ACC]">
+                    <span class="dark:text-slate-200">Include secrets (<span class="font-mono">.env</span>: API keys, webhook URLs, signing keys)</span>
+                </label>
+                <div class="space-y-1.5 max-w-xs">
+                    <label for="backup_password" class="{{ label_cls }}">Password</label>
+                    <input type="password" id="backup_password" name="password" autocomplete="current-password" required class="{{ input_cls }}">
+                </div>
+                <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-download mr-2"></i>Download backup</button>
+            </form>
+
+            <div class="max-w-2xl text-xs text-slate-500 space-y-2">
+                <h2 class="font-bold text-sm dark:text-white">Restore</h2>
+                <p>Restoring replaces the whole database, so it is done on the server with LazyEASM stopped. The database it replaces is kept as a <span class="font-mono">pre-restore</span> backup.</p>
+                <pre class="font-mono bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl p-3 overflow-x-auto">python -m utils.backup list
+python -m utils.backup restore db/backups/&lt;file&gt;.db      # or a downloaded .zip
+python -m utils.backup restore backup.zip --with-env       # also restore .env from the zip</pre>
+            </div>
         </section>
 
         <section id="panel-account" role="tabpanel" aria-labelledby="tab-account" class="tab-panel hidden">

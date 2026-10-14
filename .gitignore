@@ -111,3 +111,6 @@ db/fingerprints/
 
 # Generated HTTPS certificate and private key (utils/tls.py)
 db/tls/
+
+# Local database backups (utils/backup.py)
+db/backups/

@@ -190,6 +190,15 @@ class HeartbeatTests(TempDbTestCase):
                              json.dumps({'ts': '2020-01-01T00:00:00Z', 'components': {}}))
         self.assertFalse(worker_runtime.get_worker_status()['alive'])
 
+    def test_clean_stop_clears_the_heartbeat_at_once(self):
+        with patch.object(worker_runtime, '_component_status', return_value={'phase1': True}):
+            worker_runtime.write_heartbeat()
+        self.assertTrue(worker_runtime.get_worker_status()['alive'])
+        with patch('utils.queue_manager.phase1_worker.stop'), patch('utils.phase0_worker.stop_phase0_worker'), \
+                patch('utils.phase3_worker.stop_phase3_workers'):
+            worker_runtime.stop_background_workers()
+        self.assertFalse(worker_runtime.get_worker_status()['alive'])     # not 60 seconds later
+
 
 class MonitorLoopTests(unittest.TestCase):
     def test_follows_enabled_flag_and_live_interval_changes(self):

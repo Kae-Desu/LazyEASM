@@ -54,6 +54,7 @@ class HttpsBehaviorTests(unittest.TestCase):
     def test_startup_warning(self):
         settings = {'HOST': '0.0.0.0', 'PORT': '10001'}
         with patch.object(main, 'get_env', side_effect=lambda key, default=None: settings.get(key, default)), \
+                patch('utils.tls.certificate_files', return_value=None), \
                 patch.object(main, 'FORCE_HTTPS', False), patch('waitress.serve'), \
                 patch.object(main.logger, 'warning') as warning:
             main.serve_web()
