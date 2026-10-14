@@ -1,0 +1,7 @@
+{# Worker stopped / disk almost full (utils.system_watch.current_warnings) #}
+{% for warning in system_warnings() %}
+<div class="mb-6 p-4 rounded-xl border border-red-500/30 bg-red-500/10 text-red-800 dark:text-red-300 text-xs leading-relaxed flex gap-3" role="alert">
+    <i class="fas fa-triangle-exclamation mt-0.5" aria-hidden="true"></i>
+    <p>{{ warning }}</p>
+</div>
+{% endfor %}

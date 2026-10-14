@@ -26,7 +26,7 @@ from utils.activity_repository import ActivityQueryError, list_changes, list_sca
 from modules.Notify import test_webhook, send_message as discord_send_message
 from modules.AskAI import send_message
 from utils import auth
-from utils.scan_settings import get_schedule, get_cve_min_cvss
+from utils.scan_settings import get_schedule, get_cve_min_cvss, get_system_alerts
 
 logger = logging.getLogger(__name__)
 
@@ -485,6 +485,18 @@ def health():
         checks['phase1_queue'] = f'error: {str(e)[:50]}'
         all_healthy = False
 
+    # 4. Free space for the database (a warning does not make the app unhealthy)
+    try:
+        from utils.system_watch import describe_disk, disk_status
+        disk = disk_status()
+        if disk['critical']:
+            checks['disk'] = f"error: full ({describe_disk(disk)})"
+            all_healthy = False
+        else:
+            checks['disk'] = f"warning: {describe_disk(disk)}" if disk['low'] else 'ok'
+    except Exception as e:
+        checks['disk'] = f'error: {str(e)[:50]}'
+
     status_code = 200 if all_healthy else 503
     return jsonify({
         'status': 'healthy' if all_healthy else 'unhealthy',
@@ -517,6 +529,13 @@ def plain_http_exposed() -> bool:
 @app.context_processor
 def inject_transport_warning():
     return dict(plain_http_exposed=plain_http_exposed())
+
+
+@app.context_processor
+def inject_system_warnings():
+    # A callable: only the page layout uses it, not every partial refresh
+    from utils.system_watch import current_warnings
+    return dict(system_warnings=current_warnings)
 
 
 @app.template_filter('localtime')
@@ -675,7 +694,8 @@ def settings_page():
     from utils.tls import status as tls_status
     from utils import backup
     return render_template('settings.html', active_page='settings', config=get_config_for_ui(),
-                           schedule=get_schedule(), cve_min_cvss=get_cve_min_cvss(), tls=tls_status(),
+                           schedule=get_schedule(), system_alerts=get_system_alerts(),
+                           cve_min_cvss=get_cve_min_cvss(), tls=tls_status(),
                            backup=backup.get_settings(), backups=backup.list_backups())
 
 
@@ -1647,5 +1667,10 @@ if __name__ == '__main__':
     if get_env('LAZYEASM_ROLE', 'all') != 'web':
         from utils.worker_runtime import start_background_workers
         start_background_workers()
+
+    # Alerts when the worker stops or the disk fills; runs here so it keeps
+    # watching while the worker process is down
+    from utils.system_watch import start_watchdog
+    start_watchdog()
 
     serve_web()

@@ -22,7 +22,7 @@ External Attack Surface Management (EASM): discover what you expose on the inter
 - **Continuous monitoring** - Up/down, new subdomains, certificate expiry and replacement, technology changes, page appearance changes (screenshots), all recorded in a change history
 - **Web screenshots** - Every web service captured in an isolated headless browser, so login portals, default pages and parked domains stand out
 - **Triage** - One findings list across all assets, most urgent first; mark findings fixed, accepted or false positive in bulk; resolved findings close themselves on rescan
-- **Alerts and export** - Discord, Slack, email or any webhook; CSV/JSON export; optional AI explanation of each CVE (Gemini, Claude, OpenAI or a local model)
+- **Alerts and export** - Discord, Slack, email or any webhook, including when LazyEASM itself stops scanning or its disk fills up; CSV/JSON export; optional AI explanation of each CVE (Gemini, Claude, OpenAI or a local model)
 - **Install once and forget** - Configured from the dashboard, encrypted (HTTPS) out of the box, self-updating detection data, daily backups
 
 ## Quick start
@@ -96,7 +96,7 @@ python run.py
 | **Findings** | Every CVE and security finding across assets, most urgent first. Filter, open an issue on every host it affects, and set status (fixed, accepted, false positive) for many at once |
 | **Changes** | Everything that changed, by day: new assets, up/down, ports, technologies, certificates, page appearance, findings |
 | **Scans** | Add targets, see the worker and every queued or running job, switch monitoring on/off, run any check now |
-| **Settings** | API keys, AI provider, notifications, discovery and screenshots, check intervals and thresholds, backups, password and HTTPS status. Changes apply without a restart |
+| **Settings** | API keys, AI provider, notifications, discovery and screenshots, check intervals and thresholds, system alerts, backups, password and HTTPS status. Changes apply without a restart |
 
 **What gets scanned**: a domain you submit (`example.com`) is explored: its subdomains are found, scanned and monitored. A subdomain or IP you submit is scanned on its own; to explore its whole domain, use *Expand* on its page or submit the domain. Only scan what you are authorized to test.
 

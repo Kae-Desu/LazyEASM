@@ -43,7 +43,7 @@ Runtime behaviour:
 - Both processes share the SQLite database (WAL mode, busy timeout). Submitting assets inserts a job in `scan_queue`; the worker claims it atomically. Restarting the web process never interrupts a scan.
 - Jobs a crash left in `processing` are re-queued when the worker starts.
 - If either process exits, `run.py` stops the other and exits non-zero, so Docker's restart policy or systemd restarts LazyEASM.
-- The worker writes a heartbeat (`worker_heartbeat` setting) every 15 seconds; it counts as down after 60 seconds without one. A clean stop clears it immediately. `/health` reports the database, the worker and each component (`phase0_worker`, `discovery_worker`, `phase1_worker`, `phase2_worker`, `phase3_worker`).
+- The worker writes a heartbeat (`worker_heartbeat` setting) every 15 seconds; it counts as down after 60 seconds without one. A clean stop clears it immediately. `/health` reports the database, the worker, each component (`phase0_worker`, `discovery_worker`, `phase1_worker`, `phase2_worker`, `phase3_worker`) and `disk` (a warning when almost full; unhealthy below 100 MB free).
 - Run exactly one worker per database.
 - `python main.py` (no `LAZYEASM_ROLE`) runs web and worker in one process for local development.
 
@@ -112,7 +112,16 @@ submit targets ──► input_discovery job ──► Phase 0: discovery ──
 | `screenshots` | 24 h | Captures every web service |
 | `maintenance` | 24 h | Prunes change history (365 days) and finished queue items (90 days), refreshes fingerprint data (weekly), daily backup |
 
-Intervals and the minimum CVSS are edited in Settings > Schedule & Thresholds (`*_interval_*` and `cve_min_cvss` in the settings table, validated ranges). Installs still on the old hourly CT default were moved to 6 hours once.
+### System alerts (`utils/system_watch.py`)
+
+A watchdog thread in the web process (so it keeps running while the worker is down) checks every minute:
+
+- **Worker stopped**: no fresh heartbeat, or a component not running, for `worker_alert_minutes` (default 5).
+- **Disk almost full**: the filesystem holding `db/` is more than `disk_alert_percent` used (default 90) or has under 1 GB free.
+
+Each is sent to every notification channel once, repeated every 24 hours while it lasts, and followed by a message when it clears; a failed send is retried at the next check. State is kept in memory because a full disk cannot be written, so a restart while a problem lasts alerts again. The same problems show as a banner on every dashboard page. 0 turns an alert off.
+
+Intervals, the minimum CVSS and the system alerts are edited in Settings > Schedule & Thresholds (`*_interval_*` and `cve_min_cvss` in the settings table, validated ranges). Installs still on the old hourly CT default were moved to 6 hours once.
 
 ---
 
@@ -310,7 +319,7 @@ All routes need a logged-in session (JWT cookie) unless noted. "CSRF" routes als
 |---|---|---|---|
 | `/login` | POST | None | Log in |
 | `/refresh-token` | POST | Refresh token | New token pair |
-| `/health` | GET | None from localhost, session otherwise | Database, worker and component health (`200` / `503`) |
+| `/health` | GET | None from localhost, session otherwise | Database, worker, component and disk health (`200` / `503`) |
 
 ### Assets and findings
 
@@ -393,6 +402,7 @@ LazyEASM/
 │   └── Notify.py                # Discord, Slack, webhook, email
 ├── utils/
 │   ├── pipeline.py, queue_manager.py, worker_runtime.py   # Jobs, Phase 1 queue, worker lifecycle/heartbeat
+│   ├── system_watch.py          # Worker-stopped and disk-space alerts (web process)
 │   ├── phase0_worker.py, phase2_worker.py, phase3_worker.py  # Workers and the monitor scheduler
 │   ├── subdomain_discovery.py   # Discovery sources, CT logs, DNS brute force
 │   ├── techdetect.py, fingerprints.py, jslibs.py  # Technology detection, fingerprint data, Retire.js
@@ -439,7 +449,7 @@ python main.py           # web + worker in one process (development)
 ## Platform notes
 
 - **Docker**: the image includes headless Chromium (about 400 MB extra). Chromium runs as root in the container, without its sandbox. `docker-compose.yml` publishes host port 10002 and persists `db/`, `logs/` and `.env`. `start.sh` uses Docker Compose v2 (`docker compose`; Ubuntu package `docker-compose-v2`) and falls back to v1 (`docker-compose`). Docker's published ports bypass ufw rules.
-- **Disk space**: a full disk stops every database write (the dashboard shows the worker as down). Keep an eye on other programs' logs on a shared server.
+- **Disk space**: a full disk stops every database write. The disk alert warns before that (System alerts); on a shared server, other programs' logs are a common cause.
 - **Ubuntu 23.10+ native installs**: AppArmor blocks the user namespaces Chromium's sandbox needs; screenshot runs fail with "Chromium sandbox is blocked by the OS" until a profile allows the Playwright binary (README > Quick start).
 - **Nmap without root** uses connect scans (`-sV` works; SYN scans and OS detection are not used).
 - **Scaling**: one instance (SQLite, one worker). Multiple instances need a shared database and job claiming.

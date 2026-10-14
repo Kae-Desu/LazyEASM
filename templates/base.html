@@ -134,6 +134,7 @@
     <main class="lg:pl-56 pt-28 lg:pt-16">
         <div class="max-w-7xl mx-auto px-4 py-8">
             {% include '_insecure_banner.html' %}
+            {% include '_system_banner.html' %}
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}

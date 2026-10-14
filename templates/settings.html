@@ -149,8 +149,18 @@
                         <input type="number" id="cve_min_cvss" name="cve_min_cvss" value="{{ cve_min_cvss }}" min="0" max="10" step="0.1" required class="{{ input_cls }}">
                     </div>
                 </div>
+                <h2 class="font-bold dark:text-white pt-2">System alerts</h2>
+                <div class="grid sm:grid-cols-2 gap-4">
+                    {% for item in system_alerts %}
+                    <div class="space-y-1.5">
+                        <label for="{{ item.key }}" class="{{ label_cls }}">{{ item.label }} ({{ item.unit }})</label>
+                        <input type="number" id="{{ item.key }}" name="{{ item.key }}" value="{{ item.value }}" min="{{ item.min }}" max="{{ item.max }}" step="1" required class="{{ input_cls }}">
+                    </div>
+                    {% endfor %}
+                </div>
+                <p class="text-xs text-slate-400">Sent to every notification channel, repeated daily while the problem lasts, with a message when it is fixed; 0 turns an alert off. The disk alert also fires when less than 1 GB is free. Both also show as a banner on every page.</p>
                 <p class="text-xs text-slate-400">Changes apply to the running worker within seconds; no restart needed. The CVSS minimum applies to the next scans; raising it does not close findings already recorded below it.</p>
-                <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-save mr-2"></i>Save schedule</button>
+                <button type="submit" class="px-6 bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white font-bold py-2.5 rounded-xl hover:opacity-90"><i class="fas fa-save mr-2"></i>Save</button>
             </form>
         </section>
 

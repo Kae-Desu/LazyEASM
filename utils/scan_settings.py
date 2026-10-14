@@ -4,6 +4,7 @@ Scanning settings edited in the dashboard (stored in the settings table).
     - Phase 3 check intervals: re-read by the worker on every scheduler
       cycle, so a change applies without a restart
     - Minimum CVSS score for CVE findings
+    - System alerts: worker stopped, disk almost full (utils/system_watch.py)
 """
 
 from typing import Dict, List, Tuple
@@ -18,6 +19,13 @@ SCHEDULE = [
     ('misconfig', 'Misconfiguration check', 'misconfig_interval_hr', 24, 'hours', 1, 720),
     ('discovery', 'Subdomain discovery', 'discovery_interval_hr', 24, 'hours', 1, 720),
     ('screenshots', 'Web screenshots', 'screenshot_interval_hr', 24, 'hours', 1, 720),
+]
+
+# System alerts; 0 turns an alert off
+# name, label, setting key, default, unit, min, max
+SYSTEM_ALERTS = [
+    ('worker', 'Alert when the worker has stopped for', 'worker_alert_minutes', 5, 'minutes', 0, 1440),
+    ('disk', 'Alert when the disk is fuller than', 'disk_alert_percent', 90, '% used', 0, 99),
 ]
 
 CVE_MIN_CVSS_KEY = 'cve_min_cvss'
@@ -47,6 +55,21 @@ def get_schedule() -> List[Dict]:
     ]
 
 
+def get_system_alerts() -> List[Dict]:
+    """System alert rows for the dashboard, with current values."""
+    return [
+        {'name': name, 'label': label, 'key': key, 'unit': unit, 'min': low, 'max': high,
+         'value': interval_value(key, default, low, high)}
+        for name, label, key, default, unit, low, high in SYSTEM_ALERTS
+    ]
+
+
+def system_alert_value(name: str) -> int:
+    """Current value of a system alert setting (0 = off)."""
+    _, _, key, default, _, low, high = next(row for row in SYSTEM_ALERTS if row[0] == name)
+    return interval_value(key, default, low, high)
+
+
 def get_cve_min_cvss() -> float:
     try:
         value = float(_get(CVE_MIN_CVSS_KEY) or CVE_MIN_CVSS_DEFAULT)
@@ -65,7 +88,7 @@ def save_scanning_settings(form) -> Tuple[List[str], List[str]]:
     from utils.db_utils import set_setting
 
     errors, updates = [], []
-    for name, label, key, default, unit, low, high in SCHEDULE:
+    for name, label, key, default, unit, low, high in SCHEDULE + SYSTEM_ALERTS:
         raw = (form.get(key) or '').strip()
         if not raw:
             continue
