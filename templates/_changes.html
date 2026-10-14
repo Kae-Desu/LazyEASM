@@ -34,7 +34,7 @@
             <span class="font-mono font-bold break-all">{{ c.host }}</span>
             {%- endif %} &middot; {% endif -%}
             {{ c.summary }}</p>
-        <p class="text-[10px] text-slate-400 font-mono">{{ c.detected_at[11:16] if time_only else c.detected_at }}</p>
+        <p class="text-[10px] text-slate-400 font-mono">{{ c.detected_at|localtime('time' if time_only else 'datetime') }}</p>
     </div>
 </li>
 {% endmacro %}

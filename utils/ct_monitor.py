@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from typing import Dict, List
 
 from utils.db_utils import SERVED_CERT, get_db_connection, is_cert_notified
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +115,7 @@ def poll_all_domains() -> Dict:
     _cleanup_old_certs()
     expiry_alerts = check_certificate_expiry_thresholds()
 
-    set_setting('last_ctlogs_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+    set_setting('last_ctlogs_check', utc_now_str())
     logger.info(
         f"Certificates & CT logs: {len(new_subdomains)} new subdomains, "
         f"{len(certificates['changed'])} certificates replaced, "

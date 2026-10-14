@@ -14,6 +14,7 @@ import importlib
 
 from utils.db_utils import get_db_connection
 from utils.queue_manager import task_queue
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ JOB_TYPES = (INPUT_DISCOVERY, MONITOR_RUN)
 
 def _now() -> str:
     # Local time, like every other scan_queue timestamp (the column default is UTC)
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return utc_now_str()
 
 
 def enqueue_input_discovery(targets: dict) -> int:

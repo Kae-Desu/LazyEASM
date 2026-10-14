@@ -182,7 +182,7 @@
                     <td class="px-5 py-3 text-right ${a.vulnerability_count ? 'font-bold' : 'text-slate-400'}">${a.vulnerability_count}</td>
                     <td class="px-5 py-3 text-right text-slate-500">${a.open_port_count}</td>
                     <td class="px-5 py-3">${certCell(a.certificate)}</td>
-                    <td class="px-5 py-3 text-xs text-slate-500 font-mono">${escapeHtml(a.last_scanned || '-')}</td>
+                    <td class="px-5 py-3 text-xs text-slate-500 font-mono">${escapeHtml(localTime(a.last_scanned))}</td>
                 </tr>`;
             }).join('');
         }

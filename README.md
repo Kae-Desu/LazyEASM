@@ -683,6 +683,7 @@ Tests use temporary databases and write their log files to a temporary folder, s
 
 ## Known Limitations
 
+- Timestamps are stored in UTC and shown in the browser's local time (hover a time to see UTC). The Changes page groups entries by UTC date. Installs upgraded from a version that stored local time are converted once at startup, using the server's current UTC offset; rows written around a daylight-saving switch may be off by an hour
 - Certificate transparency lookups depend on CertSpotter (free quota; set `CERTSPOTTER_API_KEY` for more) and crt.sh, which often returns 502/503 under load. Discovery continues with the other sources when both are unavailable
 - Shared/CDN IPs skipped for port scanning
 - CVE matching requires version detection

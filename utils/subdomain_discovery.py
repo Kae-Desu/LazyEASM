@@ -37,6 +37,7 @@ import requests
 
 from utils.config import get_env
 from utils.parsing import is_valid_domain
+from utils.timeutil import utc_now, utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +122,7 @@ def from_certspotter(domain: str) -> Set[str]:
 
 
 def _utc_now() -> str:
-    return datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    return utc_now_str()
 
 
 def from_crtsh(domain: str) -> Set[str]:
@@ -139,7 +140,7 @@ def from_crtsh(domain: str) -> Set[str]:
         rows = _get('https://crt.sh/', timeout=CRTSH_TIMEOUT,
                     params={'q': f'%.{domain}', 'output': 'json', 'exclude': 'expired', 'deduplicate': 'Y'}).json()
     except (SourceError, ValueError):
-        set_setting(CRTSH_COOLDOWN_KEY, (datetime.now(timezone.utc) + CRTSH_COOLDOWN).strftime('%Y-%m-%d %H:%M:%S'))
+        set_setting(CRTSH_COOLDOWN_KEY, (utc_now() + CRTSH_COOLDOWN).strftime('%Y-%m-%d %H:%M:%S'))
         raise
     names = set()
     for row in rows:
@@ -347,7 +348,7 @@ def run_discovery_monitor() -> dict:
             result['new_subdomains'].append((domain, name))
             known.add(name)
 
-    set_setting('last_discovery_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+    set_setting('last_discovery_check', utc_now_str())
     logger.info(f"[Discovery] Monitor complete: {result['domains']} domains, "
                 f"{len(result['new_subdomains'])} new subdomains")
     return result

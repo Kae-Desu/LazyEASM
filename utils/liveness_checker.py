@@ -22,6 +22,7 @@ from utils.db_utils import (
     set_setting
 )
 from utils.utility import ping_host, is_content
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +105,7 @@ def check_all_liveness() -> dict:
         'new_down': []
     }
     
-    now = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     updates_to_make = []  # (asset_id, asset_type, new_status)
     transitions = []      # (asset_name, old_status, new_status) for change history
     

@@ -8,6 +8,7 @@ what's currently running in the database (works in Docker).
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Optional
+from utils.timeutil import utc_now, utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,7 @@ def _is_stale(started_at: Optional[str]) -> bool:
         started = datetime.strptime(started_at, '%Y-%m-%d %H:%M:%S')
     except ValueError:
         return True
-    return datetime.now() - started > timedelta(hours=STALE_LOCK_HOURS)
+    return utc_now() - started > timedelta(hours=STALE_LOCK_HOURS)
 
 
 def set_phase(phase: int, total_assets: int = 0):
@@ -75,7 +76,7 @@ def set_phase(phase: int, total_assets: int = 0):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     
     cursor.execute('''
         UPDATE phase_status 
@@ -154,7 +155,7 @@ def get_phase2_progress() -> Dict:
         
         if started and started['started_at']:
             started_time = datetime.strptime(started['started_at'], '%Y-%m-%d %H:%M:%S')
-            elapsed = (datetime.now() - started_time).total_seconds()
+            elapsed = (utc_now() - started_time).total_seconds()
             avg_time_per_asset = elapsed / processed
             remaining = total - processed
             eta_minutes = int((avg_time_per_asset * remaining) / 60)

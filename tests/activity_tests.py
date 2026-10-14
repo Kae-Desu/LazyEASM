@@ -17,7 +17,8 @@ from utils.activity_repository import ActivityQueryError, _duration, list_change
 
 
 def ago(**delta) -> str:
-    return (datetime.now() - timedelta(**delta)).strftime('%Y-%m-%d %H:%M:%S')
+    from utils.timeutil import utc_ago
+    return utc_ago(**delta)
 
 
 class ActivityTestCase(unittest.TestCase):
@@ -110,14 +111,15 @@ class ScanListTests(ActivityTestCase):
             with self.assertRaises(ActivityQueryError):
                 list_scans(**kwargs)
 
-    def test_manual_jobs_use_local_time_like_the_workers(self):
+    def test_manual_jobs_are_stamped_in_utc(self):
         from utils.pipeline import enqueue_input_discovery, enqueue_monitor_run
         before = ago(seconds=5)
         for job_id in (enqueue_input_discovery({'domains': ['c.com']}), enqueue_monitor_run('intel')[0]):
             conn = db_utils.get_db_connection()
             queued_at = conn.execute('SELECT queued_at FROM scan_queue WHERE queue_id = ?', (job_id,)).fetchone()[0]
             conn.close()
-            self.assertGreaterEqual(queued_at, before)        # not SQLite's UTC default
+            self.assertGreaterEqual(queued_at, before)
+            self.assertLessEqual(queued_at, ago(seconds=-5))
 
     def test_old_finished_items_are_pruned(self):
         conn = db_utils.get_db_connection()

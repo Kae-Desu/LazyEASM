@@ -21,6 +21,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional
 import importlib
 import requests
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -337,7 +338,7 @@ def update_last_dirsearch(asset_id: int, asset_type: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    timestamp = utc_now_str()
     
     if asset_type == 'domain':
         cursor.execute('UPDATE domain_asset SET last_dirsearch = ? WHERE dom_id = ?', (timestamp, asset_id))

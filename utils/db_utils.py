@@ -25,6 +25,7 @@ import json
 import logging
 from datetime import datetime, timedelta
 from typing import Optional
+from utils.timeutil import utc_ago, utc_in, utc_now, utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +84,7 @@ def ip_exists(ip_value: str) -> bool:
 # ============================================
 
 def _now() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    return utc_now_str()
 
 
 def _record_change(cursor, host: str, change_type: str, summary: str, details: dict = None) -> None:
@@ -159,7 +160,7 @@ def get_changes(host: str = None, change_type: str = None, since: str = None,
 
 def prune_changes(days: int = 365) -> int:
     """Delete change history older than `days`."""
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = utc_ago(days=days)
     conn = get_db_connection()
     try:
         cursor = conn.execute('DELETE FROM asset_changes WHERE detected_at < ?', (cutoff,))
@@ -171,7 +172,7 @@ def prune_changes(days: int = 365) -> int:
 
 def prune_scan_queue(days: int = 90) -> int:
     """Delete finished queue items (completed, failed, cancelled) older than `days`."""
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    cutoff = utc_ago(days=days)
     conn = get_db_connection()
     try:
         cursor = conn.execute('''
@@ -275,7 +276,7 @@ def upsert_domain(domain_name: str, is_wildcard: int = 0, wildcard_ip: str = Non
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         
         cursor.execute("SELECT dom_id, status FROM domain_asset WHERE domain_name = ?", (domain_name,))
         result = cursor.fetchone()
@@ -316,7 +317,7 @@ def add_container_domain(domain_name: str) -> int:
             return row['dom_id']
         cursor = conn.execute('''
             INSERT INTO domain_asset (domain_name, first_seen, status, expand) VALUES (?, ?, 'up', 0)
-        ''', (domain_name, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        ''', (domain_name, utc_now_str()))
         conn.commit()
         return cursor.lastrowid
     finally:
@@ -356,7 +357,7 @@ def upsert_subdomain(subdomain_name: str, dom_id: int, status: str = 'up') -> in
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         
         cursor.execute("SELECT sub_id, status FROM subdomain_asset WHERE subdomain_name = ?", (subdomain_name,))
         result = cursor.fetchone()
@@ -401,7 +402,7 @@ def upsert_ip(ip_value: str, is_private: int = 0, is_shared: int = 0, shared_pro
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         
         cursor.execute("SELECT ip_id, status FROM ip_asset WHERE ip_value = ?", (ip_value,))
         result = cursor.fetchone()
@@ -493,7 +494,7 @@ def save_scan_hint(target: str, hint_type: str, hint_value: str, source: str = '
         cursor.execute('''
             INSERT INTO scan_hints (target, hint_type, hint_value, source, created_at)
             VALUES (?, ?, ?, ?, ?)
-        ''', (target, hint_type, hint_value, source, datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+        ''', (target, hint_type, hint_value, source, utc_now_str()))
         conn.commit()
     finally:
         conn.close()
@@ -696,7 +697,7 @@ def upsert_http_service(host: str, port_num: int,
     cursor = conn.cursor()
     
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         
         cursor.execute('''
             SELECT http_id FROM http_services 
@@ -762,7 +763,7 @@ def upsert_technology(http_id: int, tech_name: str,
     cursor = conn.cursor()
     
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         
         cursor.execute('''
             SELECT tech_id FROM technologies 
@@ -865,7 +866,7 @@ def upsert_vulnerability(tech_id: int, cve_id: str, cve_score: float = None,
     cursor = conn.cursor()
 
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
 
         cursor.execute('''
             SELECT vuln_id, status FROM vulnerabilities
@@ -942,7 +943,7 @@ def reconcile_vulnerabilities(http_id: int, seen_vuln_ids, min_cvss: float = 0.0
     cursor = conn.cursor()
 
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         cursor.execute('''
             SELECT v.vuln_id, v.match_method, v.cve_id, h.host
             FROM vulnerabilities v
@@ -1051,7 +1052,7 @@ def set_statuses(items, status: str, note: str = None) -> int:
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         updated = 0
         for kind, item_id in items:
             if kind not in setters:
@@ -1073,7 +1074,7 @@ def get_cached_cves(cpe: str, max_age_hours: int = 24) -> Optional[list]:
         if not row:
             return None
         fetched = datetime.strptime(row['fetched_at'], "%Y-%m-%d %H:%M:%S")
-        if datetime.now() - fetched > timedelta(hours=max_age_hours):
+        if utc_now() - fetched > timedelta(hours=max_age_hours):
             return None
         return json.loads(row['result_json'])
     except sqlite3.OperationalError:
@@ -1089,7 +1090,7 @@ def set_cached_cves(cpe: str, cves: list) -> None:
     try:
         conn.execute(
             'INSERT OR REPLACE INTO cve_cache (cpe, result_json, fetched_at) VALUES (?, ?, ?)',
-            (cpe, json.dumps(cves), datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+            (cpe, json.dumps(cves), utc_now_str())
         )
         conn.commit()
     except sqlite3.OperationalError:
@@ -1113,7 +1114,7 @@ def upsert_finding(finding_type: str, host: str, title: str, severity: str,
     cursor = conn.cursor()
 
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         evidence_json = json.dumps(evidence or {}, sort_keys=True)
 
         cursor.execute('''
@@ -1168,7 +1169,7 @@ def reconcile_findings(host: str, finding_types, seen_finding_ids) -> int:
     cursor = conn.cursor()
 
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         placeholders = ','.join('?' * len(types))
         cursor.execute(f'''
             SELECT finding_id, finding_type, title FROM findings
@@ -1253,7 +1254,7 @@ def upsert_cve_intel(cve_id: str, epss: dict = None, kev: dict = None,
     """
     conn = get_db_connection()
     try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now = utc_now_str()
         conn.execute('INSERT OR IGNORE INTO cve_intel (cve_id) VALUES (?)', (cve_id,))
         if update_epss:
             conn.execute('''
@@ -2386,7 +2387,7 @@ def update_domain_status(dom_id: int, status: str) -> bool:
     try:
         cursor.execute(
             "UPDATE domain_asset SET status = ?, last_seen = ? WHERE dom_id = ?",
-            (status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), dom_id)
+            (status, utc_now_str(), dom_id)
         )
         conn.commit()
         return True
@@ -2414,7 +2415,7 @@ def update_subdomain_status(sub_id: int, status: str) -> bool:
     try:
         cursor.execute(
             "UPDATE subdomain_asset SET status = ?, last_seen = ? WHERE sub_id = ?",
-            (status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), sub_id)
+            (status, utc_now_str(), sub_id)
         )
         conn.commit()
         return True
@@ -2442,7 +2443,7 @@ def update_ip_status(ip_id: int, status: str) -> bool:
     try:
         cursor.execute(
             "UPDATE ip_asset SET status = ?, last_seen = ? WHERE ip_id = ?",
-            (status, datetime.now().strftime("%Y-%m-%d %H:%M:%S"), ip_id)
+            (status, utc_now_str(), ip_id)
         )
         conn.commit()
         return True
@@ -2463,7 +2464,7 @@ def update_asset_last_scanned(asset_id: int, asset_type: str) -> None:
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     
     try:
         if asset_type == 'domain':
@@ -2514,7 +2515,7 @@ def record_served_certificate(cert: dict):
         ('changed', {'hostname', 'port', 'summary'}) when it was replaced;
         the change is also recorded in the change history.
     """
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     host, port = cert['hostname'], cert['port']
     conn = get_db_connection()
     try:
@@ -2561,7 +2562,7 @@ def record_served_certificate(cert: dict):
 def retire_served_certificates(still_served) -> int:
     """Mark certificates of services that are no longer HTTPS (or gone) as replaced."""
     keep = {(host, port) for host, port in still_served}
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     conn = get_db_connection()
     try:
         stale = [row['cert_id'] for row in conn.execute(f'SELECT cert_id, hostname, port FROM certificates WHERE {SERVED_CERT}')
@@ -2660,7 +2661,7 @@ def set_setting(key: str, value: str) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     
     cursor.execute('''
         INSERT INTO settings (key, value, updated_at)
@@ -2729,7 +2730,7 @@ def update_asset_status(asset_id: int, asset_type: str, status: str) -> bool:
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     
     if asset_type == 'domain':
         cursor.execute('''
@@ -2818,7 +2819,7 @@ def queue_subdomain_discovery(subdomain_name: str, domain_name: str):
         return
     
     # Add to scan_queue for Phase 0
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     cursor.execute('''
         INSERT OR IGNORE INTO scan_queue (scan_type, target, target_type, status, cycle, queued_at)
         VALUES (?, ?, ?, ?, ?, ?)
@@ -2842,7 +2843,7 @@ def blacklist_token(jti: str, user: str, expires_at: str) -> bool:
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     
     try:
         cursor.execute('''
@@ -2895,7 +2896,7 @@ def blacklist_all_user_tokens(user: str) -> int:
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     
     # Find all non-expired, non-blacklisted tokens for this user
     # Since we only blacklist refresh tokens, all entries belong to refresh tokens
@@ -2910,7 +2911,7 @@ def blacklist_all_user_tokens(user: str) -> int:
         INSERT OR IGNORE INTO token_blacklist (jti, user, expires_at, created_at)
         VALUES (?, ?, ?, ?)
     ''', (f'user_revoke:{user}:{now}', user, 
-          (datetime.now() + timedelta(days=7)).strftime("%Y-%m-%d %H:%M:%S"), now))
+          utc_in(days=7), now))
     
     conn.commit()
     conn.close()
@@ -2932,7 +2933,7 @@ def is_user_revoked(user: str) -> bool:
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    now = utc_now_str()
     
     cursor.execute('''
         SELECT 1 FROM token_blacklist 

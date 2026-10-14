@@ -203,7 +203,7 @@
                         <div class="text-[10px] text-slate-400 mt-0.5">${f.ports.length ? 'Port ' + escapeHtml(f.ports.join(', ')) + ' · ' : ''}<button type="button" data-filter="host" data-value="${escapeHtml(f.host)}" class="hover:text-accent hover:underline">all on host</button></div></td>
                     <td class="px-3 py-3 align-top">${riskCell(f)}</td>
                     <td class="px-3 py-3 align-top">${statusSelect(f)}</td>
-                    <td class="px-3 py-3 align-top text-[11px] text-slate-500 font-mono whitespace-nowrap">${escapeHtml((f.first_seen || '-').slice(0, 10))}</td>
+                    <td class="px-3 py-3 align-top text-[11px] text-slate-500 font-mono whitespace-nowrap">${escapeHtml(localTime(f.first_seen, 'date'))}</td>
                 </tr>`;
             }).join('');
         }

@@ -15,6 +15,7 @@ os.environ.setdefault('JWT_SECRET', 'test-jwt-secret')
 
 from modules import InitDB
 from utils import db_utils, phase3_worker, phase_lock, pipeline, worker_runtime
+from utils.timeutil import utc_ago, utc_now_str
 
 
 def wait_for(condition, timeout=10.0):
@@ -125,10 +126,10 @@ class StaleLockTests(TempDbTestCase):
         conn.close()
 
     def test_fresh_lock_is_kept_and_stale_lock_cleared(self):
-        self.set_lock(datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        self.set_lock(utc_now_str())
         self.assertTrue(phase_lock.is_phase2_running())
 
-        self.set_lock((datetime.datetime.now() - datetime.timedelta(days=2)).strftime('%Y-%m-%d %H:%M:%S'))
+        self.set_lock(utc_ago(days=2))
         self.assertFalse(phase_lock.is_phase2_running())
         self.assertEqual(phase_lock.get_current_phase(), phase_lock.PHASE_NONE)
 

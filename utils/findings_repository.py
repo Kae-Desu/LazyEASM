@@ -15,6 +15,7 @@ from typing import Optional
 
 from utils.db_utils import VULN_STATUSES, get_db_connection
 from utils.threat_intel import CVSS_HIGH, EPSS_HIGH
+from utils.timeutil import utc_ago
 
 DEFAULT_PAGE_SIZE = 25
 MAX_PAGE_SIZE = 100
@@ -173,7 +174,7 @@ def get_overview(top: int = 5) -> dict:
     """Headline numbers, riskiest assets and most widespread open issues."""
     from utils.asset_repository import ASSET_CTES
 
-    week_ago = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d %H:%M:%S')
+    week_ago = utc_ago(days=7)
     conn = get_db_connection()
     try:
         severity = {sev: 0 for sev in ('critical', 'high', 'medium', 'low')}

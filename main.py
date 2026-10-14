@@ -491,6 +491,22 @@ def health():
     }), status_code
 
 
+@app.template_filter('localtime')
+def localtime_filter(value, part: str = 'datetime'):
+    """
+    A stored UTC timestamp as <time>; static/js/app.js shows it in the viewer's
+    local time. part: 'datetime', 'date' or 'time'. Without JavaScript the
+    UTC value stays readable.
+    """
+    from markupsafe import Markup, escape
+    if not value:
+        return '-'
+    value = str(value)[:19].replace('T', ' ')
+    shown = {'date': value[:10], 'time': value[11:16]}.get(part, value[:16])
+    return Markup(f'<time datetime="{escape(value.replace(" ", "T"))}Z" data-local="{escape(part)}" '
+                  f'title="{escape(value)} UTC">{escape(shown)} UTC</time>')
+
+
 @app.context_processor
 def inject_csrf_token():
     session_token = request.cookies.get('access_token') or ''

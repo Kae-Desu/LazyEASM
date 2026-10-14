@@ -16,6 +16,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.db_utils import get_db_connection, set_setting
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,7 @@ def run_wappalyzer_scan() -> dict:
     if not hosts:
         logger.info("No hosts with HTTP services to scan")
         set_setting('last_wappalyzer_check',
-                     datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+                     utc_now_str())
         return {
             'hosts_scanned': 0,
             'technologies_found': 0,
@@ -157,7 +158,7 @@ def run_wappalyzer_scan() -> dict:
         'errors': []
     }
 
-    now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+    now_str = utc_now_str()
 
     for host_info in hosts:
         host = host_info['host']

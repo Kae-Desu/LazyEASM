@@ -325,6 +325,33 @@ async function updateStatus(url, select) {
 }
 
 // --- Formatting ---
+
+// Timestamps are stored in UTC ('YYYY-MM-DD HH:MM:SS'); show them in local time
+function localTime(timestamp, part = 'datetime') {
+    if (!timestamp || timestamp === '-') return '-';
+    const date = new Date(String(timestamp).slice(0, 19).replace(' ', 'T') + 'Z');
+    if (isNaN(date)) return timestamp;
+    const pad = n => String(n).padStart(2, '0');
+    const day = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+    const time = `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    return part === 'date' ? day : part === 'time' ? time : `${day} ${time}`;
+}
+
+// <time data-local> elements from the `localtime` template filter, also in
+// content loaded later (auto-refresh, partials)
+function localizeTimes(root = document) {
+    root.querySelectorAll('time[data-local]').forEach(el => {
+        el.textContent = localTime(el.getAttribute('datetime'), el.dataset.local);
+        el.removeAttribute('data-local');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    localizeTimes();
+    new MutationObserver(records => records.forEach(r => r.addedNodes.forEach(node => {
+        if (node.nodeType === 1) localizeTimes(node.matches('time[data-local]') ? node.parentNode : node);
+    }))).observe(document.body, { childList: true, subtree: true });
+});
 function formatRelativeTime(timestamp) {
     if (!timestamp || timestamp === '-') return '-';
     try {
@@ -332,8 +359,7 @@ function formatRelativeTime(timestamp) {
         const diffMins = Math.floor((new Date() - date) / 60000);
         const diffHours = Math.floor(diffMins / 60);
         const diffDays = Math.floor(diffHours / 24);
-        const pad = n => String(n).padStart(2, '0');
-        const formatted = `${pad(date.getDate())}-${pad(date.getMonth() + 1)}-${date.getFullYear()} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+        const formatted = localTime(timestamp);
         let relative = '';
         if (diffMins < 1) relative = 'just now';
         else if (diffMins < 60) relative = `${diffMins}m ago`;

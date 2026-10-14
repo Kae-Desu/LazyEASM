@@ -16,6 +16,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Dict, Optional
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +25,7 @@ MAX_WORKERS = 4
 
 
 def _now() -> str:
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return utc_now_str()
 
 
 def _db():

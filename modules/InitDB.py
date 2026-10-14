@@ -569,9 +569,70 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
 
+    migrate_timestamps_to_utc(cursor)
+
     conn.commit()
     conn.close()
     print("Database initialization complete.")
+
+
+# Columns that were written in the server's local time before timestamps moved
+# to UTC (utils/timeutil.py). Columns that already held UTC are not listed:
+# last_liveness_check, last_wappalyzer_scan, settings, certificate validity,
+# and columns only ever filled by SQLite's CURRENT_TIMESTAMP default.
+LOCAL_TIME_COLUMNS = {
+    'domain_asset': ('first_seen', 'last_seen', 'last_scanned', 'last_deep_scan'),
+    'subdomain_asset': ('first_seen', 'last_seen', 'last_scanned', 'last_deep_scan'),
+    'ip_asset': ('first_seen', 'last_seen', 'last_scanned'),
+    'ports': ('first_seen',),
+    'http_services': ('first_seen', 'last_seen'),
+    'technologies': ('first_seen', 'removed_at'),
+    'vulnerabilities': ('first_seen', 'last_seen', 'status_updated_at'),
+    'findings': ('first_seen', 'last_seen', 'status_updated_at'),
+    'certificates': ('first_seen', 'last_seen', 'replaced_at'),
+    'directories': ('first_seen',),
+    'cve_cache': ('fetched_at',),
+    'cve_intel': ('updated_at',),
+    'scan_hints': ('created_at',),
+    'scan_history': ('started_at', 'completed_at'),
+    'scan_queue': ('queued_at', 'started_at', 'completed_at'),
+    'scan_progress': ('started_at', 'updated_at'),
+    'phase_status': ('started_at',),
+    'asset_changes': ('detected_at',),
+    'screenshots': ('captured_at',),
+    'admin_user': ('password_changed_at',),
+}
+
+
+def migrate_timestamps_to_utc(cursor, offset_seconds: int = None) -> bool:
+    """
+    Shift timestamps written in local time to UTC, once. The marker row is
+    claimed first, so two processes starting together cannot shift twice.
+    A no-op (besides the marker) on servers running in UTC, e.g. Docker.
+
+    Returns:
+        True if this call did the migration
+    """
+    from datetime import datetime
+
+    if offset_seconds is None:
+        offset_seconds = int(datetime.now().astimezone().utcoffset().total_seconds())
+    cursor.execute("INSERT OR IGNORE INTO settings (key, value, description) VALUES "
+                   "('timestamps_in_utc', ?, 'Migration marker: seconds local timestamps were shifted by')",
+                   (str(-offset_seconds),))
+    if cursor.rowcount != 1:
+        return False
+    if offset_seconds:
+        modifier = f'{-offset_seconds:+d} seconds'
+        for table, columns in LOCAL_TIME_COLUMNS.items():
+            existing = {row[1] for row in cursor.execute(f'PRAGMA table_info({table})')}
+            for column in columns:
+                if column in existing:
+                    cursor.execute(f"""
+                        UPDATE {table} SET {column} = strftime('%Y-%m-%d %H:%M:%S', {column}, ?)
+                        WHERE {column} GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]*[0-9][0-9]:[0-9][0-9]:[0-9][0-9]*'
+                    """, (modifier,))
+    return True
 
 
 def reset_db():

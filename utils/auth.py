@@ -18,6 +18,7 @@ from datetime import datetime
 from typing import Optional
 
 from werkzeug.security import check_password_hash, generate_password_hash
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +57,7 @@ def set_admin_password(username: str, password: str) -> int:
     Returns:
         the new token_version
     """
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     conn = _db()
     try:
         conn.execute('''

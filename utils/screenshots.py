@@ -30,6 +30,7 @@ from typing import Dict, Iterable, List, Optional, Set
 from urllib.parse import urlsplit
 
 from utils.config import get_env
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +283,7 @@ def run_screenshots(hosts: List[str] = None) -> dict:
             summary['changed'].append(capture.host)
 
     if hosts is None:
-        set_setting('last_screenshot_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        set_setting('last_screenshot_check', utc_now_str())
     logger.info(f"Screenshots: {summary['captured']} captured, {summary['failed']} failed, "
                 f"{len(summary['changed'])} changed, {summary['blocked_requests']} internal requests blocked")
     return summary

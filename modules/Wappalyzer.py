@@ -56,6 +56,7 @@ from modules.CVEmatch import find_cve
 from modules.Notify import send_vulnerability_alert
 
 from utils.config import get_log_dir
+from utils.timeutil import utc_now_str
 
 LOGS_DIR = get_log_dir()
 log_file = os.path.join(LOGS_DIR, f"wappalyzer-{datetime.now().strftime('%Y-%m-%d')}.log")
@@ -354,7 +355,7 @@ class WappalyzerScanner:
             Stats dict with results grouped by asset
         """
         logger.info("Starting Wappalyzer + CVEmatch scan")
-        scan_started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        scan_started = utc_now_str()
         
         if targets is None:
             targets = get_http_targets()
@@ -385,7 +386,7 @@ class WappalyzerScanner:
             result = self.scan_target(host, ip_id, port, is_https)
             results.append(result)
         
-        scan_completed = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        scan_completed = utc_now_str()
         
         log_scan(
             'wappalyzer_cve',

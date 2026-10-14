@@ -25,6 +25,7 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import requests
 from urllib3.exceptions import InsecureRequestWarning
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -472,7 +473,7 @@ def run_misconfig_check(hosts: List[str] = None, ips: List[str] = None, max_work
         summary['closed'] += reconcile_findings(result.host, result.evaluated, seen)
 
     if full_run:
-        set_setting('last_misconfig_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        set_setting('last_misconfig_check', utc_now_str())
 
     logger.info(f"Misconfiguration check complete: {summary['hosts_checked']} targets, "
                 f"{len(summary['open_findings'])} detected, {len(summary['new_findings'])} new, "

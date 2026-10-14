@@ -15,6 +15,7 @@ import logging
 import threading
 import time
 import importlib
+from utils.timeutil import utc_ago, utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ def reset_stuck_processing_items(timeout_minutes: int = 30):
     cursor = conn.cursor()
     
     # Calculate cutoff time in Python (handles timezone correctly)
-    cutoff = (datetime.now() - timedelta(minutes=timeout_minutes)).strftime('%Y-%m-%d %H:%M:%S')
+    cutoff = utc_ago(minutes=timeout_minutes)
     
     cursor.execute('''
         UPDATE scan_queue 
@@ -98,7 +99,7 @@ def mark_queue_item_processing(queue_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     cursor.execute('''
         UPDATE scan_queue SET status = ?, started_at = ? WHERE queue_id = ?
     ''', ('processing', now, queue_id))
@@ -115,7 +116,7 @@ def mark_queue_item_completed(queue_id: int):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     cursor.execute('''
         UPDATE scan_queue SET status = ?, completed_at = ? WHERE queue_id = ?
     ''', ('completed', now, queue_id))
@@ -132,7 +133,7 @@ def mark_queue_item_failed(queue_id: int, error_message: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     cursor.execute('''
         UPDATE scan_queue SET status = ?, completed_at = ?, error_message = ? WHERE queue_id = ?
     ''', ('failed', now, error_message, queue_id))

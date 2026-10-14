@@ -104,7 +104,7 @@
             <figcaption class="px-4 py-3 text-xs space-y-1">
                 <p class="font-mono font-semibold break-all">{{ shot.url }}{% if shot.final_url and shot.final_url != shot.url %} <span class="text-slate-400">→ {{ shot.final_url }}</span>{% endif %}</p>
                 <p class="text-slate-500">{% if shot.status_code %}HTTP {{ shot.status_code }} · {% endif %}{{ shot.title or 'No title' }}</p>
-                <p class="text-slate-400">Captured {{ shot.captured_at }}{% if shot.capture_count > 1 %} · {{ shot.capture_count }} captures kept{% endif %}</p>
+                <p class="text-slate-400">Captured {{ shot.captured_at|localtime }}{% if shot.capture_count > 1 %} · {{ shot.capture_count }} captures kept{% endif %}</p>
             </figcaption>
         </figure>
         {% endfor %}
@@ -173,10 +173,10 @@
 <section id="panel-details" role="tabpanel" aria-labelledby="tab-details" class="tab-panel hidden">
     <dl class="rounded-2xl border border-border dark:border-white/10 bg-white dark:bg-dark-card divide-y divide-slate-100 dark:divide-white/5 text-sm">
         {% for label, value in [
-            ('First seen', asset.first_seen), ('Last seen', asset.last_seen),
-            ('Last scanned', asset.last_scanned), ('Last technology scan', asset.last_wappalyzer_scan),
-            ('Last deep scan', asset.last_deep_scan),
-            ('TLS certificate', (asset.certificate.not_after ~ ' (' ~ asset.certificate.days_until_expiry ~ ' days, ' ~ (asset.certificate.issuer or 'unknown issuer') ~ ')') if asset.certificate else 'None found'),
+            ('First seen', asset.first_seen|localtime), ('Last seen', asset.last_seen|localtime),
+            ('Last scanned', asset.last_scanned|localtime), ('Last technology scan', asset.last_wappalyzer_scan|localtime),
+            ('Last deep scan', asset.last_deep_scan|localtime),
+            ('TLS certificate', (asset.certificate.not_after[:10] ~ ' (' ~ asset.certificate.days_until_expiry ~ ' days, ' ~ (asset.certificate.issuer or 'unknown issuer') ~ ')') if asset.certificate else 'None found'),
         ] %}
         <div class="px-5 py-3 flex flex-wrap justify-between gap-2"><dt class="text-slate-500">{{ label }}</dt><dd class="font-mono text-right break-all">{{ value or '-' }}</dd></div>
         {% endfor %}

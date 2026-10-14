@@ -43,9 +43,9 @@
 
 <div class="bg-white dark:bg-dark-card border border-border dark:border-white/5 rounded-2xl overflow-hidden shadow-xl mt-4">
     {% for day, entries in days %}
-    <h2 class="px-6 py-2 bg-slate-50 dark:bg-lazy-dark border-b border-border dark:border-white/5 text-[10px] font-bold uppercase tracking-widest text-slate-500">{{ day }}</h2>
+    <h2 class="px-6 py-2 bg-slate-50 dark:bg-lazy-dark border-b border-border dark:border-white/5 text-[10px] font-bold uppercase tracking-widest text-slate-500">{{ day }} <span class="normal-case font-normal">(UTC)</span></h2>
     <ul class="divide-y divide-slate-100 dark:divide-white/5 border-b border-border dark:border-white/5 last:border-b-0">
-        {% for c in entries %}{{ change_item(c, time_only=True) }}{% endfor %}
+        {% for c in entries %}{{ change_item(c) }}{% endfor %}
     </ul>
     {% else %}
     <p class="px-6 py-10 text-center text-sm text-slate-400">

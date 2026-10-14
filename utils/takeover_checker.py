@@ -29,6 +29,7 @@ import requests
 import dns.resolver
 import dns.exception
 from urllib3.exceptions import InsecureRequestWarning
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -282,7 +283,7 @@ def run_takeover_check(hosts: List[str] = None, max_workers: int = 20) -> dict:
 
         result['closed'] += reconcile_findings(check.host, FINDING_TYPES, seen)
 
-    set_setting('last_takeover_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+    set_setting('last_takeover_check', utc_now_str())
 
     logger.info(
         f"Takeover check complete: {result['hosts_checked']} hosts, "

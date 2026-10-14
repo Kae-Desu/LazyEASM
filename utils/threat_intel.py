@@ -20,6 +20,7 @@ from datetime import datetime, timezone
 from typing import Dict, Iterable, List, Optional
 
 import requests
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -190,7 +191,7 @@ def refresh_threat_intel(cve_ids: Iterable[str] = None) -> dict:
                     })
 
     if cve_ids is None:
-        set_setting('last_intel_check', datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S'))
+        set_setting('last_intel_check', utc_now_str())
 
     logger.info(f"Threat intel refreshed for {len(ids)} CVEs: {result['kev_count']} in KEV, "
                 f"{len(result['newly_kev'])} newly KEV, {len(result['errors'])} errors")

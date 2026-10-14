@@ -19,6 +19,7 @@ import logging
 import tempfile
 from typing import List, Dict, Optional
 from datetime import datetime
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +232,7 @@ def save_directories(asset_id: int, host: str, port: int, directories: List[Dict
     
     http_id = result['http_id']
     saved = []
-    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    now = utc_now_str()
     
     for entry in directories:
         if isinstance(entry, dict):

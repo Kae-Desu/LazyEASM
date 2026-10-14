@@ -17,6 +17,7 @@ import threading
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from utils.db_utils import get_db_connection
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -62,11 +63,11 @@ def update_queue_status(queue_id: int, status: str, **kwargs):
     
     if status == 'processing':
         updates.append('started_at = ?')
-        values.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        values.append(utc_now_str())
     
     if status == 'completed':
         updates.append('completed_at = ?')
-        values.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        values.append(utc_now_str())
         
         if 'ports_found' in kwargs:
             updates.append('ports_found = ?')
@@ -78,7 +79,7 @@ def update_queue_status(queue_id: int, status: str, **kwargs):
     
     if status == 'failed':
         updates.append('completed_at = ?')
-        values.append(datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+        values.append(utc_now_str())
         
         if 'error_message' in kwargs:
             updates.append('error_message = ?')
@@ -214,7 +215,7 @@ def process_phase2_queue():
         update_asset_last_scan(
             target, 
             target_type, 
-            datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            utc_now_str()
         )
         
         nmap_info = ""

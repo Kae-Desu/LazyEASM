@@ -15,6 +15,7 @@ import importlib
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 from utils.db_utils import get_db_connection
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -165,7 +166,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
         try:
             conn_w = get_db_connection()
             cursor_w = conn_w.cursor()
-            now_str = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S')
+            now_str = utc_now_str()
             cursor_w.execute(
                 'UPDATE domain_asset SET last_wappalyzer_scan = ? WHERE domain_name = ?',
                 (now_str, asset_name)

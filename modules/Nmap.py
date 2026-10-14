@@ -33,6 +33,7 @@ from utils.db_utils import (
     _record_change,
     log_scan
 )
+from utils.timeutil import utc_now_str
 
 # Constants
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -355,7 +356,7 @@ class PortScanner:
         cursor = conn.cursor()
         
         saved_count = 0
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = utc_now_str()
         
         for port in ports:
             try:
@@ -414,7 +415,7 @@ class PortScanner:
         conn = get_db_connection()
         cursor = conn.cursor()
         
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        timestamp = utc_now_str()
         
         cursor.execute('''
             UPDATE ip_asset 
@@ -521,7 +522,7 @@ class PortScanner:
             'errors': []
         }
         
-        scan_started = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        scan_started = utc_now_str()
         
         # Scan each target
         for i, target in enumerate(targets, 1):
@@ -541,7 +542,7 @@ class PortScanner:
                 if result['error']:
                     stats['errors'].append(f"{ip_value}: {result['error']}")
         
-        scan_completed = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        scan_completed = utc_now_str()
         
         # Log to scan_history
         log_scan(

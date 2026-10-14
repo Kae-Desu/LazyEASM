@@ -20,7 +20,7 @@
     <div class="flex justify-between items-start gap-3 mb-2">
         <div class="flex flex-col min-w-0">
             <span class="text-sm font-bold text-slate-700 dark:text-slate-200">{{ f.title }}</span>
-            <span class="text-[10px] text-slate-400 font-mono mt-1">First seen {{ f.first_seen }} · last seen {{ f.last_seen }}</span>
+            <span class="text-[10px] text-slate-400 font-mono mt-1">First seen {{ f.first_seen|localtime('date') }} · last seen {{ f.last_seen|localtime('date') }}</span>
         </div>
         <div class="flex flex-col items-end gap-1 shrink-0">
             {{ severity_badge(f.severity) }}

@@ -23,6 +23,7 @@ import os
 import threading
 import time
 from datetime import datetime, timezone
+from utils.timeutil import utc_now_str
 
 logger = logging.getLogger(__name__)
 
@@ -147,7 +148,7 @@ def recover_interrupted_jobs() -> int:
 # ---------------------------------------------------------------------------
 
 def _now() -> str:
-    return datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    return utc_now_str()
 
 
 def _component_status() -> dict:

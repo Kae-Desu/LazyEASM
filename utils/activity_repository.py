@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 
 from utils.db_utils import get_db_connection
+from utils.timeutil import utc_now
 
 DEFAULT_PAGE_SIZE = 50
 MAX_PAGE_SIZE = 200
@@ -91,7 +92,7 @@ def list_changes(*, page=1, page_size=DEFAULT_PAGE_SIZE, query: Optional[str] = 
         params.extend(types)
     if period:
         where.append('c.detected_at >= ?')
-        params.append((datetime.now() - PERIODS[period]).strftime('%Y-%m-%d %H:%M:%S'))
+        params.append((utc_now() - PERIODS[period]).strftime('%Y-%m-%d %H:%M:%S'))
     if host:
         where.append('c.host = ?')
         params.append(host.strip().lower())
