@@ -166,9 +166,33 @@ setup_venv() {
     .venv/bin/pip install --upgrade pip --quiet
     .venv/bin/pip install -r requirements.txt --quiet
 
+    install_chromium
+}
+
+# Headless Chromium for web screenshots. The browser downloads into the
+# user's cache (no root needed); its system libraries need root once. These
+# are separate steps: `install --with-deps` without root stops at the
+# libraries and never downloads the browser.
+install_chromium() {
     echo "Installing headless Chromium for web screenshots..."
-    .venv/bin/python -m playwright install --with-deps chromium \
-        || echo "Chromium install failed; web screenshots stay disabled until it is installed."
+    if ! .venv/bin/python -m playwright install chromium; then
+        echo -e "${YELLOW}Chromium download failed; web screenshots stay disabled until it is installed.${NC}"
+        return
+    fi
+    [ "$(detect_os)" = "linux" ] || return
+    if [ "$(id -u)" -eq 0 ]; then
+        .venv/bin/python -m playwright install-deps chromium \
+            || echo -e "${YELLOW}Installing Chromium's system libraries failed; web screenshots may not work.${NC}"
+        return
+    fi
+    # Without root: only ask for the libraries if some are actually missing
+    local shell
+    shell=$(find "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" -type f -name chrome-headless-shell 2>/dev/null \
+            | sort | tail -1)
+    if [ -n "$shell" ] && ldd "$shell" 2>/dev/null | grep -q "not found"; then
+        echo -e "${YELLOW}Chromium needs system libraries that are missing. Install them once as root, then restart:${NC}"
+        echo "    sudo $SCRIPT_DIR/.venv/bin/python -m playwright install-deps chromium"
+    fi
 }
 
 start_docker() {

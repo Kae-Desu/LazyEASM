@@ -32,7 +32,7 @@ External Attack Surface Management (EASM): discover what you expose on the inter
 ```bash
 git clone https://github.com/Kae-Desu/LazyEASM.git
 cd LazyEASM
-./start.sh                    # installs Docker on Linux if missing
+./start.sh                    # installs Docker if missing (Debian/Ubuntu, run with sudo)
 ```
 
 Open **https://&lt;server&gt;:10002** (or `https://localhost:10002`). The image includes a headless browser for screenshots (about 400 MB).
@@ -42,10 +42,10 @@ Open **https://&lt;server&gt;:10002** (or `https://localhost:10002`). The image 
 ```bash
 git clone https://github.com/Kae-Desu/LazyEASM.git
 cd LazyEASM
-./start.sh --native           # installs Python, Nmap and dependencies if missing
+./start.sh --native           # installs Python, Nmap and dependencies if missing (needs sudo for that)
 ```
 
-Open **https://&lt;server&gt;:10001**.
+Open the address it prints (**https://&lt;server&gt;:10001**). It runs in the foreground: keep it running with a service manager such as systemd. Web screenshots need Chromium's system libraries; if some are missing, the script prints the one command to run as root.
 
 > **Ubuntu 23.10 or newer:** web screenshots need one extra step, because Ubuntu blocks the sandbox Chromium uses. Run once as root, replacing `lazyeasm` with the user LazyEASM runs as:
 > ```bash

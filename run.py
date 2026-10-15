@@ -53,6 +53,20 @@ def print_setup_code():
               f"[run] {line}", flush=True)
 
 
+def print_address(scheme: str):
+    """Where to open LazyEASM. In Docker the entrypoint prints the published port instead."""
+    if os.path.exists('/.dockerenv'):
+        return
+    from utils.config import get_env
+    from utils.tls import _primary_ip
+    port = get_env('PORT', '10001')
+    host = get_env('PUBLIC_IP', '') or get_env('HOST', '')
+    if host in ('', '0.0.0.0', '::'):
+        host = _primary_ip() or 'localhost'
+    host = f'[{host}]' if ':' in host else host
+    print(f"[run] Open LazyEASM at {scheme}://{host}:{port}", flush=True)
+
+
 def main() -> int:
     import logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -78,6 +92,7 @@ def main() -> int:
     except TLSConfigError as e:
         print(f"[run] HTTPS is enabled but cannot start: {e}", flush=True)
         return 1
+    print_address('https' if tls_files else 'http')
     if tls_files:
         print(f"[run] HTTPS certificate SHA-256 fingerprint: {describe(tls_files[0])['fingerprint']}", flush=True)
 
