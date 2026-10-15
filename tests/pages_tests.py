@@ -134,7 +134,7 @@ class SettingsPageTests(PagesTestCase):
 
 
 class CsrfCoverageTests(PagesTestCase):
-    EXEMPT = {'/login', '/refresh-token'}   # no session yet / token rotation
+    EXEMPT = {'/login', '/setup', '/refresh-token'}   # no session yet (setup: the setup code) / token rotation
 
     def test_every_route_that_changes_data_checks_csrf(self):
         import re

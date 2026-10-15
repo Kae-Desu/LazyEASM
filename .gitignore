@@ -114,3 +114,6 @@ db/tls/
 
 # Local database backups (utils/backup.py)
 db/backups/
+
+# One-time first-run setup code (utils/auth.py)
+db/setup_code

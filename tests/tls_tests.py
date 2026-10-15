@@ -105,6 +105,22 @@ def free_port() -> int:
 
 
 class ServeTests(TLSTestCase):
+    def setUp(self):
+        super().setUp()
+        # The served pages read the account and /setup writes the setup code
+        # next to the database: keep both out of the install the tests run on
+        import contextlib
+        import io
+        from modules import InitDB
+        from utils import db_utils
+        db_path = os.path.join(self.tmp, 'test.db')
+        for target, attr in ((InitDB, 'DB_NAME'), (db_utils, 'DB_PATH')):
+            p = patch.object(target, attr, db_path)
+            p.start()
+            self.addCleanup(p.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            InitDB.init_db()
+
     def serve(self, **env):
         import main
         self.env.update(env)

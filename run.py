@@ -38,6 +38,21 @@ def _stop(processes):
             proc.kill()
 
 
+def print_setup_code():
+    """First run: the code that creates the account in the browser."""
+    from utils.auth import ensure_setup_code
+    code = ensure_setup_code()
+    if code:
+        line = '=' * 60
+        print(f"[run] {line}\n"
+              f"[run]  First run: open LazyEASM in your browser and create your\n"
+              f"[run]  account with this one-time setup code:\n"
+              f"[run]\n"
+              f"[run]      {code}\n"
+              f"[run]\n"
+              f"[run] {line}", flush=True)
+
+
 def main() -> int:
     import logging
     logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -55,6 +70,7 @@ def main() -> int:
     init_db()
     record_schema_signature()
     bootstrap_admin_from_env()
+    print_setup_code()
 
     from utils.tls import TLSConfigError, certificate_files, describe
     try:

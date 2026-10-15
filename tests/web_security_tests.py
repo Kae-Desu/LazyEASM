@@ -1,4 +1,8 @@
+import contextlib
+import io
 import os
+import shutil
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -6,10 +10,23 @@ os.environ.setdefault('FLASK_SECRET_KEY', 'test-secret')
 os.environ.setdefault('JWT_SECRET', 'test-jwt-secret')
 
 import main
+from modules import InitDB
+from utils import db_utils
 
 
 class HttpsBehaviorTests(unittest.TestCase):
     def setUp(self):
+        # Own database: /login reads the account and /setup writes the setup
+        # code next to the database, never into the install the tests run on
+        tmp = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, tmp, True)
+        db_path = os.path.join(tmp, 'test.db')
+        for target, attr in ((InitDB, 'DB_NAME'), (db_utils, 'DB_PATH')):
+            patcher = patch.object(target, attr, db_path)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            InitDB.init_db()
         self.client = main.app.test_client()
 
     def test_plain_http_has_no_hsts_and_non_secure_cookies(self):
@@ -38,7 +55,8 @@ class HttpsBehaviorTests(unittest.TestCase):
             for base_url, exposed in (('http://203.0.113.5:10001', True), ('http://easm.example.com', True),
                                       ('http://localhost:10001', False), ('http://127.0.0.1:10001', False),
                                       ('http://[::1]:10001', False), ('https://easm.example.com', False)):
-                html = self.client.get('/login', base_url=base_url).get_data(as_text=True)
+                # Before the account exists this lands on /setup, which warns too
+                html = self.client.get('/login', base_url=base_url, follow_redirects=True).get_data(as_text=True)
                 self.assertEqual('Not encrypted.' in html, exposed, base_url)
 
     def test_behind_a_reverse_proxy(self):

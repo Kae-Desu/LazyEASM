@@ -62,9 +62,12 @@ Open **https://&lt;server&gt;:10001**.
 
 ### First login
 
-1. The installer prints the username (`lazymin`) and a generated password. **Save it**: it is stored hashed and removed from `.env` on first start. Change it in Settings > Account.
+1. On first start LazyEASM prints a **one-time setup code** (in the `./start.sh` output; later also in `./start.sh --logs` or `journalctl -u lazyeasm`).
 2. The dashboard uses a self-signed HTTPS certificate, so the browser warns once. In the warning's certificate details, check that the SHA-256 fingerprint matches the one printed when LazyEASM starts, then accept it.
-3. Add targets on the **Scans** page.
+3. The browser opens **Create your account**: enter the setup code, choose a username and password (12+ characters). The code only works once; whoever reaches a fresh install without it cannot claim it.
+4. Add targets on the **Scans** page.
+
+Lost your password? Put `ADMIN_PASS=<new password>` in `.env` and restart LazyEASM; it is stored hashed and removed from the file.
 
 | `start.sh` | |
 |---|---|
@@ -82,7 +85,7 @@ python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 python -m playwright install --with-deps chromium   # screenshots (optional)
 sudo apt install nmap                                # or: brew install nmap
-cp .env.example .env    # set ADMIN_PASS (secrets are generated on first start; TLS_MODE=self-signed is preset)
+cp .env.example .env    # secrets are generated on first start; TLS_MODE=self-signed is preset
 python run.py
 ```
 </details>

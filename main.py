@@ -297,10 +297,9 @@ def login():
             flash(f"Terlalu banyak percobaan login. Coba lagi dalam {remaining} detik.", "error")
             return redirect(url_for('login'))
         
-        if auth.get_admin() is None:
-            flash("Password admin belum diatur. Tambahkan ADMIN_PASS=... di file .env lalu restart LazyEASM.", "error")
-            return redirect(url_for('login'))
-        
+        if auth.setup_pending():
+            return redirect(url_for('setup'))
+
         admin = auth.verify_login(username, password)
         if admin:
             reset_failed_login(client_ip)
@@ -310,8 +309,46 @@ def login():
         record_failed_login(client_ip, username)
         flash("Username atau Password salah!", "error")
         return redirect(url_for('login'))
-    
+
+    if auth.setup_pending():
+        return redirect(url_for('setup'))
     return render_template('login.html')
+
+
+@app.route('/setup', methods=['GET', 'POST'])
+def setup():
+    """
+    First run: create the account in the browser. Needs the one-time setup
+    code printed at startup, so whoever reaches a fresh install first cannot
+    claim it (the code also stands in for CSRF protection: there is no
+    session yet).
+    """
+    if not auth.setup_pending():
+        return redirect(url_for('login'))
+    auth.ensure_setup_code()
+    client_ip = request.remote_addr or 'unknown'
+
+    if request.method == 'POST':
+        blocked, _, remaining = is_rate_limited(client_ip)
+        if blocked:
+            flash(f"Too many wrong setup codes. Try again in {remaining} seconds.", "error")
+            return redirect(url_for('setup'))
+        username = request.form.get('username', '')
+        error, wrong_code = auth.complete_setup(request.form.get('setup_code', ''), username,
+                                                request.form.get('password', ''), request.form.get('confirm', ''))
+        if error:
+            if wrong_code:
+                record_failed_login(client_ip, username)
+            flash(error, "error")
+            return render_template('setup.html', username=username.strip() or auth.DEFAULT_USERNAME,
+                                   min_length=auth.MIN_PASSWORD_LENGTH)
+        reset_failed_login(client_ip)
+        admin = auth.get_admin()
+        flash("Account created. Add your first targets on the Scans page.", "success")
+        return issue_session(make_response(redirect(url_for('dashboard'))), admin['username'],
+                             admin['token_version'])
+
+    return render_template('setup.html', username=auth.DEFAULT_USERNAME, min_length=auth.MIN_PASSWORD_LENGTH)
 
 
 @app.route('/logout')
@@ -1665,6 +1702,7 @@ if __name__ == '__main__':
     auth.bootstrap_admin_from_env()
 
     if get_env('LAZYEASM_ROLE', 'all') != 'web':
+        auth.ensure_setup_code()        # first run: logged here; run.py prints it otherwise
         from utils.worker_runtime import start_background_workers
         start_background_workers()
 

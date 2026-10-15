@@ -195,8 +195,31 @@ start_docker() {
 
     echo ""
     echo -e "${GREEN}LazyEASM started!${NC}"
+    show_startup_info
     echo "View logs:  ./start.sh --logs"
     echo "Stop:       ./start.sh --stop"
+}
+
+# Address, certificate fingerprint and (first run) the setup code from the
+# container's startup output
+show_startup_info() {
+    local logs=""
+    for _ in $(seq 1 45); do
+        logs=$(compose logs --no-color --no-log-prefix lazyeasm 2>/dev/null)
+        echo "$logs" | grep -q "fingerprint:\|Serving LazyEASM" && break
+        sleep 2
+    done
+    echo "$logs" | grep -E "^(Access:| {9}https?://)" | tail -2
+    echo "$logs" | grep -o "fingerprint: [0-9A-F:]*" | tail -1 | sed 's/^/HTTPS certificate SHA-256 /'
+    # db/ is mounted from here; the file exists only until the account is created
+    if [ -e "$SCRIPT_DIR/db/setup_code" ] && echo "$logs" | grep -q "one-time setup code"; then
+        local code
+        code=$(echo "$logs" | grep -A2 "one-time setup code" | grep -oE "[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}" | tail -1)
+        echo ""
+        echo -e "${YELLOW}First run: open the address above and create your account with this setup code:${NC}"
+        echo -e "    ${GREEN}${code}${NC}"
+    fi
+    echo ""
 }
 
 start_native() {

@@ -81,6 +81,68 @@ class BootstrapTests(AuthTestCase):
         self.assertIsNone(auth.get_admin())
 
 
+class SetupTests(AuthTestCase):
+    """First run: the account is created in the browser with the setup code."""
+
+    def setUp(self):
+        super().setUp()
+        self.env_file.write_text('FLASK_SECRET_KEY=x\n')            # what install.sh writes now
+        auth.bootstrap_admin_from_env()
+
+    def submit(self, code, username='operator', password='a-long-password-1', confirm=None):
+        return self.client.post('/setup', data={'setup_code': code, 'username': username, 'password': password,
+                                                'confirm': password if confirm is None else confirm})
+
+    def test_setup_code_file(self):
+        code = auth.ensure_setup_code()
+        self.assertRegex(code, r'^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$')
+        self.assertEqual(auth.ensure_setup_code(), code)              # stable across restarts
+        path = auth._setup_code_path()
+        if os.name == 'posix':
+            self.assertEqual(os.stat(path).st_mode & 0o777, 0o600)
+        auth.create_admin('lazymin', 'a-long-password-1')
+        self.assertIsNone(auth.ensure_setup_code())
+        self.assertFalse(os.path.exists(path))
+
+    def test_login_leads_to_setup_and_the_page_never_shows_the_code(self):
+        self.assertTrue(self.client.get('/login').headers['Location'].endswith('/setup'))
+        page = self.client.get('/setup').get_data(as_text=True)
+        self.assertIn('Create your account', page)
+        self.assertNotIn(auth.ensure_setup_code(), page)
+
+    def test_wrong_code_creates_nothing_and_is_rate_limited(self):
+        auth.ensure_setup_code()
+        for _ in range(self.main.MAX_LOGIN_ATTEMPTS):
+            self.assertIn('Wrong setup code', self.submit('AAAA-BBBB-CCCC').get_data(as_text=True))
+        self.assertIsNone(auth.get_admin())
+        code = auth.ensure_setup_code()
+        self.submit(code)                                             # right code, but blocked now
+        self.assertIsNone(auth.get_admin())
+
+    def test_creates_the_account_and_signs_in(self):
+        code = auth.ensure_setup_code()
+        self.assertIn('do not match', self.submit(code, confirm='something-else-1').get_data(as_text=True))
+        self.assertIn('at least 12', self.submit(code, password='short', confirm='short').get_data(as_text=True))
+        self.assertIn('Username', self.submit(code, username='bad name').get_data(as_text=True))
+        self.assertIsNone(auth.get_admin())
+
+        response = self.submit(code.lower().replace('-', ''))         # case and dashes do not matter
+        self.assertEqual(response.status_code, 302)
+        self.assertIn('access_token=', response.headers.get('Set-Cookie', ''))
+        self.assertTrue(auth.verify_login('operator', 'a-long-password-1'))
+        self.assertFalse(os.path.exists(auth._setup_code_path()))
+        self.assertTrue(self.client.get('/setup').headers['Location'].endswith('/login'))
+        self.assertIn('already exists', auth.complete_setup(code, 'other', 'another-password-1',
+                                                            'another-password-1')[0])
+        self.assertFalse(auth.create_admin('other', 'another-password-1'))   # a racing second setup
+
+    def test_password_reset_keeps_the_username_chosen_at_setup(self):
+        self.submit(auth.ensure_setup_code())
+        self.env_file.write_text(self.env_file.read_text() + 'ADMIN_PASS=recovered-password-2\n')
+        self.assertEqual(auth.bootstrap_admin_from_env(), 'reset')
+        self.assertTrue(auth.verify_login('operator', 'recovered-password-2'))
+
+
 class LoginTests(AuthTestCase):
     def login(self, username, password):
         return self.client.post('/login', data={'username': username, 'password': password})
@@ -91,8 +153,7 @@ class LoginTests(AuthTestCase):
         auth.bootstrap_admin_from_env()
         response = self.login('lazymin', '')
         self.assertNotIn('access_token=', response.headers.get('Set-Cookie', ''))
-        with self.client.session_transaction() as session:
-            self.assertIn('ADMIN_PASS', session['_flashes'][0][1])
+        self.assertTrue(response.headers['Location'].endswith('/setup'))        # no account: first-run setup
 
         # with an account, an empty password is still rejected
         self.env_file.write_text('ADMIN_PASS=generated-by-install-1\n')
