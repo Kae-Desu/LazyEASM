@@ -31,7 +31,10 @@ class AuthTestCase(unittest.TestCase):
         patcher = patch.dict(os.environ, {}, clear=False)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # The install's own .env (loaded into the environment at import) must
+        # not leak into these tests
         os.environ.pop('ADMIN_PASS', None)
+        os.environ.pop('ADMIN_USER', None)
 
         import main
         self.main = main
