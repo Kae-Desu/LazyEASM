@@ -294,7 +294,7 @@ def login():
         
         blocked, attempts, remaining = is_rate_limited(client_ip)
         if blocked:
-            flash(f"Terlalu banyak percobaan login. Coba lagi dalam {remaining} detik.", "error")
+            flash(f"Too many failed sign-in attempts. Try again in {remaining} seconds.", "error")
             return redirect(url_for('login'))
         
         if auth.setup_pending():
@@ -307,7 +307,7 @@ def login():
             return issue_session(resp, admin['username'], admin['token_version'])
         
         record_failed_login(client_ip, username)
-        flash("Username atau Password salah!", "error")
+        flash("Wrong username or password.", "error")
         return redirect(url_for('login'))
 
     if auth.setup_pending():
@@ -372,7 +372,7 @@ def logout():
     resp = make_response(redirect(url_for('login')))
     resp.set_cookie('access_token', '', expires=0, **get_secure_cookie_kwargs())
     resp.set_cookie('refresh_token', '', expires=0, **get_secure_cookie_kwargs())
-    flash("Berhasil logout.", "success")
+    flash("Signed out.", "success")
     return resp
 
 

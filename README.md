@@ -2,17 +2,6 @@
 
 External Attack Surface Management (EASM): discover what you expose on the internet, find what is vulnerable or misconfigured, and keep watching it.
 
----
-
-> **Thesis Project**
-> [Author Name]
-> [University Name]
-> [Year]
->
-> [Thesis Title/Description placeholder]
-
----
-
 ## Highlights
 
 - **Discovery** - Subdomains from certificate transparency, passive DNS sources and DNS brute force; IPs and CIDRs. A submitted domain is explored fully; a submitted subdomain is scanned on its own, so access to one host never turns into scanning a whole organization

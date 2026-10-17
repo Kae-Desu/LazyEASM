@@ -5,14 +5,14 @@ PROJECT_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 mkdir -p "$PROJECT_ROOT/static/icons"
 mkdir -p "$PROJECT_ROOT/static/images"
 
-# --- GENERATE RAHASIA UNIK ---
+# --- Unique secrets ---
 # No password here: the account is created in the browser on first run,
 # with the one-time setup code LazyEASM prints when it starts
-# Generate Secrets: 128 karakter
+# Secrets: 128 characters each
 RANDOM_JWT=$(openssl rand -base64 96 | tr -d '/+=' | head -c 128)
 RANDOM_FLASK=$(openssl rand -base64 96 | tr -d '/+=' | head -c 128)
 
-# --- SIMPAN KE .env ---
+# --- Write .env ---
 cat << EOF > "$PROJECT_ROOT/.env"
 FLASK_SECRET_KEY=$RANDOM_FLASK
 JWT_SECRET=$RANDOM_JWT
