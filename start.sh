@@ -16,20 +16,26 @@ show_help() {
     echo "Usage: ./start.sh [OPTIONS]"
     echo ""
     echo "Options:"
-    echo "  --native    Run in native mode (no Docker)"
-    echo "  --stop      Stop Docker containers"
-    echo "  --logs      Show Docker logs (follow mode)"
-    echo "  --clean     Remove Docker containers, images, and volumes"
-    echo "  --help      Show this help message"
+    echo "  --native          Run in native mode (no Docker), in the foreground"
+    echo "  --service         Native mode as a systemd service: starts at boot, restarts"
+    echo "                    on failure (run with sudo; again after git pull to upgrade)"
+    echo "  --remove-service  Stop and remove the service (keeps your data)"
+    echo "  --stop            Stop Docker containers"
+    echo "  --logs            Show Docker logs (follow mode)"
+    echo "  --clean           Remove Docker containers, images, and volumes"
+    echo "  --help            Show this help message"
     echo ""
     echo "Default: Docker mode"
     echo ""
     echo "Examples:"
-    echo "  ./start.sh              # Start in Docker"
-    echo "  ./start.sh --native     # Start in native mode"
-    echo "  ./start.sh --logs       # View Docker logs"
-    echo "  ./start.sh --stop       # Stop Docker containers"
-    echo "  ./start.sh --clean     # Remove Docker containers and images"
+    echo "  ./start.sh                  # Start in Docker"
+    echo "  sudo ./start.sh --service   # Install and start as a service"
+    echo "  ./start.sh --native         # Start in native mode (foreground)"
+    echo "  ./start.sh --logs           # View Docker logs"
+    echo "  ./start.sh --stop           # Stop Docker containers"
+    echo "  ./start.sh --clean          # Remove Docker containers and images"
+    echo ""
+    echo "Service: sudo systemctl stop|start|restart lazyeasm, logs: journalctl -u lazyeasm -f"
 }
 
 detect_os() {
@@ -189,7 +195,8 @@ install_chromium() {
     local shell
     shell=$(find "${PLAYWRIGHT_BROWSERS_PATH:-$HOME/.cache/ms-playwright}" -type f -name chrome-headless-shell 2>/dev/null \
             | sort | tail -1)
-    if [ -n "$shell" ] && ldd "$shell" 2>/dev/null | grep -q "not found"; then
+    # (--service installs them as root right after this step)
+    if [ -z "$LAZYEASM_SERVICE_SETUP" ] && [ -n "$shell" ] && ldd "$shell" 2>/dev/null | grep -q "not found"; then
         echo -e "${YELLOW}Chromium needs system libraries that are missing. Install them once as root, then restart:${NC}"
         echo "    sudo $SCRIPT_DIR/.venv/bin/python -m playwright install-deps chromium"
     fi
@@ -246,12 +253,8 @@ show_startup_info() {
     echo ""
 }
 
-start_native() {
-    if ! check_native; then
-        install_native_deps
-    fi
-
-    echo -e "${GREEN}Starting LazyEASM in native mode...${NC}"
+# .env (first run) and the virtualenv with dependencies and Chromium
+prepare_native() {
     cd "$SCRIPT_DIR"
 
     if [ ! -f "$SCRIPT_DIR/.env" ]; then
@@ -260,8 +263,165 @@ start_native() {
     fi
 
     setup_venv
+}
+
+start_native() {
+    if ! check_native; then
+        install_native_deps
+    fi
+
+    echo -e "${GREEN}Starting LazyEASM in native mode...${NC}"
+    prepare_native
 
     .venv/bin/python run.py
+}
+
+# ---------------------------------------------------------------------------
+# systemd service (--service / --remove-service)
+# ---------------------------------------------------------------------------
+
+SERVICE_NAME="${SERVICE_NAME:-lazyeasm}"
+UNIT_FILE="/etc/systemd/system/$SERVICE_NAME.service"
+
+require_systemd_root() {
+    if [ "$(detect_os)" != "linux" ] || ! command -v systemctl &> /dev/null; then
+        echo -e "${RED}--service needs Linux with systemd. Use ./start.sh (Docker) or --native instead.${NC}"
+        exit 1
+    fi
+    if [ "$(id -u)" -ne 0 ]; then
+        echo -e "${RED}Run with sudo: sudo ./start.sh $1${NC}"
+        exit 1
+    fi
+}
+
+# Run a command as the service user, with that user's home directory
+as_service_user() {
+    if [ "$RUN_USER" = "root" ]; then
+        "$@"
+    else
+        runuser -u "$RUN_USER" -- env HOME="$RUN_HOME" LAZYEASM_SERVICE_SETUP=1 "$@"
+    fi
+}
+
+# Ubuntu 23.10+ blocks the user namespaces Chromium's sandbox needs; allow
+# only the Playwright headless shell of this user (README > Quick start)
+allow_chromium_sandbox() {
+    [ "$(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null)" = "1" ] || return 0
+    command -v apparmor_parser &> /dev/null || return 0
+    local cache="$RUN_HOME/.cache/ms-playwright"
+    if grep -rqs "$cache/" /etc/apparmor.d/; then
+        return 0        # a profile for this user's Chromium already exists
+    fi
+    local profile="/etc/apparmor.d/lazyeasm-chromium-$RUN_USER"
+    cat > "$profile" << EOF
+# Written by LazyEASM start.sh --service: lets this user's Playwright
+# Chromium use the user namespaces its sandbox needs (Ubuntu 23.10+)
+abi <abi/5.0>,
+include <tunables/global>
+profile lazyeasm-chromium-$RUN_USER $cache/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+  userns,
+}
+EOF
+    if apparmor_parser -r "$profile"; then
+        echo "Allowed Chromium's sandbox in AppArmor for $RUN_USER ($profile)."
+    else
+        echo -e "${YELLOW}Could not load $profile; web screenshots may fail (README > Quick start).${NC}"
+    fi
+}
+
+install_service() {
+    require_systemd_root --service
+
+    # Run as the owner of the LazyEASM folder, not as root
+    RUN_USER=$(stat -c %U "$SCRIPT_DIR")
+    RUN_GROUP=$(id -gn "$RUN_USER")
+    RUN_HOME=$(getent passwd "$RUN_USER" | cut -d: -f6)
+    if [ "$RUN_USER" = "root" ]; then
+        echo -e "${YELLOW}The LazyEASM folder belongs to root, so the service runs as root. Better: put it in a normal user's directory and run this again there.${NC}"
+    fi
+
+    if ! check_native; then
+        install_native_deps
+    fi
+
+    echo -e "${GREEN}Preparing LazyEASM for $RUN_USER...${NC}"
+    as_service_user "$SCRIPT_DIR/start.sh" --prepare-native
+
+    echo "Installing Chromium's system libraries..."
+    "$SCRIPT_DIR/.venv/bin/python" -m playwright install-deps chromium \
+        || echo -e "${YELLOW}Installing Chromium's system libraries failed; web screenshots may not work.${NC}"
+    allow_chromium_sandbox
+
+    cat > "$UNIT_FILE" << EOF
+# Written by LazyEASM start.sh --service (run it again to update)
+[Unit]
+Description=LazyEASM (web + worker)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=$RUN_USER
+Group=$RUN_GROUP
+WorkingDirectory=$SCRIPT_DIR
+ExecStart=$SCRIPT_DIR/.venv/bin/python run.py
+Environment=PYTHONUNBUFFERED=1
+# run.py exits non-zero when the web or worker process dies
+Restart=on-failure
+RestartSec=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    local since
+    since=$(date '+%Y-%m-%d %H:%M:%S')
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME" > /dev/null 2>&1
+    systemctl restart "$SERVICE_NAME"
+    echo -e "${GREEN}LazyEASM is running as the $SERVICE_NAME service (starts at boot).${NC}"
+    show_service_info "$since"
+    echo "Logs:     journalctl -u $SERVICE_NAME -f"
+    echo "Control:  sudo systemctl stop|start|restart $SERVICE_NAME"
+    echo "Upgrade:  git pull && sudo ./start.sh --service"
+}
+
+# Address, certificate fingerprint and (first run) the setup code from this start's log
+show_service_info() {
+    local logs=""
+    for _ in $(seq 1 45); do
+        logs=$(journalctl -u "$SERVICE_NAME" --since "$1" --no-pager -o cat 2>/dev/null)
+        echo "$logs" | grep -q "fingerprint:\|Serving LazyEASM\|exited with code" && break
+        sleep 2
+    done
+    if ! systemctl is-active --quiet "$SERVICE_NAME"; then
+        echo -e "${RED}The service is not running. See: journalctl -u $SERVICE_NAME -n 50${NC}"
+        return
+    fi
+    echo "$logs" | grep -o "Open LazyEASM at .*" | tail -1
+    echo "$logs" | grep -o "fingerprint: [0-9A-F:]*" | head -1 | sed 's/^/HTTPS certificate SHA-256 /'
+    if [ -e "$SCRIPT_DIR/db/setup_code" ]; then
+        local code
+        code=$(echo "$logs" | grep -A2 "one-time setup code" | grep -oE "[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}" | tail -1)
+        echo ""
+        echo -e "${YELLOW}First run: open the address above and create your account with this setup code:${NC}"
+        echo -e "    ${GREEN}${code}${NC}"
+    fi
+    echo ""
+}
+
+remove_service() {
+    require_systemd_root --remove-service
+    if [ ! -f "$UNIT_FILE" ]; then
+        echo "No $SERVICE_NAME service installed."
+        return
+    fi
+    systemctl disable --now "$SERVICE_NAME" > /dev/null 2>&1 || true
+    rm -f "$UNIT_FILE"
+    systemctl daemon-reload
+    echo -e "${GREEN}Service $SERVICE_NAME removed. Your data (db/, .env) is kept.${NC}"
 }
 
 MODE="docker"
@@ -269,6 +429,10 @@ MODE="docker"
 for arg in "$@"; do
     case $arg in
         --native) MODE="native" ;;
+        --service) MODE="service" ;;
+        --remove-service) MODE="remove-service" ;;
+        # Internal: what --service runs as the service user
+        --prepare-native) MODE="prepare-native" ;;
         --stop)
             cd "$SCRIPT_DIR"
             compose down
@@ -302,4 +466,7 @@ done
 case $MODE in
     docker) start_docker ;;
     native) start_native ;;
+    service) install_service ;;
+    remove-service) remove_service ;;
+    prepare-native) prepare_native ;;
 esac

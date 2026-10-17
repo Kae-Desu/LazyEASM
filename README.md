@@ -31,37 +31,46 @@ Open **https://&lt;server&gt;:10002** (or `https://localhost:10002`). The image 
 ```bash
 git clone https://github.com/Kae-Desu/LazyEASM.git
 cd LazyEASM
-./start.sh --native           # installs Python, Nmap and dependencies if missing (needs sudo for that)
+sudo ./start.sh --service     # installs dependencies, runs LazyEASM as a systemd service
 ```
 
-Open the address it prints (**https://&lt;server&gt;:10001**). It runs in the foreground: keep it running with a service manager such as systemd. Web screenshots need Chromium's system libraries; if some are missing, the script prints the one command to run as root.
+Open the address it prints (**https://&lt;server&gt;:10001**). The service starts at boot, restarts if it fails, and runs as the user who owns the LazyEASM folder (clone it as a normal user, not as root). It also sets up what web screenshots need, including the AppArmor rule Ubuntu 23.10+ requires for Chromium's sandbox. To upgrade: `git pull && sudo ./start.sh --service`.
 
-> **Ubuntu 23.10 or newer:** web screenshots need one extra step, because Ubuntu blocks the sandbox Chromium uses. Run once as root, replacing `lazyeasm` with the user LazyEASM runs as:
-> ```bash
-> cat > /etc/apparmor.d/lazyeasm-chromium <<'EOF'
-> abi <abi/5.0>,
-> include <tunables/global>
-> profile lazyeasm-chromium /home/lazyeasm/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
->   userns,
-> }
-> EOF
-> apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
-> ```
-> This allows only that program; the rest of the system keeps the restriction. Docker installs do not need it.
+`./start.sh --native` runs LazyEASM in the foreground instead (until you stop it), e.g. to try it out.
+
+<details>
+<summary>Ubuntu 23.10+ with --native or a manual install: allow Chromium's sandbox</summary>
+
+Ubuntu blocks the sandbox Chromium uses, so web screenshots fail. Run once as root, replacing `lazyeasm` with the user LazyEASM runs as (`--service` does this for you):
+
+```bash
+cat > /etc/apparmor.d/lazyeasm-chromium <<'EOF'
+abi <abi/5.0>,
+include <tunables/global>
+profile lazyeasm-chromium /home/lazyeasm/.cache/ms-playwright/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell flags=(unconfined) {
+  userns,
+}
+EOF
+apparmor_parser -r /etc/apparmor.d/lazyeasm-chromium
+```
+
+This allows only that program; the rest of the system keeps the restriction. Docker installs do not need it.
+</details>
 
 ### First login
 
-1. On first start LazyEASM prints a **one-time setup code** (in the `./start.sh` output; later also in `./start.sh --logs` or `journalctl -u lazyeasm`).
+1. On first start LazyEASM prints a **one-time setup code** (in the `./start.sh` output; later also in `./start.sh --logs`, or `journalctl -u lazyeasm` for the service).
 2. The dashboard uses a self-signed HTTPS certificate, so the browser warns once. In the warning's certificate details, check that the SHA-256 fingerprint matches the one printed when LazyEASM starts, then accept it.
 3. The browser opens **Create your account**: enter the setup code, choose a username and password (12+ characters). The code only works once; whoever reaches a fresh install without it cannot claim it.
 4. Add targets on the **Scans** page.
 
-Lost your password? Put `ADMIN_PASS=<new password>` in `.env` and restart LazyEASM; it is stored hashed and removed from the file.
+Lost your password? Put `ADMIN_PASS=<new password>` in `.env` and restart LazyEASM (`sudo systemctl restart lazyeasm`, or `./start.sh` for Docker); it is stored hashed and removed from the file.
 
 | `start.sh` | |
 |---|---|
 | `./start.sh` | Start with Docker (default) |
-| `./start.sh --native` | Start without Docker |
+| `sudo ./start.sh --service` | Install or upgrade the native systemd service (`--remove-service` removes it, keeping your data) |
+| `./start.sh --native` | Start without Docker, in the foreground |
 | `./start.sh --stop` | Stop the Docker containers |
 | `./start.sh --logs` | Follow the Docker logs |
 | `./start.sh --clean` | Remove the Docker containers, images and volumes |
