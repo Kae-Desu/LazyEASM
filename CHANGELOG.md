@@ -4,6 +4,8 @@ All notable changes to LazyEASM are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html). Versions before 1.0.0 were not tagged; their dates and contents come from the commit history.
 
+## [Unreleased]
+
 ## [1.0.0] - 2026-10-25
 
 First stable release.
@@ -83,4 +85,5 @@ Initial version, released under the MIT License.
 - Dashboard with login, Discord notifications and AI explanations of CVEs.
 - Docker and native installation with `start.sh`.
 
+[Unreleased]: https://github.com/Kae-Desu/LazyEASM/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/Kae-Desu/LazyEASM/releases/tag/v1.0.0

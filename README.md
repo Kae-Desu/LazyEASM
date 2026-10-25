@@ -181,7 +181,11 @@ Full reference: [TECHNICAL.md > Configuration reference](TECHNICAL.md#configurat
 ## Documentation
 
 - [TECHNICAL.md](TECHNICAL.md) - architecture, scanning pipeline, detection details, data and retention, security design, configuration and API reference, development and testing
+- [CHANGELOG.md](CHANGELOG.md) - what changed in each version
+- [CONTRIBUTING.md](CONTRIBUTING.md) - development setup, tests, code style, proposing changes
+- [SECURITY.md](SECURITY.md) - supported versions and how to report a vulnerability privately
 - Tests: `python -m tests`
+- Demo data: `python scripts/demo_seed.py --serve` serves fictional assets and findings at http://127.0.0.1:10009, nothing is scanned
 
 ## License
 
