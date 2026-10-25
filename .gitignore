@@ -117,3 +117,6 @@ db/backups/
 
 # One-time first-run setup code (utils/auth.py)
 db/setup_code
+
+# Demo database and screenshots (scripts/demo_seed.py)
+demo/
