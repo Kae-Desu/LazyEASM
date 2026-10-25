@@ -165,7 +165,7 @@ LazyEASM is licensed under the GNU Affero General Public License v3.0 (AGPL-3.0)
 
 In short: you can use, modify and self-host LazyEASM freely. If you modify it and let other people use it over a network (for example, as a hosted service), you must make your modified source code available to those users under the same license.
 
-Releases published before this change remain available under the MIT License.
+Copies of LazyEASM obtained before the switch to the AGPL (October 2026) remain licensed under the MIT License.
 
 ## Acknowledgments
 
