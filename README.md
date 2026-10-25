@@ -1,6 +1,12 @@
 # LazyEASM
 
+[![License: AGPL-3.0](https://img.shields.io/github/license/Kae-Desu/LazyEASM)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/Kae-Desu/LazyEASM)](https://github.com/Kae-Desu/LazyEASM/releases)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](#requirements)
+
 External Attack Surface Management (EASM): discover what you expose on the internet, find what is vulnerable or misconfigured, and keep watching it.
+
+![LazyEASM: the Overview, the Findings list and an asset page (fictional demo data)](docs/images/demo.gif)
 
 ## Highlights
 
@@ -14,7 +20,27 @@ External Attack Surface Management (EASM): discover what you expose on the inter
 - **Alerts and export** - Discord, Slack, email or any webhook, including when LazyEASM itself stops scanning or its disk fills up; CSV/JSON export; optional AI explanation of each CVE (Gemini, Claude, OpenAI or a local model)
 - **Install once and forget** - Configured from the dashboard, encrypted (HTTPS) out of the box, self-updating detection data, daily backups
 
+### Screenshots
+
+| | | |
+|---|---|---|
+| [![Overview](docs/images/overview.jpg)](docs/images/overview.jpg)<br>Overview | [![Findings](docs/images/findings.jpg)](docs/images/findings.jpg)<br>Findings | [![Asset page](docs/images/asset-detail.jpg)](docs/images/asset-detail.jpg)<br>Asset page |
+| [![Assets](docs/images/assets.jpg)](docs/images/assets.jpg)<br>Assets | [![Changes](docs/images/changes.jpg)](docs/images/changes.jpg)<br>Changes | [![Settings](docs/images/settings.jpg)](docs/images/settings.jpg)<br>Settings |
+
+All screenshots show fictional demo data (`python scripts/demo_seed.py --serve` to try it, nothing is scanned).
+
+## Why LazyEASM?
+
+- **Fix what attackers actually exploit first.** Every finding gets a priority from P1 to P4: P1 means the CVE is in CISA's Known Exploited Vulnerabilities catalog, P2 that EPSS predicts exploitation is likely, so a known-exploited 7.5 comes before an unexploited 9.8.
+- **One triage list across all assets.** CVEs and security findings from every host land in one list, most urgent first, with bulk status changes; resolved issues close themselves on the next scan.
+- **Scoped scanning.** A submitted domain is explored; a submitted subdomain or IP is scanned on its own and never expands to the rest of the organization.
+- **Install once and forget.** HTTPS out of the box, a systemd service or Docker container that restarts itself, self-updating fingerprints, daily backups, alerts when LazyEASM itself stops or its disk fills up, and optional AI explanations of CVEs, including with a local model so findings never leave your network.
+
 ## Quick start
+
+### Requirements
+
+Linux (tested on Ubuntu 26.04). Docker mode: Docker with Compose v2 (`start.sh` installs both on Debian/Ubuntu); about 2.5 GB of disk for the image. Native mode: Python 3.11+ (tested with 3.11, 3.13 and 3.14) and Nmap; about 1 GB of disk. About 1 GB of RAM (measured: 200 MB idle, 650 MB at peak while scanning with screenshots). macOS and Windows with Docker Desktop are untested.
 
 ### Docker (recommended)
 
