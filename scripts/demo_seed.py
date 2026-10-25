@@ -455,7 +455,7 @@ def main():
 
     use_demo_paths(args.dir)
     seed(args.dir)
-    print(f"Demo data written to {args.dir}")
+    print(f"Demo data written to {args.dir}", flush=True)
     if not args.serve:
         return
 
@@ -463,7 +463,7 @@ def main():
     keep_heartbeat()
     import main as app_main
     from waitress import serve
-    print(f"Serving the demo at http://127.0.0.1:{DEMO_PORT}  (sign in as {user} / {password}; Ctrl+C to stop)")
+    print(f"Serving the demo at http://127.0.0.1:{DEMO_PORT}  (sign in as {user} / {password}; Ctrl+C to stop)", flush=True)
     serve(app_main.app, host='127.0.0.1', port=DEMO_PORT, threads=4)
 
 
