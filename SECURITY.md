@@ -11,19 +11,18 @@ Security fixes are released for the latest 1.0.x version. Upgrade with `git pull
 
 ## Reporting a vulnerability
 
-Please report vulnerabilities in LazyEASM privately, not in a public issue:
-
-- **GitHub private vulnerability reporting**: on the repository's **Security** tab, choose **Report a vulnerability**.
-- **Email**: security@thelazies.net
+Please report vulnerabilities in LazyEASM privately through GitHub, not in a public issue: on the repository's **Security** tab, choose **Report a vulnerability** ([direct link](https://github.com/Kae-Desu/LazyEASM/security/advisories/new)). The report stays private between you and the maintainers until a fix is released.
 
 Include the affected version or commit, how to reproduce the issue, and its impact. If you have a fix in mind, describe it in the report rather than opening a public pull request.
+
+Fixed vulnerabilities are published as [GitHub security advisories](https://github.com/Kae-Desu/LazyEASM/security/advisories), with a CVE requested through GitHub where appropriate.
 
 ## What to expect
 
 - An acknowledgement within **3 business days**.
 - An initial assessment (confirmed or not, severity) within **10 business days**.
 - A fix or mitigation as soon as possible, depending on severity; you will be kept informed of progress.
-- Credit in the release notes and `CHANGELOG.md` if you wish, once a fix is released.
+- Credit in the security advisory and `CHANGELOG.md` if you wish, once a fix is released.
 
 Please give us a reasonable time to release a fix before disclosing the issue publicly.
 
