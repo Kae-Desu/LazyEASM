@@ -20,6 +20,11 @@
             <span class="px-2 py-1 rounded font-bold uppercase border {% if asset.status == 'up' %}bg-emerald-500/10 text-emerald-500 border-emerald-500/20{% else %}bg-amber-500/10 text-amber-500 border-amber-500/20{% endif %}">{{ asset.status or 'unknown' }}</span>
             {% if open_kev %}<span class="px-2 py-1 rounded font-bold uppercase bg-red-600 text-white">KEV {{ open_kev|length }}</span>{% endif %}
             {% if asset.root_domain and asset.root_domain != asset.name %}<span class="text-slate-500">in {{ asset.root_domain }}</span>{% endif %}
+            {% for name in asset_groups %}<span class="px-2 py-1 rounded font-semibold bg-accent/10 text-accent"><i class="fas fa-folder mr-1" aria-hidden="true"></i>{{ name }}</span>{% endfor %}
+            {% if asset_groups|length > 1 %}
+            <span class="px-2 py-1 rounded font-semibold bg-amber-500/10 text-amber-600 border border-amber-500/20"
+                  title="This asset matches more than one group, so it shows up for each of them (and Purge group deletes it)."><i class="fas fa-triangle-exclamation mr-1" aria-hidden="true"></i>In {{ asset_groups|length }} groups</span>
+            {% endif %}
         </div>
     </div>
     <div class="flex flex-wrap gap-2">

@@ -23,6 +23,7 @@ only, not the hostnames.
 
 import json
 import logging
+import os
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
@@ -170,7 +171,23 @@ def delete_asset(asset_type: str, asset_id: int) -> Optional[Dict[str, int]]:
 
         files += _delete_host_data(conn, hosts, counts)
         if sub_ids:
+            containers = [r[0] for r in conn.execute(
+                f'SELECT DISTINCT dom_id FROM subdomain_asset WHERE sub_id IN ({_placeholders(sub_ids)}) '
+                f'AND dom_id IS NOT NULL', sub_ids)]
             conn.execute(f'DELETE FROM subdomain_asset WHERE sub_id IN ({_placeholders(sub_ids)})', sub_ids)
+            # A domain kept only to hold single submitted subdomains (expand = 0)
+            # goes with its last one: its name is the client's data too
+            for dom_id in containers:
+                if dom_id in dom_ids:
+                    continue
+                row = conn.execute('SELECT domain_name, expand FROM domain_asset WHERE dom_id = ?', (dom_id,)).fetchone()
+                if row and not row['expand'] and not conn.execute(
+                        'SELECT 1 FROM subdomain_asset WHERE dom_id = ?', (dom_id,)).fetchone():
+                    _delete_host_data(conn, [row['domain_name']], counts)
+                    dom_ids.append(dom_id)
+                    hosts.append(row['domain_name'])
+                    candidate_ips |= {r[0] for r in conn.execute(
+                        'SELECT ip_id FROM domain_ip WHERE dom_id = ?', (dom_id,))}
         if dom_ids:
             conn.execute(f'DELETE FROM domain_asset WHERE dom_id IN ({_placeholders(dom_ids)})', dom_ids)
         counts['hosts'] = len(hosts)
@@ -200,3 +217,90 @@ def delete_asset(asset_type: str, asset_id: int) -> Optional[Dict[str, int]]:
         remove_screenshot_file(name)
     logger.info(f"Deleted a {asset_type} asset: " + ', '.join(f'{v} {k}' for k, v in counts.items() if v))
     return counts
+
+
+# ---------------------------------------------------------------------------
+# Purge a named group (utils/groups.py): delete a whole client at once
+# ---------------------------------------------------------------------------
+
+def group_assets(group_id: int) -> Optional[dict]:
+    """
+    What purging the group deletes.
+
+    Returns:
+        {'name', 'domains': [(id, name, subdomain count)], 'subdomains': [(id, name)],
+         'ips': [(id, value)], 'hostnames': int, 'shared': [(host, [group names])]}
+        or None if the group does not exist.
+
+        Subdomains under a listed domain are left out (deleting the domain
+        takes them with it). IPs the deleted hostnames point to are not
+        listed either: deleting the hostnames removes them unless another
+        asset still uses them. 'ips' are the group's other IPs (submitted on
+        their own or inside its ranges), deleted outright.
+    """
+    from utils.db_utils import get_db_connection
+    from utils.groups import Inventory
+
+    conn = get_db_connection()
+    try:
+        inventory = Inventory(conn)
+        if group_id not in inventory.names:
+            return None
+        members = inventory.named[group_id]
+        hosts = inventory.hosts_for(members['domain'], members['cidr'])
+        domain_names = sorted(d for d in inventory.domains if d in hosts)
+        under = lambda name: any(name == d or name.endswith('.' + d) for d in domain_names)
+        domains = [(inventory.domains[d], d, sum(1 for s in inventory.subdomains if s.endswith('.' + d)))
+                   for d in domain_names]
+        subdomains = [(r['sub_id'], r['subdomain_name']) for r in conn.execute(
+            'SELECT sub_id, subdomain_name FROM subdomain_asset ORDER BY subdomain_name')
+            if r['subdomain_name'].lower() in hosts and not under(r['subdomain_name'].lower())]
+        hostnames = {h for h in inventory.hostnames if h in hosts}
+        linked = {ip for name in hostnames for ip in inventory.links.get(name, ())}
+        ips = [(r['ip_id'], r['ip_value']) for r in conn.execute('SELECT ip_id, ip_value FROM ip_asset ORDER BY ip_value')
+               if r['ip_value'] in hosts and r['ip_value'] not in linked]
+        shared = []
+        for host in sorted(hostnames) + [value for _, value in ips]:
+            names = inventory.groups_of(host)
+            if len(names) > 1:
+                shared.append((host, names))
+        return {'name': inventory.names[group_id], 'domains': domains, 'subdomains': subdomains, 'ips': ips,
+                'hostnames': len(hostnames), 'shared': shared}
+    finally:
+        conn.close()
+
+
+def purge_group(group_id: int, delete_backups: bool = False) -> Optional[Dict[str, int]]:
+    """
+    Delete every asset of the group (and everything recorded about them),
+    then the group. With delete_backups, every local backup is deleted (they
+    are snapshots of the whole database, so they still hold the group) and a
+    fresh one is taken.
+
+    Returns:
+        summed counts plus 'backups_deleted', or None if the group does not exist
+    """
+    from utils import backup, groups
+
+    plan = group_assets(group_id)
+    if plan is None:
+        return None
+    totals: Dict[str, int] = {}
+    for asset_type, items in (('domain', plan['domains']), ('subdomain', plan['subdomains']), ('ip', plan['ips'])):
+        for item in items:
+            removed = delete_asset(asset_type, item[0])        # None: already gone with a domain
+            for key, value in (removed or {}).items():
+                totals[key] = totals.get(key, 0) + value
+    groups.delete_group(group_id)
+
+    totals['backups_deleted'] = 0
+    if delete_backups:
+        for item in backup.list_backups():
+            try:
+                os.remove(os.path.join(backup.BACKUP_DIR, item['name']))
+                totals['backups_deleted'] += 1
+            except OSError as e:
+                logger.warning(f"Could not delete a backup during a group purge: {e}")
+        backup.create_backup('manual')
+    logger.info("Purged a group: " + ', '.join(f'{v} {k}' for k, v in totals.items() if v))
+    return totals

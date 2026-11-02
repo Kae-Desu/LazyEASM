@@ -729,6 +729,60 @@ def assign_to_group():
     return _group_action(action)
 
 
+@app.route('/groups/<int:group_id>/purge', methods=['GET'])
+@token_required
+def purge_group_page(group_id):
+    """What purging the group deletes, export links, and the confirmation form."""
+    from utils import asset_deletion, backup
+
+    plan = asset_deletion.group_assets(group_id)
+    if plan is None:
+        flash('Group not found.', 'error')
+        return redirect(url_for('groups_page'))
+    return render_template('purge_group.html', group_id=group_id, plan=plan, backup_count=len(backup.list_backups()))
+
+
+@app.route('/groups/<int:group_id>/purge', methods=['POST'])
+@token_required
+@csrf_protected
+def purge_group(group_id):
+    """
+    Delete a whole group (e.g. a client after an engagement): every asset and
+    everything recorded about it, then the group. Asks for the password, like
+    the backup download.
+    """
+    from utils import asset_deletion, groups
+
+    plan = asset_deletion.group_assets(group_id)
+    if plan is None:
+        flash('Group not found.', 'error')
+        return redirect(url_for('groups_page'))
+    client_ip = request.remote_addr or 'unknown'
+    blocked, _, remaining = is_rate_limited(client_ip)
+    if blocked:
+        flash(f"Too many failed attempts. Try again in {remaining} seconds.", "error")
+        return redirect(url_for('purge_group_page', group_id=group_id))
+    admin = auth.get_admin()
+    if not admin or not auth.verify_login(admin['username'], request.form.get('password', '')):
+        record_failed_login(client_ip, admin['username'] if admin else '')
+        flash('Password is incorrect; nothing was deleted.', 'error')
+        return redirect(url_for('purge_group_page', group_id=group_id))
+    reset_failed_login(client_ip)
+
+    removed = asset_deletion.purge_group(group_id, delete_backups=request.form.get('delete_backups') == '1')
+    if removed is None:
+        flash('Group not found.', 'error')
+        return redirect(url_for('groups_page'))
+    note = (f" {removed['backups_deleted']} backups deleted and a fresh one taken."
+            if request.form.get('delete_backups') == '1' else ' Existing backups still contain it.')
+    flash(f'Group "{plan["name"]}" purged: {removed.get("hosts", 0)} hostnames and {removed.get("ips", 0)} IPs '
+          f'with all their data deleted.{note}', 'success')
+    response = make_response(redirect(url_for('groups_page')))
+    if request.cookies.get(GROUP_COOKIE) == f'g:{group_id}':
+        response.set_cookie(GROUP_COOKIE, groups.ALL, max_age=365 * 24 * 3600, **get_secure_cookie_kwargs())
+    return response
+
+
 @app.route('/groups/<int:group_id>/members/remove', methods=['POST'])
 @token_required
 @csrf_protected
@@ -816,9 +870,13 @@ def scans_page():
                  'interval': interval_value(key, default, low, high),
                  'last': get_setting(last_key.get(name, f'last_{name}_check')) or ''}
                 for name, label, key, default, unit, low, high in SCHEDULE]
+    from utils import groups
+    current = selected_group()
     return render_template('scans.html', active_page='scans', result=result, filters=filters,
                            queue_status=task_queue.get_status(), worker=get_worker_status(),
-                           phase3=get_phase3_status(), monitors=monitors)
+                           phase3=get_phase3_status(), monitors=monitors,
+                           named_groups=groups.list_named_groups(),
+                           target_group=current[2:] if current.startswith('g:') else '')
 
 
 @app.route('/scans/queue')
@@ -842,7 +900,9 @@ def asset_detail_page(asset_type, asset_id):
     if not asset:
         flash("Asset not found.", "error")
         return redirect(url_for('assets_page'))
-    return render_template('asset_detail.html', active_page='assets', asset=asset)
+    from utils import groups
+    return render_template('asset_detail.html', active_page='assets', asset=asset,
+                           asset_groups=groups.groups_of_host(asset['name']))
 
 
 @app.route('/screenshots/<int:screenshot_id>/<kind>')
@@ -1494,8 +1554,23 @@ def process_assets():
     
     # Discovery runs in the worker process
     enqueue_input_discovery(targets)
-    
-    flash('Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.' + invalid_note, 'success')
+
+    # New targets join the chosen named group; what discovery finds under a
+    # domain or inside a range follows automatically
+    group_note = ''
+    group_id = (request.form.get('group_id') or '').strip()
+    if group_id.isdigit():
+        from utils import groups
+        try:
+            for kind, key in (('domain', 'domains'), ('domain', 'subdomains'), ('cidr', 'ips'), ('cidr', 'cidrs')):
+                for value in targets.get(key, []):
+                    groups.add_member(int(group_id), kind, value)
+            group_note = f' Added to the group "{groups.label(f"g:{group_id}")}".'
+        except groups.GroupError as e:
+            group_note = f' Not added to a group: {e}.'
+
+    flash('Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.'
+          + group_note + invalid_note, 'success')
     return redirect(url_for('scans_page'))
 
 

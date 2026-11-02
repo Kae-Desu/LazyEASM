@@ -1,0 +1,70 @@
+{% extends 'base.html' %}
+{% block title %}Purge group{% endblock %}
+
+{% block content %}
+{% set key = 'g:' ~ group_id %}
+{% set asset_count = plan.hostnames + plan.ips|length %}
+<a href="/groups" class="text-xs text-slate-500 hover:text-accent"><i class="fas fa-arrow-left mr-1"></i>Groups</a>
+<h1 class="text-2xl font-bold mt-2 mb-2 dark:text-white"><i class="fas fa-dumpster-fire mr-2 text-red-500"></i>Purge {{ plan.name }}</h1>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-3xl">
+    Deletes every asset of this group and everything recorded about it (web services, CVEs, findings, screenshots,
+    certificates, history and jobs), then the group itself. Deleted data is overwritten in the database file.
+    Use this after an engagement. It cannot be undone.
+</p>
+
+<div class="grid lg:grid-cols-2 gap-6">
+    <section class="bg-white dark:bg-dark-card rounded-2xl border border-border dark:border-white/5 p-5">
+        <h2 class="font-bold dark:text-white mb-3">What is deleted ({{ plan.hostnames }} hostnames, {{ plan.ips|length }} other IPs)</h2>
+        {% if plan.domains %}
+        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-3 mb-1">Domains</p>
+        <ul class="text-sm font-mono dark:text-slate-200 max-h-48 overflow-y-auto">
+            {% for _, name, subs in plan.domains %}<li>{{ name }} <span class="font-sans text-xs text-slate-500">{% if subs %}and its {{ subs }} subdomain{{ 's' if subs != 1 }}{% endif %}</span></li>{% endfor %}
+        </ul>
+        {% endif %}
+        {% for title, items in [('Subdomains', plan.subdomains), ("Other IPs (submitted on their own or inside the group's ranges)", plan.ips)] %}
+        {% if items %}
+        <p class="text-[10px] font-bold uppercase tracking-wider text-slate-400 mt-3 mb-1">{{ title }}</p>
+        <ul class="text-sm font-mono dark:text-slate-200 max-h-48 overflow-y-auto">{% for item in items %}<li>{{ item[1] }}</li>{% endfor %}</ul>
+        {% endif %}
+        {% endfor %}
+        {% if plan.hostnames %}<p class="text-xs text-slate-500 mt-3">IPs these hostnames point to are deleted too, unless another asset still uses them.</p>{% endif %}
+        {% if not asset_count %}<p class="text-sm text-slate-500">No assets: only the group is removed.</p>{% endif %}
+
+        {% if plan.shared %}
+        <div class="mt-4 p-3 rounded-xl border border-amber-500/30 bg-amber-500/10 text-xs text-amber-800 dark:text-amber-300">
+            <p class="font-bold mb-1"><i class="fas fa-triangle-exclamation mr-1"></i>Also in other groups, deleted for them too:</p>
+            <ul class="font-mono">{% for host, names in plan.shared %}<li>{{ host }} <span class="font-sans">({{ names|join(', ') }})</span></li>{% endfor %}</ul>
+            <p class="mt-1">To keep one, remove the matching domain or range from this group first.</p>
+        </div>
+        {% endif %}
+    </section>
+
+    <section class="bg-white dark:bg-dark-card rounded-2xl border border-border dark:border-white/5 p-5 space-y-4">
+        <div>
+            <h2 class="font-bold dark:text-white mb-2">1. Export what the report needs</h2>
+            <div class="flex flex-wrap gap-2 text-xs font-bold">
+                {% for href, label in [('/api/export/findings.csv', 'Findings CSV'), ('/api/export/findings.json', 'Findings JSON'), ('/api/export/assets.csv', 'Assets CSV'), ('/api/export/assets.json', 'Assets JSON')] %}
+                <a href="{{ href }}?group={{ key | urlencode }}" class="px-3 py-2 rounded-xl border border-border dark:border-white/10 hover:text-accent"><i class="fas fa-download mr-1"></i>{{ label }}</a>
+                {% endfor %}
+            </div>
+        </div>
+
+        <form action="/groups/{{ group_id }}/purge" method="POST" class="space-y-3">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <h2 class="font-bold dark:text-white">2. Delete</h2>
+            <label class="flex items-start gap-2 cursor-pointer text-sm">
+                <input type="checkbox" name="delete_backups" value="1" checked class="mt-1 w-4 h-4 accent-[#CC9ACC]">
+                <span class="dark:text-slate-200">Also delete the {{ backup_count }} existing backups and take a fresh one.
+                    <span class="block text-xs text-slate-500">Backups are copies of the whole database, so they still contain this group (and every other one). Copies you made elsewhere are not touched.</span></span>
+            </label>
+            <div>
+                <label for="purge-password" class="text-xs font-bold text-slate-500 uppercase tracking-wider">Your password</label>
+                <input id="purge-password" type="password" name="password" required autocomplete="current-password"
+                       class="w-full mt-1 bg-slate-50 dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-3 py-2 text-sm dark:text-white">
+            </div>
+            <button type="submit" class="w-full font-bold py-2.5 rounded-xl bg-red-600 text-white hover:bg-red-700"><i class="fas fa-trash-alt mr-2"></i>Purge {{ plan.name }}</button>
+            <p class="text-xs text-slate-500">Log files (<span class="font-mono">logs/</span>) and the service journal also mention hostnames; rotate or delete them separately if your contract requires it.</p>
+        </form>
+    </section>
+</div>
+{% endblock %}

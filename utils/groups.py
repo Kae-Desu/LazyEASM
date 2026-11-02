@@ -255,6 +255,15 @@ class Inventory:
         return found
 
 
+def groups_of_host(host: str) -> List[str]:
+    """Names of the groups a hostname or IP is in (more than one: shared between groups)."""
+    conn = _db()
+    try:
+        return Inventory(conn).groups_of(host)
+    finally:
+        conn.close()
+
+
 def is_valid_key(key: str, inventory: Inventory = None) -> bool:
     if key in (ALL, UNGROUPED):
         return True

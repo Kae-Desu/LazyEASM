@@ -43,6 +43,7 @@
         </form>
         <span class="text-xs text-slate-400">{{ counts.get(g.key, 0) }} assets</span>
         <a href="/groups/select?group={{ g.key | urlencode }}&next=/assets" class="text-xs font-bold text-accent hover:underline">Show</a>
+        <a href="/groups/{{ g.group_id }}/purge" class="text-xs font-bold text-red-500 hover:underline" title="Delete every asset of this group and all their data">Purge&hellip;</a>
         <form action="/groups/{{ g.group_id }}/delete" method="POST" onsubmit="return confirm(this.dataset.confirm)"
               data-confirm="Remove the group {{ g.name }}? Its assets are kept and show under their root domains again.">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

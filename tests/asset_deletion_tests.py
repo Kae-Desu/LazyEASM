@@ -193,6 +193,26 @@ class DeleteSubdomainAndIpTests(DeletionTestCase):
         self.assertEqual(self.rows_mentioning('192.0.2.9'), [])
         self.assertFalse(os.path.exists(os.path.join(self.shot_dir, '192-0-2-9.jpg')))
 
+    def test_last_subdomain_takes_its_container_domain(self):
+        # Submitting shop.example.net alone creates a non-expanded example.net to hold it
+        conn = db_utils.get_db_connection()
+        try:
+            conn.execute("INSERT INTO domain_asset (domain_name, expand) VALUES ('example.net', 0)")
+            dom_id = conn.execute("SELECT dom_id FROM domain_asset WHERE domain_name = 'example.net'").fetchone()[0]
+            conn.execute("INSERT INTO subdomain_asset (dom_id, subdomain_name) VALUES (?, 'shop.example.net')", (dom_id,))
+            conn.execute("INSERT INTO subdomain_asset (dom_id, subdomain_name) VALUES (?, 'api.example.net')", (dom_id,))
+            conn.commit()
+            shop, api = [r[0] for r in conn.execute(
+                "SELECT sub_id FROM subdomain_asset WHERE subdomain_name IN ('shop.example.net', 'api.example.net') "
+                "ORDER BY subdomain_name DESC")]
+        finally:
+            conn.close()
+        asset_deletion.delete_asset('subdomain', shop)
+        self.assertTrue(self.rows_mentioning('example.net'))                # api.example.net still uses it
+        asset_deletion.delete_asset('subdomain', api)
+        self.assertEqual(self.rows_mentioning('example.net'), [])
+        self.assertTrue(self.count('SELECT COUNT(*) FROM domain_asset WHERE domain_name = ?', ('example.org',)))
+
     def test_missing_asset_and_bad_type(self):
         self.assertIsNone(asset_deletion.delete_asset('subdomain', 999999))
         with self.assertRaises(ValueError):

@@ -180,7 +180,7 @@ class FilteredPagesTests(GroupsTestCase):
         self.assertEqual(hosts(db_utils.get_findings_for_export(group=corp)), ['203.0.113.40', 'www.example.com'])
 
 
-class RouteTests(GroupsTestCase):
+class RouteTestCase(GroupsTestCase):
     def setUp(self):
         super().setUp()
         import main
@@ -194,6 +194,8 @@ class RouteTests(GroupsTestCase):
     def post(self, path, **data):
         return self.client.post(path, data={'csrf_token': self.csrf, **data})
 
+
+class RouteTests(RouteTestCase):
     def test_switcher_choice_filters_pages_api_and_exports(self):
         response = self.client.get('/groups/select?group=d:example.org&next=/findings')
         self.assertEqual(response.headers['Location'], '/findings')
@@ -233,6 +235,64 @@ class RouteTests(GroupsTestCase):
         self.post(f'/groups/{gid}/delete')
         self.assertNotIn(gid, [g['group_id'] for g in groups.list_named_groups()])
         self.assertEqual(self.client.post(f'/groups/{self.corp}/delete').status_code, 403)   # CSRF required
+
+
+class ClientSeparationTests(RouteTestCase):
+    def test_new_targets_join_the_chosen_group(self):
+        with patch('utils.phase_lock.is_phase2_running', return_value=False):
+            self.post('/process_assets', group_id=str(self.corp),
+                      asset_input='example.edu\nshop.example.net\n203.0.113.99\n198.51.100.0/28')
+        corp = next(g for g in groups.list_named_groups() if g['group_id'] == self.corp)
+        self.assertEqual(corp['domains'], ['example.com', 'example.edu', 'shop.example.net'])
+        self.assertEqual(corp['cidrs'], ['198.51.100.0/28', '203.0.113.32/27', '203.0.113.99/32'])
+
+    def test_asset_page_shows_groups_and_overlaps(self):
+        other = groups.create_group('Small block')
+        groups.add_member(other, 'cidr', '203.0.113.32/28')
+        conn = db_utils.get_db_connection()
+        try:
+            ip_id = conn.execute("SELECT ip_id FROM ip_asset WHERE ip_value = '203.0.113.40'").fetchone()[0]
+        finally:
+            conn.close()
+        page = self.client.get(f'/assets/ip/{ip_id}').get_data(as_text=True)
+        self.assertIn('Example Corp', page)
+        self.assertIn('In 2 groups', page)
+
+    def test_purge_deletes_the_group_and_only_its_assets(self):
+        from utils import asset_deletion, backup
+        plan = asset_deletion.group_assets(self.corp)
+        self.assertEqual([d[1:] for d in plan['domains']], [('example.com', 1)])   # with www
+        self.assertEqual(plan['subdomains'], [])                                 # www goes with example.com
+        self.assertEqual(plan['hostnames'], 2)
+        # 203.0.113.10 goes with www.example.com (only it uses it); 203.0.113.40 is in the group's range
+        self.assertEqual([n for _, n in plan['ips']], ['203.0.113.40'])
+
+        backup_dir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, backup_dir, True)
+        old = os.path.join(backup_dir, 'lazyeasm-20261101-000000-daily.db')
+        open(old, 'wb').close()
+        with patch.object(backup, 'BACKUP_DIR', backup_dir):
+            self.assertIn('Purge Example Corp', self.client.get(f'/groups/{self.corp}/purge').get_data(as_text=True))
+            self.post(f'/groups/{self.corp}/purge', password='wrong-password', delete_backups='1')
+            self.assertTrue(groups.is_valid_key(f'g:{self.corp}'))           # wrong password: nothing deleted
+            self.assertTrue(os.path.exists(old))
+
+            response = self.post(f'/groups/{self.corp}/purge', password='correct-horse-battery', delete_backups='1')
+            self.assertEqual(response.status_code, 302)
+            self.assertFalse(os.path.exists(old))
+            self.assertEqual(len(backup.list_backups()), 1)                  # the fresh one
+        self.assertFalse(groups.is_valid_key(f'g:{self.corp}'))
+        remaining = {a['name'] for a in asset_repository.export_assets()}
+        self.assertFalse(remaining & {'example.com', 'www.example.com', '203.0.113.40'})
+        self.assertTrue({'example.org', 'blog.example.org', '192.0.2.5'} <= remaining)
+        conn = db_utils.get_db_connection()
+        try:
+            ips = {r[0] for r in conn.execute('SELECT ip_value FROM ip_asset')}
+        finally:
+            conn.close()
+        self.assertNotIn('203.0.113.10', ips)          # only www.example.com used it
+        self.assertIn('198.51.100.23', ips)            # the CDN address blog.example.org still uses
+        self.assertEqual(self.client.post(f'/groups/{self.corp}/purge').status_code, 403)   # CSRF required
 
 
 if __name__ == '__main__':
