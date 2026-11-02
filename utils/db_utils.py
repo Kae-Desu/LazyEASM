@@ -128,8 +128,9 @@ def record_change(host: str, change_type: str, summary: str, details: dict = Non
 
 
 def get_changes(host: str = None, change_type: str = None, since: str = None,
-                limit: int = 100, offset: int = 0) -> list:
-    """Most recent changes first, optionally filtered."""
+                limit: int = 100, offset: int = 0, group: str = None) -> list:
+    """Most recent changes first, optionally filtered (group: see utils/groups.py)."""
+    from utils import groups
     where, params = [], []
     if host:
         where.append('host = ?')
@@ -140,12 +141,14 @@ def get_changes(host: str = None, change_type: str = None, since: str = None,
     if since:
         where.append('detected_at >= ?')
         params.append(since)
-    query = 'SELECT * FROM asset_changes'
-    if where:
-        query += ' WHERE ' + ' AND '.join(where)
-    query += ' ORDER BY detected_at DESC, change_id DESC LIMIT ? OFFSET ?'
     conn = get_db_connection()
     try:
+        if groups.bind(conn, group):
+            where.append(groups.in_group('host'))
+        query = 'SELECT * FROM asset_changes'
+        if where:
+            query += ' WHERE ' + ' AND '.join(where)
+        query += ' ORDER BY detected_at DESC, change_id DESC LIMIT ? OFFSET ?'
         rows = []
         for row in conn.execute(query, params + [limit, offset]):
             item = dict(row)
@@ -1408,16 +1411,23 @@ def _cvss_severity(score) -> str:
     return 'low' if score > 0 else 'none'
 
 
-def get_findings_for_export(status: str = None) -> list:
+def get_findings_for_export(status: str = None, group: str = None) -> list:
     """
     CVE findings (one row per host, port and CVE) and security findings in
-    one list, sorted by host. status filters on open/fixed/accepted/false_positive.
+    one list, sorted by host. status filters on open/fixed/accepted/false_positive;
+    group limits it to one group (utils/groups.py).
     """
+    from utils import groups
     from utils.threat_intel import compute_priority
 
     conn = get_db_connection()
     try:
         params = [status] if status else []
+        grouped = groups.bind(conn, group)
+        cve_where = ' AND '.join(filter(None, ['v.status = ?' if status else '',
+                                               groups.in_group('h.host') if grouped else '']))
+        finding_where = ' AND '.join(filter(None, ['status = ?' if status else '',
+                                                   groups.in_group('host') if grouped else '']))
         rows = []
         cves = conn.execute(f'''
             SELECT h.host, h.port_num, t.tech_name, t.tech_version, v.cve_id, v.cve_score,
@@ -1427,7 +1437,7 @@ def get_findings_for_export(status: str = None) -> list:
             INNER JOIN technologies t ON t.tech_id = v.tech_id
             INNER JOIN http_services h ON h.http_id = t.http_id
             LEFT JOIN cve_intel ci ON ci.cve_id = v.cve_id
-            {'WHERE v.status = ?' if status else ''}
+            {'WHERE ' + cve_where if cve_where else ''}
         ''', params).fetchall()
         for r in cves:
             tech = f"{r['tech_name']} {r['tech_version']}".strip() if r['tech_version'] else r['tech_name']
@@ -1453,7 +1463,7 @@ def get_findings_for_export(status: str = None) -> list:
 
         findings = conn.execute(f'''
             SELECT host, finding_type, title, severity, evidence, status, status_note, first_seen, last_seen
-            FROM findings {'WHERE status = ?' if status else ''}
+            FROM findings {'WHERE ' + finding_where if finding_where else ''}
         ''', params).fetchall()
         for r in findings:
             try:

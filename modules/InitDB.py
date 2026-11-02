@@ -569,6 +569,25 @@ def init_db():
     ''')
     cursor.execute('CREATE INDEX IF NOT EXISTS idx_blacklist_expires ON token_blacklist(expires_at)')
 
+    # Named asset groups (utils/groups.py): root domains and CIDRs as entered;
+    # every root domain not in a named group is a group of its own
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS asset_groups (
+            group_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            created_at TEXT
+        )
+    ''')
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS asset_group_members (
+            group_id INTEGER NOT NULL,
+            kind TEXT NOT NULL CHECK (kind IN ('domain', 'cidr')),
+            value TEXT NOT NULL,
+            PRIMARY KEY (group_id, kind, value),
+            FOREIGN KEY(group_id) REFERENCES asset_groups(group_id) ON DELETE CASCADE
+        )
+    ''')
+
     migrate_timestamps_to_utc(cursor)
 
     # Technologies renamed in the fingerprints that replaced python-Wappalyzer's

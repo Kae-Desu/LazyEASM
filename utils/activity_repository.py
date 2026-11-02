@@ -5,6 +5,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Optional
 
+from utils import groups
 from utils.db_utils import get_db_connection
 from utils.timeutil import utc_now
 
@@ -72,7 +73,7 @@ def _pagination(page: int, page_size: int, total: int) -> dict:
 
 def list_changes(*, page=1, page_size=DEFAULT_PAGE_SIZE, query: Optional[str] = None,
                  host: Optional[str] = None, category: Optional[str] = None,
-                 period: Optional[str] = None) -> dict:
+                 period: Optional[str] = None, group: Optional[str] = None) -> dict:
     """
     One page of the change history, newest first.
 
@@ -100,10 +101,12 @@ def list_changes(*, page=1, page_size=DEFAULT_PAGE_SIZE, query: Optional[str] = 
         pattern = f"%{query.strip().lower()}%"
         where.append('(LOWER(c.host) LIKE ? OR LOWER(c.summary) LIKE ?)')
         params.extend([pattern, pattern])
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
 
     conn = get_db_connection()
     try:
+        if groups.bind(conn, group):
+            where.append(groups.in_group('c.host'))
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ''
         total = conn.execute(f'SELECT COUNT(*) FROM asset_changes c {where_sql}', params).fetchone()[0]
         rows = conn.execute(f'''
             SELECT c.change_id, c.host, c.change_type, c.summary, c.details, c.detected_at, {ASSET_COLUMNS}
@@ -154,8 +157,13 @@ def _duration(started_at: Optional[str], completed_at: Optional[str]) -> Optiona
 
 
 def list_scans(*, page=1, page_size=DEFAULT_PAGE_SIZE, kind: Optional[str] = None,
-               status: Optional[str] = None, query: Optional[str] = None) -> dict:
-    """One page of the scan queue (every queue), active items first, then newest."""
+               status: Optional[str] = None, query: Optional[str] = None, group: Optional[str] = None) -> dict:
+    """
+    One page of the scan queue (every queue), active items first, then newest.
+
+    With a group, only jobs for its hosts (dashboard submissions naming one of
+    them included); the active counts stay global, since the worker is shared.
+    """
     page = _page_number(page, 1, 'page')
     page_size = min(_page_number(page_size, DEFAULT_PAGE_SIZE, 'page_size'), MAX_PAGE_SIZE)
     if kind and kind not in SCAN_KINDS:
@@ -175,10 +183,13 @@ def list_scans(*, page=1, page_size=DEFAULT_PAGE_SIZE, kind: Optional[str] = Non
     if query and query.strip():
         where.append('LOWER(q.target) LIKE ?')
         params.append(f"%{query.strip().lower()}%")
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
 
     conn = get_db_connection()
     try:
+        if groups.bind(conn, group):
+            where.append(f"({groups.in_group('q.target')} OR (json_valid(q.target) AND EXISTS ("
+                         f"SELECT 1 FROM json_tree(q.target) jt WHERE jt.type = 'text' AND {groups.in_group('jt.atom')})))")
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ''
         total = conn.execute(f'SELECT COUNT(*) FROM scan_queue q {where_sql}', params).fetchone()[0]
         counts = {row[0]: row[1] for row in conn.execute(
             "SELECT status, COUNT(*) FROM scan_queue WHERE status IN ('pending', 'running', 'processing') GROUP BY status")}

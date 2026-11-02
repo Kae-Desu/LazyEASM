@@ -9,6 +9,7 @@ import math
 import os
 from typing import Iterable, Optional
 
+from utils import groups
 from utils.db_utils import (
     _get_cert_expiry,
     _get_cves_for_host,
@@ -244,8 +245,9 @@ def list_assets(
     scan_state: Optional[str] = None,
     sort: str = "name",
     order: str = "asc",
+    group: Optional[str] = None,
 ) -> dict:
-    """Return one page of lightweight asset summaries."""
+    """Return one page of lightweight asset summaries (group: see utils/groups.py)."""
     page = _positive_int(page, 1, "page")
     page_size = min(_positive_int(page_size, DEFAULT_PAGE_SIZE, "page_size"), MAX_PAGE_SIZE)
     types = _normalize_types(asset_types)
@@ -308,9 +310,11 @@ def list_assets(
         where.append("phase2_status = ?")
         params.append(scan_state)
 
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ""
     conn = get_db_connection()
     try:
+        if groups.bind(conn, group):
+            where.append(groups.in_group("name"))
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ""
         cursor = conn.cursor()
         cursor.execute(f"{ASSET_CTES} SELECT COUNT(*) AS total FROM enriched {where_sql}", params)
         total = cursor.fetchone()["total"]
@@ -350,12 +354,13 @@ def _serialize_summary(row: dict) -> dict:
     return row
 
 
-def export_assets() -> list:
-    """Every asset summary (same fields as list_assets), for CSV/JSON export."""
+def export_assets(group: Optional[str] = None) -> list:
+    """Every asset summary (same fields as list_assets) of the group, for CSV/JSON export."""
     conn = get_db_connection()
     try:
+        where = f"WHERE {groups.in_group('name')}" if groups.bind(conn, group) else ""
         cursor = conn.cursor()
-        cursor.execute(f"{ASSET_CTES} SELECT * FROM enriched ORDER BY type ASC, name ASC")
+        cursor.execute(f"{ASSET_CTES} SELECT * FROM enriched {where} ORDER BY type ASC, name ASC")
         return [_serialize_summary(dict(row)) for row in cursor.fetchall()]
     finally:
         conn.close()

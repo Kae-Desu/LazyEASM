@@ -13,6 +13,7 @@ import math
 from datetime import datetime, timedelta
 from typing import Optional
 
+from utils import groups
 from utils.db_utils import VULN_STATUSES, get_db_connection
 from utils.threat_intel import CVSS_HIGH, EPSS_HIGH
 from utils.timeutil import utc_ago
@@ -106,9 +107,9 @@ def _serialize(row: dict) -> dict:
 def list_findings(*, page=1, page_size=DEFAULT_PAGE_SIZE, query: Optional[str] = None,
                   kind: Optional[str] = None, severity: Optional[str] = None,
                   status: Optional[str] = 'open', kev_only=False, identifier: Optional[str] = None,
-                  host: Optional[str] = None, sort: str = 'urgency') -> dict:
+                  host: Optional[str] = None, sort: str = 'urgency', group: Optional[str] = None) -> dict:
     """
-    One page of findings across all assets.
+    One page of findings across all assets (or one group, see utils/groups.py).
 
     status: open (default), fixed, accepted, false_positive, or 'all'
     """
@@ -147,10 +148,12 @@ def list_findings(*, page=1, page_size=DEFAULT_PAGE_SIZE, query: Optional[str] =
         pattern = f"%{query.strip().lower()}%"
         where.append('(LOWER(host) LIKE ? OR LOWER(identifier) LIKE ? OR LOWER(title) LIKE ?)')
         params.extend([pattern, pattern, pattern])
-    where_sql = f"WHERE {' AND '.join(where)}" if where else ''
 
     conn = get_db_connection()
     try:
+        if groups.bind(conn, group):
+            where.append(groups.in_group('host'))
+        where_sql = f"WHERE {' AND '.join(where)}" if where else ''
         total = conn.execute(f"{ISSUES_CTE} SELECT COUNT(*) FROM issues {where_sql}", params).fetchone()[0]
         rows = conn.execute(
             f"{ISSUES_CTE} SELECT * FROM issues {where_sql} ORDER BY {SORTS[sort]}, kind ASC, id ASC LIMIT ? OFFSET ?",
@@ -170,15 +173,19 @@ def list_findings(*, page=1, page_size=DEFAULT_PAGE_SIZE, query: Optional[str] =
     }
 
 
-def get_overview(top: int = 5) -> dict:
-    """Headline numbers, riskiest assets and most widespread open issues."""
+def get_overview(top: int = 5, group: Optional[str] = None) -> dict:
+    """Headline numbers, riskiest assets and most widespread open issues (of a group, see utils/groups.py)."""
     from utils.asset_repository import ASSET_CTES
 
     week_ago = utc_ago(days=7)
     conn = get_db_connection()
     try:
+        grouped = groups.bind(conn, group)
+        issue_filter = f" AND {groups.in_group('host')}" if grouped else ''
+        asset_filter = f" AND {groups.in_group('name')}" if grouped else ''
+        change_filter = f" AND {groups.in_group('host')}" if grouped else ''
         severity = {sev: 0 for sev in ('critical', 'high', 'medium', 'low')}
-        for row in conn.execute(f"{ISSUES_CTE} SELECT severity, COUNT(*) FROM issues WHERE status = 'open' GROUP BY severity"):
+        for row in conn.execute(f"{ISSUES_CTE} SELECT severity, COUNT(*) FROM issues WHERE status = 'open'{issue_filter} GROUP BY severity"):
             key = row[0] if row[0] in severity else 'low'
             severity[key] += row[1]
 
@@ -188,7 +195,7 @@ def get_overview(top: int = 5) -> dict:
                    COUNT(DISTINCT CASE WHEN in_kev = 1 THEN host END) AS kev_hosts,
                    COALESCE(SUM(urgency = 1), 0) AS urgent,
                    COALESCE(SUM(first_seen >= ?), 0) AS new_this_week
-            FROM issues WHERE status = 'open'
+            FROM issues WHERE status = 'open'{issue_filter}
         ''', (week_ago,)).fetchone()
 
         assets = conn.execute(f'''{ASSET_CTES}
@@ -198,14 +205,14 @@ def get_overview(top: int = 5) -> dict:
                    COALESCE(SUM(first_seen >= ?), 0) AS new_this_week,
                    COALESCE(SUM(certificate_state = 'expired'), 0) AS certs_expired,
                    COALESCE(SUM(certificate_state = 'expiring'), 0) AS certs_expiring
-            FROM enriched
+            FROM enriched WHERE 1 = 1{asset_filter}
         ''', (week_ago,)).fetchone()
 
         riskiest = [dict(row) for row in conn.execute(f'''{ASSET_CTES}
             SELECT type, id, name, status, kev_count, max_cvss, finding_count, max_finding_severity,
                    vulnerability_count, screenshot_id
             FROM enriched
-            WHERE vulnerability_count > 0 OR finding_count > 0
+            WHERE (vulnerability_count > 0 OR finding_count > 0){asset_filter}
             ORDER BY kev_count DESC, max_cvss DESC, finding_count DESC, name ASC
             LIMIT ?
         ''', (top,))]
@@ -213,12 +220,12 @@ def get_overview(top: int = 5) -> dict:
         widespread = [dict(row) for row in conn.execute(f'''{ISSUES_CTE}
             SELECT kind, identifier, MIN(title) AS title, MIN(urgency) AS urgency, MIN(severity_rank) AS severity_rank,
                    MAX(in_kev) AS in_kev, COUNT(DISTINCT host) AS host_count
-            FROM issues WHERE status = 'open'
+            FROM issues WHERE status = 'open'{issue_filter}
             GROUP BY kind, identifier
             ORDER BY urgency ASC, host_count DESC, severity_rank ASC, identifier ASC
             LIMIT ?
         ''', (top,))]
-        changes_this_week = conn.execute('SELECT COUNT(*) FROM asset_changes WHERE detected_at >= ?',
+        changes_this_week = conn.execute(f'SELECT COUNT(*) FROM asset_changes WHERE detected_at >= ?{change_filter}',
                                          (week_ago,)).fetchone()[0]
     finally:
         conn.close()
