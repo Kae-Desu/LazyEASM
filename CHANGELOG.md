@@ -6,13 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
-### Fixed
+### Added
 
-- Deleting an asset left most of its data behind: web services, CVEs, screenshots (including image files), findings, certificates, change history and jobs are keyed by hostname and stayed in the database, and deleting a domain kept its subdomains. Delete now removes everything recorded about the asset and the IPs only it used, and overwrites the deleted content so it cannot be recovered from the database file.
+- **Asset groups**: a switcher to view one client, brand or engagement at a time. Every root domain is a group of its own; named groups combine domains, IPs and CIDR ranges. Every page, count and export follows the selected group, and export file names carry the group name. Targets added on the Scans page can join a group; asset pages show their groups and warn about overlaps.
+- **Purge group**: delete a whole client after an engagement, with its exports offered first, password confirmation, and the option to replace existing backups with a fresh one.
 
 ### Changed
 
 - AI explanations of CVEs are written in English (they were in Indonesian). Existing explanations stay as they are until regenerated.
+
+### Fixed
+
+- Deleting an asset left most of its data behind: web services, CVEs, screenshots (including image files), findings, certificates, change history and jobs are keyed by hostname and stayed in the database, and deleting a domain kept its subdomains. Delete now removes everything recorded about the asset and the IPs only it used, and overwrites the deleted content so it cannot be recovered from the database file.
 
 ## [1.0.0] - 2026-10-25
 

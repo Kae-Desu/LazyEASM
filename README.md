@@ -16,6 +16,7 @@ External Attack Surface Management (EASM): discover what you expose on the inter
 - **Security findings** - Exposed `.git`/`.env` and similar files, weak TLS, missing security headers, internet-exposed databases and admin services, subdomain takeovers, and hostnames pointing at servers that no longer serve them
 - **Continuous monitoring** - Up/down, new subdomains, certificate expiry and replacement, technology changes, page appearance changes (screenshots), all recorded in a change history
 - **Web screenshots** - Every web service captured in an isolated headless browser, so login portals, default pages and parked domains stand out
+- **Groups** - View one client, brand or engagement at a time: every root domain is a group on its own, or combine domains and IP ranges into named groups; exports per group, and one action to purge a client after an engagement
 - **Triage** - One findings list across all assets, most urgent first; mark findings fixed, accepted or false positive in bulk; resolved findings close themselves on rescan
 - **Alerts and export** - Discord, Slack, email or any webhook, including when LazyEASM itself stops scanning or its disk fills up; CSV/JSON export; optional AI explanation of each CVE (Gemini, Claude, OpenAI or a local model)
 - **Install once and forget** - Configured from the dashboard, encrypted (HTTPS) out of the box, self-updating detection data, daily backups
@@ -127,6 +128,10 @@ python run.py
 
 **What gets scanned**: a domain you submit (`example.com`) is explored: its subdomains are found, scanned and monitored. A subdomain or IP you submit is scanned on its own; to explore its whole domain, use *Expand* on its page or submit the domain. Only scan what you are authorized to test.
 
+**Groups**: the switcher at the bottom of the sidebar shows one group at a time; every page, export and count follows it. Every root domain is a group of its own; in **Manage groups** you combine domains, IPs and CIDR ranges into named groups (e.g. one per client). A domain includes everything under it, a range includes the IPs inside it, and IPs your hostnames point to join their group (CDN addresses excepted). Targets added on the Scans page can go straight into a group.
+
+**After an engagement**: in **Manage groups**, *Purge* the client's group. It offers the group's exports first, asks for your password, deletes every asset of the group and everything recorded about it, and can replace the existing backups (which still contain the client) with a fresh one. Log files and the service journal still mention hostnames: rotate or delete them if your contract requires it.
+
 **Priorities**: P1 = known to be exploited in the wild (CISA KEV), P2 = likely to be exploited soon (EPSS >= 10%), P3 = high CVSS (>= 7.0) without an exploitation signal, P4 = everything else.
 
 ## HTTPS
@@ -177,7 +182,7 @@ Full reference: [TECHNICAL.md > Configuration reference](TECHNICAL.md#configurat
 - Certificate transparency lookups use CertSpotter's free quota (set `CERTSPOTTER_API_KEY` for more) and crt.sh as a fallback, which is often overloaded; discovery continues with the other sources.
 - Times are stored in UTC and shown in your browser's time zone.
 - After logout a session token stays valid for up to 15 minutes; changing the password ends every session at once.
-- Deleting an asset removes everything recorded about it (for a domain, also its subdomains), so it cannot be recovered from the database. Backups made before still contain it: after an engagement, also delete `db/backups/` or the whole install.
+- Deleting an asset removes everything recorded about it (for a domain, also its subdomains), so it cannot be recovered from the database. Backups made before still contain it; *Purge* on a group can replace them.
 
 ## Documentation
 

@@ -185,6 +185,19 @@ Intervals, the minimum CVSS and the system alerts are edited in Settings > Sched
 
 ---
 
+## Asset groups (`utils/groups.py`)
+
+Groups filter the one shared database; the worker and threat intelligence serve every group.
+
+- **Automatic groups**: every root domain in `domain_asset` (also non-expanded containers of single submitted subdomains) not covered by a named group.
+- **Named groups** (`asset_groups`, `asset_group_members`): domains and CIDRs as entered. A domain member matches the name and every hostname under it; a CIDR member matches the IPs inside it (containment, so ranges may overlap). IPs linked to the group's hostnames (`domain_ip`, `subdomain_ip`) join it unless `ip_asset.is_shared` (CDN/shared hosting). Hosts in no group are *Ungrouped*.
+- **Keys**: `all`, `ungrouped`, `g:<group_id>`, `d:<root domain>`. The switcher stores the key in the `lazyeasm_group` cookie (HttpOnly); `?group=` overrides it. Unknown or deleted keys mean all assets.
+- **Filtering**: `bind(conn, key)` resolves the group to its hostnames and IPs once per request and loads them into `temp.group_hosts`; the asset, findings, Overview, change and scan queries add `LOWER(host) IN (SELECT host FROM temp.group_hosts)`. Scan jobs also match dashboard submissions naming a group host (`json_tree`). Worker and queue counts stay global.
+- **Submissions** (`/process_assets`, `group_id`): domains and single subdomains become domain members, IPs and CIDRs range members.
+- **Purge** (`utils/asset_deletion.purge_group`): deletes the group's domains (with their subdomains), its other subdomains and the IPs submitted on their own or inside its ranges through the complete asset delete, then the group. IPs the deleted hostnames pointed to go only when no remaining asset uses them. Optionally deletes every local backup and takes a fresh one. Password required (login rate limit); the log records counts only.
+
+---
+
 ## Data, storage and retention
 
 SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
@@ -203,6 +216,7 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 | `scan_queue`, `scan_history`, `scan_progress`, `phase_status`, `scan_hints` | Jobs and scan bookkeeping |
 | `settings` | Dashboard settings, check intervals, last runs, heartbeat, migration markers |
 | `admin_user`, `token_blacklist` | Admin account (scrypt hash, token version), revoked refresh tokens |
+| `asset_groups`, `asset_group_members` | Named groups and their domains and CIDRs |
 
 - **Timestamps** are UTC (`YYYY-MM-DD HH:MM:SS`, `utils/timeutil.py`); the browser shows them in local time (`<time>` elements via the `localtime` template filter and `static/js/app.js`). Installs that stored local time were converted once by the server's UTC offset (marker `timestamps_in_utc`).
 - **Retention**: change history 365 days; finished queue items 90 days; screenshots 5 per service; replaced certificates expired more than 90 days; backups per [Backups](#backups-internals); expired blacklisted tokens are removed as new ones are added.
@@ -314,6 +328,7 @@ All routes need a logged-in session (JWT cookie) unless noted. "CSRF" routes als
 | `/settings` | Settings |
 | `/login`, `/logout` | Login (no session needed), logout |
 | `/setup` | First run only: create the account with the setup code |
+| `/groups`, `/groups/<id>/purge` | Manage groups; purge confirmation |
 
 ### Authentication and health
 
@@ -335,6 +350,10 @@ All routes need a logged-in session (JWT cookie) unless noted. "CSRF" routes als
 | `/api/domains/<id>/expand` | POST | CSRF | Expand a container domain (queues discovery, `202`) |
 | `/process_assets` | POST | CSRF | Submit targets (form field `asset_input`) |
 | `/delete_asset/<type>/<id>` | DELETE | CSRF | Delete an asset and everything recorded about it; returns counts of what was removed |
+| `/groups/select` | GET | Session | Switcher: `group`, `next` (same-site path); sets the `lazyeasm_group` cookie |
+| `/groups/create`, `/groups/<id>/rename`, `/groups/<id>/delete` | POST | CSRF | Named groups (deleting keeps the assets) |
+| `/groups/<id>/members/add`, `/groups/<id>/members/remove`, `/groups/assign` | POST | CSRF | Domains, IPs and CIDRs of a group |
+| `/groups/<id>/purge` | POST | CSRF + password | Delete every asset of the group, then the group (`delete_backups=1`: replace the backups) |
 | `/api/changes` | GET | Session | Change history: `host`, `type`, `since`, `limit` (max 500), `offset` |
 | `/api/export/<assets\|findings>.<csv\|json>` | GET | Session | Export; findings accept `status`. CSV cells starting with a formula character are neutralized |
 | `/screenshots/<id>/<full\|thumb>` | GET | Session | Screenshot image |
