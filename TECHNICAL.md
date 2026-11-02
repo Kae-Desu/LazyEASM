@@ -207,6 +207,7 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 - **Timestamps** are UTC (`YYYY-MM-DD HH:MM:SS`, `utils/timeutil.py`); the browser shows them in local time (`<time>` elements via the `localtime` template filter and `static/js/app.js`). Installs that stored local time were converted once by the server's UTC offset (marker `timestamps_in_utc`).
 - **Retention**: change history 365 days; finished queue items 90 days; screenshots 5 per service; replaced certificates expired more than 90 days; backups per [Backups](#backups-internals); expired blacklisted tokens are removed as new ones are added.
 - Other folders: `db/screenshots/`, `db/fingerprints/` (downloaded fingerprint data), `db/tls/` (generated certificate and key), `db/backups/`, `logs/` (`LAZYEASM_LOG_DIR` overrides).
+- **Deleting an asset** (`utils/asset_deletion.py`) removes everything recorded about it, in one transaction. Most of it is keyed by hostname rather than linked to the asset row, so each hostname's web services, technologies, CVEs, directories, screenshots (rows and files), findings, certificates and expiry notices, change history, jobs (including dashboard submissions naming it), scan hints and unserved-hostname strikes are deleted explicitly. A domain takes its subdomains with it, also ones an earlier delete left without a domain. IPs no remaining asset points to are deleted with their ports and IP-keyed data; deleting an IP keeps the web services of hostnames that pointed to it. `PRAGMA secure_delete` overwrites the deleted content and the WAL is checkpointed, so it cannot be read back from the database file; backups made earlier and log files still contain it. The log line records counts, not hostnames.
 
 ---
 
@@ -333,7 +334,7 @@ All routes need a logged-in session (JWT cookie) unless noted. "CSRF" routes als
 | `/api/vulnerabilities/<id>/status`, `/api/findings/<id>/status` | POST | CSRF | Status of one CVE (all ports on that host) or finding |
 | `/api/domains/<id>/expand` | POST | CSRF | Expand a container domain (queues discovery, `202`) |
 | `/process_assets` | POST | CSRF | Submit targets (form field `asset_input`) |
-| `/delete_asset/<type>/<id>` | DELETE | CSRF | Delete an asset |
+| `/delete_asset/<type>/<id>` | DELETE | CSRF | Delete an asset and everything recorded about it; returns counts of what was removed |
 | `/api/changes` | GET | Session | Change history: `host`, `type`, `since`, `limit` (max 500), `offset` |
 | `/api/export/<assets\|findings>.<csv\|json>` | GET | Session | Export; findings accept `status`. CSV cells starting with a formula character are neutralized |
 | `/screenshots/<id>/<full\|thumb>` | GET | Session | Screenshot image |

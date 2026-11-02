@@ -113,8 +113,10 @@ function openConfirmModal(type, extraData = null) {
         delete: {
             icon: 'fa-trash-alt', color: 'bg-red-500/10 text-red-500',
             btn: 'text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10',
-            title: 'Remove Asset?',
-            desc: `Remove ${name} from LazyEASM?`,
+            title: 'Delete Asset?',
+            desc: `Delete ${name} and everything recorded about it: web services, CVEs, findings, screenshots, `
+                + `certificates and history${extraData && extraData.type === 'domain' ? ', including all its subdomains' : ''}. `
+                + `IPs no other asset uses are removed too. This cannot be undone; backups made before now still contain it.`,
             action: () => {
                 fetch(`/delete_asset/${encodeURIComponent(extraData.type)}/${encodeURIComponent(extraData.id)}`, { method: 'DELETE', headers: csrfHeaders() })
                     .then(res => res.json())

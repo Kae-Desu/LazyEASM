@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Fixed
+
+- Deleting an asset left most of its data behind: web services, CVEs, screenshots (including image files), findings, certificates, change history and jobs are keyed by hostname and stayed in the database, and deleting a domain kept its subdomains. Delete now removes everything recorded about the asset and the IPs only it used, and overwrites the deleted content so it cannot be recovered from the database file.
+
 ### Changed
 
 - AI explanations of CVEs are written in English (they were in Indonesian). Existing explanations stay as they are until regenerated.

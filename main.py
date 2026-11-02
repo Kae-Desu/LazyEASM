@@ -932,29 +932,19 @@ def api_asset_detail(asset_type, asset_id):
 @token_required
 @csrf_protected
 def delete_asset(asset_type, asset_id):
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    
+    """The asset and everything recorded about it (see utils/asset_deletion.py)."""
+    from utils.asset_deletion import ASSET_TYPES, delete_asset as delete_everything
+
+    if asset_type not in ASSET_TYPES:
+        return jsonify({'success': False, 'error': 'Invalid asset type'}), 400
     try:
-        if asset_type == 'domain':
-            cursor.execute('DELETE FROM domain_asset WHERE dom_id = ?', (asset_id,))
-            cursor.execute('DELETE FROM domain_ip WHERE dom_id = ?', (asset_id,))
-        elif asset_type == 'subdomain':
-            cursor.execute('DELETE FROM subdomain_asset WHERE sub_id = ?', (asset_id,))
-            cursor.execute('DELETE FROM subdomain_ip WHERE sub_id = ?', (asset_id,))
-        elif asset_type == 'ip':
-            cursor.execute('DELETE FROM ip_asset WHERE ip_id = ?', (asset_id,))
-            cursor.execute('DELETE FROM domain_ip WHERE ip_id = ?', (asset_id,))
-            cursor.execute('DELETE FROM subdomain_ip WHERE ip_id = ?', (asset_id,))
-        else:
-            return jsonify({'success': False, 'error': 'Invalid asset type'}), 400
-        
-        conn.commit()
-        return jsonify({'success': True})
+        removed = delete_everything(asset_type, asset_id)
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)}), 500
-    finally:
-        conn.close()
+        logger.error(f"Asset deletion failed: {e}")
+        return jsonify({'success': False, 'error': 'Delete failed; nothing was removed'}), 500
+    if removed is None:
+        return jsonify({'success': False, 'error': 'Asset not found'}), 404
+    return jsonify({'success': True, 'removed': removed})
 
 
 @app.route('/save_scanning_settings', methods=['POST'])

@@ -177,6 +177,7 @@ Full reference: [TECHNICAL.md > Configuration reference](TECHNICAL.md#configurat
 - Certificate transparency lookups use CertSpotter's free quota (set `CERTSPOTTER_API_KEY` for more) and crt.sh as a fallback, which is often overloaded; discovery continues with the other sources.
 - Times are stored in UTC and shown in your browser's time zone.
 - After logout a session token stays valid for up to 15 minutes; changing the password ends every session at once.
+- Deleting an asset removes everything recorded about it (for a domain, also its subdomains), so it cannot be recovered from the database. Backups made before still contain it: after an engagement, also delete `db/backups/` or the whole install.
 
 ## Documentation
 
