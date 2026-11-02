@@ -293,7 +293,7 @@ Every configured notification channel receives every alert.
 | OpenAI | `openai` | none, set `AI_MODEL` | `OPENAI_API_KEY` |
 | OpenAI-compatible | `openai_compatible` | none, set `AI_MODEL` | `AI_BASE_URL` (e.g. `http://localhost:11434/v1` for Ollama) |
 
-The prompt includes the CVE (ID, CVSS, description), the technology and version, the hostname and port, and the other technologies on that port; use `openai_compatible` with a local model if that data must not leave your network. The answer is in Indonesian: a one-sentence explanation (*APA INI?*), three main risks (*3 RISIKO UTAMA*) and three patch steps (*PANDUAN PATCH*). API errors (quota, unavailable) are shown, not hidden.
+The prompt includes the CVE (ID, CVSS, description), the technology and version, the hostname and port, and the other technologies on that port; use `openai_compatible` with a local model if that data must not leave your network. The answer is in English: a one-sentence explanation (*What is it?*), the top three risks and three patch steps (*Patch guide*), the first naming the version to upgrade to. API errors (quota, unavailable) are shown, not hidden.
 
 ---
 

@@ -44,7 +44,7 @@ class AIError(Exception):
 
 def get_cvss_severity(score):
     if score is None:
-        return "Tidak tersedia"
+        return "Not available"
     if score >= 9.0:
         return "Critical"
     elif score >= 7.0:
@@ -230,66 +230,66 @@ def build_prompt(cve_id: str, cve_score, cve_description: str,
                  tech_name: str, tech_version: str, asset_name: str,
                  port, is_https, tech_stack: list) -> str:
     severity = get_cvss_severity(cve_score)
-    score_display = f"{cve_score} ({severity})" if cve_score is not None else "Tidak tersedia"
+    score_display = f"{cve_score} ({severity})" if cve_score is not None else "Not available"
     tech_display = f"{tech_name} {tech_version}" if tech_version else tech_name
 
-    port_display = str(port) if port else "tidak diketahui"
+    port_display = str(port) if port else "unknown"
     protocol = "HTTPS" if is_https else "HTTP"
     port_info = f"{port_display} ({protocol})"
 
     stack_info = format_tech_stack(tech_stack, tech_name)
     if stack_info:
-        tech_stack_data = f"\nTech Stack (teknologi lain di port yang sama): {stack_info}\n"
-        tech_stack_note = f"\nTech stack: {stack_info}. Pastikan kompatibilitas saat patch diterapkan."
+        tech_stack_data = f"\nTech stack (other technologies on the same port): {stack_info}\n"
+        tech_stack_note = f"\nTech stack: {stack_info}. Check compatibility when applying the patch."
     else:
         tech_stack_data = ""
         tech_stack_note = ""
 
-    return f"""Anda adalah Asisten Keamanan Siber. Berikan analisis kerentanan dalam Bahasa Indonesia.
+    return f"""You are a cybersecurity assistant. Write a vulnerability analysis in English.
 
---- DATA SUMBER ---
-Aset: {asset_name}
+--- SOURCE DATA ---
+Asset: {asset_name}
 Port: {port_info}
-Teknologi Terdampak: {tech_display}
+Affected technology: {tech_display}
 CVE ID: {cve_id}
-Skor CVSS: {score_display}
-Deskripsi: "{cve_description}"
+CVSS score: {score_display}
+Description: "{cve_description}"
 {tech_stack_data}-------------------
 
-STRICT OUTPUT FORMAT (IKUTI FORMAT INI PERSIS, GUNAKAN NEWLINE):
+STRICT OUTPUT FORMAT (FOLLOW THIS FORMAT EXACTLY, USE NEWLINES):
 
-📋 APA INI?
-[1 kalimat singkat, maksimal 30 kata]
+📋 WHAT IS IT?
+[1 short sentence, at most 30 words]
 
-🔴 3 RISIKO UTAMA:
-1. [1 kalimat, maksimal 20 kata]
-2. [1 kalimat, maksimal 20 kata]
-3. [1 kalimat, maksimal 20 kata]
+🔴 TOP 3 RISKS:
+1. [1 sentence, at most 20 words]
+2. [1 sentence, at most 20 words]
+3. [1 sentence, at most 20 words]
 
-🛠️ PANDUAN PATCH (3 LANGKAH):
-1. [WAJIB sebutkan versi aman: "Update {tech_name} dari versi {tech_version} ke versi X.X.X+", maksimal 25 kata]
-2. [Langkah mitigasi alternatif, maksimal 25 kata]
-3. [Langkah monitoring, sebutkan port {port_display} jika relevan, maksimal 25 kata]
+🛠️ PATCH GUIDE (3 STEPS):
+1. [MUST name the safe version: "Update {tech_name} from version {tech_version} to version X.X.X+", at most 25 words]
+2. [Alternative mitigation, at most 25 words]
+3. [Monitoring step, mention port {port_display} if relevant, at most 25 words]
 {tech_stack_note}
 
-CONTOH OUTPUT:
+EXAMPLE OUTPUT:
 
-📋 APA INI?
-Kerentanan XSS memungkinkan injeksi JavaScript berbahaya.
+📋 WHAT IS IT?
+An XSS vulnerability that allows injecting malicious JavaScript.
 
-🔴 3 RISIKO UTAMA:
-1. Pencurian cookie sesi pengguna.
-2. Redirect ke situs phishing.
-3. Defacement halaman website.
+🔴 TOP 3 RISKS:
+1. Theft of users' session cookies.
+2. Redirects to phishing sites.
+3. Defacement of the website.
 
-🛠️ PANDUAN PATCH (3 LANGKAH):
-1. Update ke versi 2.1.0 atau lebih baru.
-2. Tambahkan Content-Security-Policy header.
-3. Monitor log di port 443 untuk pola XSS.
+🛠️ PATCH GUIDE (3 STEPS):
+1. Update to version 2.1.0 or later.
+2. Add a Content-Security-Policy header.
+3. Monitor logs on port 443 for XSS patterns.
 
-Tech stack: Node.js. Pastikan kompatibilitas saat patch.
+Tech stack: Node.js. Check compatibility when applying the patch.
 
-PENTING: Setiap bagian harus di baris baru. Jangan gabungkan dalam satu baris. Ikuti contoh di atas persis."""
+IMPORTANT: Put every section on its own line. Do not merge them into one line. Follow the example above exactly."""
 
 
 def send_message(cve_id: str, cve_score, cve_description: str,

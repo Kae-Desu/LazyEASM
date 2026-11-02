@@ -6,6 +6,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- AI explanations of CVEs are written in English (they were in Indonesian). Existing explanations stay as they are until regenerated.
+
 ## [1.0.0] - 2026-10-25
 
 First stable release.
