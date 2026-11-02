@@ -180,5 +180,60 @@ class FilteredPagesTests(GroupsTestCase):
         self.assertEqual(hosts(db_utils.get_findings_for_export(group=corp)), ['203.0.113.40', 'www.example.com'])
 
 
+class RouteTests(GroupsTestCase):
+    def setUp(self):
+        super().setUp()
+        import main
+        from tests.helpers import access_token
+        self.main = main
+        self.client = main.app.test_client()
+        token = access_token(main)
+        self.client.set_cookie('access_token', token)
+        self.csrf = main.generate_csrf_token(token)
+
+    def post(self, path, **data):
+        return self.client.post(path, data={'csrf_token': self.csrf, **data})
+
+    def test_switcher_choice_filters_pages_api_and_exports(self):
+        response = self.client.get('/groups/select?group=d:example.org&next=/findings')
+        self.assertEqual(response.headers['Location'], '/findings')
+        self.assertIn('HttpOnly', response.headers['Set-Cookie'])
+        self.assertEqual(self.client.get('/api/findings').get_json()['pagination']['total'], 1)
+        self.assertIn('Showing <strong>example.org</strong> only', self.client.get('/findings').get_data(as_text=True))
+        export = self.client.get('/api/export/findings.csv')
+        self.assertIn('filename="lazyeasm-example.org-findings-', export.headers['Content-Disposition'])
+        self.assertIn(f'group=g%3A{self.corp}', self.client.get('/').get_data(as_text=True))   # switcher entries
+
+        self.assertEqual(self.client.get('/api/findings?group=all').get_json()['pagination']['total'], 4)
+        self.client.get('/groups/select?group=g:999&next=/')                                # unknown: all assets
+        self.assertEqual(self.client.get('/api/findings').get_json()['pagination']['total'], 4)
+
+    def test_select_never_redirects_to_another_site(self):
+        for target in ('https://evil.example', '//evil.example', '/\\evil.example', 'javascript:alert(1)'):
+            response = self.client.get('/groups/select', query_string={'group': 'all', 'next': target})
+            self.assertEqual(response.headers['Location'], '/', target)
+
+    def test_manage_groups(self):
+        self.assertIn('Example Corp', self.client.get('/groups').get_data(as_text=True))
+        self.post('/groups/create', name='Client B', members='example.org 198.51.100.0/24')
+        client_b = next(g for g in groups.list_named_groups() if g['name'] == 'Client B')
+        self.assertEqual((client_b['domains'], client_b['cidrs']), (['example.org'], ['198.51.100.0/24']))
+
+        self.post('/groups/create', name='Broken', members='example.org not-a-domain')     # nothing created
+        self.assertNotIn('Broken', [g['name'] for g in groups.list_named_groups()])
+
+        gid = client_b['group_id']
+        self.post(f'/groups/{gid}/rename', name='Client C')
+        self.post(f'/groups/{gid}/members/add', value='203.0.113.7')
+        self.post(f'/groups/{gid}/members/remove', kind='domain', value='example.org')
+        self.post('/groups/assign', group_id=str(gid), value='example.net')
+        group = next(g for g in groups.list_named_groups() if g['group_id'] == gid)
+        self.assertEqual((group['name'], group['domains'], group['cidrs']),
+                         ('Client C', ['example.net'], ['198.51.100.0/24', '203.0.113.7/32']))
+        self.post(f'/groups/{gid}/delete')
+        self.assertNotIn(gid, [g['group_id'] for g in groups.list_named_groups()])
+        self.assertEqual(self.client.post(f'/groups/{self.corp}/delete').status_code, 403)   # CSRF required
+
+
 if __name__ == '__main__':
     unittest.main()

@@ -6,6 +6,7 @@ import time
 import logging
 import hashlib
 import hmac
+import re
 import uuid
 from functools import wraps
 from flask import Flask, render_template, request, redirect, url_for, flash, make_response, jsonify
@@ -598,18 +599,159 @@ def inject_csrf_token():
     return dict(csrf_token=csrf_token)
 
 
+GROUP_COOKIE = 'lazyeasm_group'
+
+
+def selected_group() -> str:
+    """
+    The asset group to show (utils/groups.py): ?group= (API and links), else
+    the switcher's cookie. An unknown or deleted group shows all assets.
+    """
+    from utils import groups
+    key = (request.args.get('group') or request.cookies.get(GROUP_COOKIE) or groups.ALL).strip()
+    return key if groups.is_valid_key(key) else groups.ALL
+
+
+@app.context_processor
+def inject_group_switcher():
+    # A callable: only the page layout needs the menu, not partial refreshes
+    def group_switcher():
+        from utils import groups
+        key = selected_group()
+        return {'current': key, 'label': groups.label(key), 'menu': groups.menu()}
+    return dict(group_switcher=group_switcher)
+
+
+def _local_path(target: str, default: str = '/') -> str:
+    """A same-site path to return to (never another site)."""
+    target = (target or '').strip()
+    return target if target.startswith('/') and not target.startswith('//') and '\\' not in target else default
+
+
+@app.route('/groups/select')
+@token_required
+def select_group():
+    """Remember the switcher's choice (a view preference, not data) and go back."""
+    from utils import groups
+    key = (request.args.get('group') or groups.ALL).strip()
+    if not groups.is_valid_key(key):
+        key = groups.ALL
+    response = make_response(redirect(_local_path(request.args.get('next'))))
+    response.set_cookie(GROUP_COOKIE, key, max_age=365 * 24 * 3600, **get_secure_cookie_kwargs())
+    return response
+
+
+@app.route('/groups')
+@token_required
+def groups_page():
+    """Create named groups and choose their domains and CIDRs."""
+    from utils import groups
+    return render_template('groups.html', named=groups.list_named_groups(), menu=groups.menu())
+
+
+def _group_action(action):
+    """Run a group change; show its error instead of failing."""
+    from utils.groups import GroupError
+    try:
+        message = action()
+        if message:
+            flash(message, 'success')
+    except GroupError as e:
+        flash(str(e), 'error')
+    return redirect(url_for('groups_page'))
+
+
+@app.route('/groups/create', methods=['POST'])
+@token_required
+@csrf_protected
+def create_group():
+    from utils import groups
+
+    def action():
+        name = groups.normalize_name(request.form.get('name'))
+        values = [v for v in re.split(r'[\s,]+', request.form.get('members') or '') if v]
+        members = [(groups.member_kind(v), v) for v in values]
+        for kind, value in members:
+            groups.normalize_member(kind, value)        # validate all before creating anything
+        group_id = groups.create_group(name)
+        for kind, value in members:
+            groups.add_member(group_id, kind, value)
+        return f'Group "{name}" created.'
+    return _group_action(action)
+
+
+@app.route('/groups/<int:group_id>/rename', methods=['POST'])
+@token_required
+@csrf_protected
+def rename_group(group_id):
+    from utils import groups
+    return _group_action(lambda: groups.rename_group(group_id, request.form.get('name')) or 'Group renamed.')
+
+
+@app.route('/groups/<int:group_id>/delete', methods=['POST'])
+@token_required
+@csrf_protected
+def delete_group(group_id):
+    """Removes the group only; its assets stay (Purge deletes them)."""
+    from utils import groups
+    return _group_action(lambda: groups.delete_group(group_id) or
+                         'Group removed. Its assets were kept and show under their root domains again.')
+
+
+@app.route('/groups/<int:group_id>/members/add', methods=['POST'])
+@token_required
+@csrf_protected
+def add_group_member(group_id):
+    from utils import groups
+
+    def action():
+        values = [v for v in re.split(r'[\s,]+', request.form.get('value') or '') if v]
+        if not values:
+            raise groups.GroupError('Enter a domain, IP or CIDR range')
+        added = [groups.add_member(group_id, groups.member_kind(v), v) for v in values]
+        return f"Added {', '.join(added)}."
+    return _group_action(action)
+
+
+@app.route('/groups/assign', methods=['POST'])
+@token_required
+@csrf_protected
+def assign_to_group():
+    """Move a root domain from its automatic group into a named group (form: group_id, value)."""
+    from utils import groups
+
+    def action():
+        group_id = request.form.get('group_id', '')
+        if not group_id.isdigit():
+            raise groups.GroupError('Choose a group')
+        value = groups.add_member(int(group_id), 'domain', request.form.get('value'))
+        return f'{value} added to "{groups.label(f"g:{group_id}")}".'
+    return _group_action(action)
+
+
+@app.route('/groups/<int:group_id>/members/remove', methods=['POST'])
+@token_required
+@csrf_protected
+def remove_group_member(group_id):
+    from utils import groups
+    return _group_action(lambda: groups.remove_member(group_id, request.form.get('kind'), request.form.get('value'))
+                         or 'Removed from the group.')
+
+
 @app.route('/')
 @token_required
 def dashboard():
+    group = selected_group()
     return render_template('dashboard.html', active_page='overview',
-                           changes=get_changes(limit=RECENT_CHANGES_LIMIT), overview=get_overview())
+                           changes=get_changes(limit=RECENT_CHANGES_LIMIT, group=group),
+                           overview=get_overview(group=group))
 
 
 @app.route('/update_overview')
 @token_required
 def update_overview():
     """Headline numbers partial (Overview auto-refresh)."""
-    return render_template('overview_partial.html', overview=get_overview())
+    return render_template('overview_partial.html', overview=get_overview(group=selected_group()))
 
 
 @app.route('/assets')
@@ -633,7 +775,7 @@ def changes_page():
     filters = {key: (request.args.get(key) or '').strip() or None for key in ('q', 'category', 'period', 'host')}
     try:
         result = list_changes(page=request.args.get('page', 1), query=filters['q'], host=filters['host'],
-                              category=filters['category'], period=filters['period'])
+                              category=filters['category'], period=filters['period'], group=selected_group())
     except ActivityQueryError as exc:
         flash(str(exc), 'error')
         return redirect(url_for('changes_page'))
@@ -651,7 +793,7 @@ def _scan_view():
     """Queue page data from the request's filters (shared by the page and its refresh partial)."""
     filters = {key: (request.args.get(key) or '').strip() or None for key in ('kind', 'status', 'q')}
     result = list_scans(page=request.args.get('page', 1), kind=filters['kind'],
-                        status=filters['status'], query=filters['q'])
+                        status=filters['status'], query=filters['q'], group=selected_group())
     return result, {k: v for k, v in filters.items() if v}
 
 
@@ -825,6 +967,7 @@ def api_assets():
             scan_state=request.args.get('scan_state'),
             sort=request.args.get('sort', 'name'),
             order=request.args.get('order', 'asc'),
+            group=selected_group(),
         )
     except AssetQueryError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
@@ -853,6 +996,7 @@ def api_findings():
             identifier=request.args.get('identifier') or None,
             host=request.args.get('host') or None,
             sort=request.args.get('sort') or 'urgency',
+            group=selected_group(),
         )
     except FindingQueryError as exc:
         return jsonify({'success': False, 'error': str(exc)}), 400
@@ -1099,23 +1243,27 @@ def export_data(dataset, fmt):
     /api/export/assets.csv, /api/export/assets.json
     /api/export/findings.csv, /api/export/findings.json  (?status=open|fixed|accepted|false_positive)
     """
-    from utils import export
+    from utils import export, groups
     from utils.db_utils import get_findings_for_export
     from utils.asset_repository import export_assets
     
     if fmt not in ('csv', 'json') or dataset not in ('assets', 'findings'):
         return jsonify({'success': False, 'error': 'Use /api/export/<assets|findings>.<csv|json>'}), 404
     
+    group = selected_group()
     if dataset == 'assets':
-        rows, columns = [export.flatten_asset(a) for a in export_assets()], export.ASSET_COLUMNS
+        rows, columns = [export.flatten_asset(a) for a in export_assets(group)], export.ASSET_COLUMNS
     else:
         status = request.args.get('status') or None
         if status and status not in VULN_STATUSES:
             return jsonify({'success': False, 'error': f"status must be one of: {', '.join(VULN_STATUSES)}"}), 400
-        rows, columns = get_findings_for_export(status), export.FINDING_COLUMNS
+        rows, columns = get_findings_for_export(status, group), export.FINDING_COLUMNS
     
     body = export.to_csv(rows, columns) if fmt == 'csv' else export.to_json(rows, columns)
-    filename = f"lazyeasm-{dataset}-{datetime.datetime.now().strftime('%Y%m%d-%H%M')}.{fmt}"
+    # The group's name in the file name, so exports of different clients are not mixed up
+    scope = '' if group == groups.ALL else '-' + (re.sub(r'[^a-z0-9.]+', '-', groups.label(group).lower()).strip('-')
+                                                   or 'group')
+    filename = f"lazyeasm{scope}-{dataset}-{datetime.datetime.now().strftime('%Y%m%d-%H%M')}.{fmt}"
     response = make_response(body)
     response.headers['Content-Type'] = 'text/csv; charset=utf-8' if fmt == 'csv' else 'application/json'
     response.headers['Content-Disposition'] = f'attachment; filename="{filename}"'

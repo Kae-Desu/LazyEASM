@@ -189,6 +189,11 @@ FINDINGS = [
       'missing': ['X-Content-Type-Options']}, 'false_positive', 25),
 ]
 
+# Named asset groups; example.org stays an automatic (root domain) group
+GROUPS = {
+    'Example Corp': [('domain', 'example.com'), ('cidr', '203.0.113.30/31')],
+}
+
 # Certificates presented by HTTPS services: host -> days until expiry (negative: expired)
 CERT_EXPIRY = {
     'www.example.com': 74, 'shop.example.com': 74, 'api.example.com': 52, 'dev.example.com': 33,
@@ -396,6 +401,13 @@ def seed(demo_dir: str = DEMO_DIR):
                       'first_seen, last_seen) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
                       (ftype, host, title, severity, json.dumps(evidence, sort_keys=True), status,
                        ago(4) if status != 'open' else None, ago(days), ago(hours=1)))
+
+        for name, members in GROUPS.items():
+            c.execute('INSERT INTO asset_groups (name, created_at) VALUES (?, ?)', (name, ago(30)))
+            group_id = c.lastrowid
+            for kind, value in members:
+                c.execute('INSERT INTO asset_group_members (group_id, kind, value) VALUES (?, ?, ?)',
+                          (group_id, kind, value))
 
         for host, days in CERT_EXPIRY.items():
             port = WEB[host][0]

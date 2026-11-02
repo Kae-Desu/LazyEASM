@@ -1,0 +1,102 @@
+{% extends 'base.html' %}
+{% block title %}Groups{% endblock %}
+
+{% block content %}
+{% set input_cls = 'bg-white dark:bg-lazy-dark border border-border dark:border-white/10 rounded-xl px-3 py-2 text-sm focus:ring-2 focus:ring-accent outline-none dark:text-white' %}
+{% set btn_cls = 'px-4 py-2 text-xs font-bold rounded-xl bg-lazy-dark dark:bg-accent dark:text-lazy-dark text-white hover:opacity-90' %}
+{% set counts = {} %}
+{% for g in menu.named + menu.roots %}{% set _ = counts.update({g.key: g.count}) %}{% endfor %}
+
+<h1 class="text-2xl font-bold mb-2 dark:text-white"><i class="fas fa-layer-group mr-2 text-accent"></i>Groups</h1>
+<p class="text-sm text-slate-500 dark:text-slate-400 mb-6 max-w-3xl">
+    A group shows one client, brand or engagement at a time; choose it with the switcher in the sidebar.
+    Every root domain is a group of its own until you put it in a named group. A domain includes all hostnames under it;
+    an IP or CIDR range includes the IPs inside it. IPs your hostnames point to join their group, except CDN and
+    shared-hosting addresses.
+</p>
+
+<section class="bg-white dark:bg-dark-card rounded-2xl border border-border dark:border-white/5 p-5 mb-6">
+    <h2 class="font-bold dark:text-white mb-3">New group</h2>
+    <form action="/groups/create" method="POST" class="grid md:grid-cols-[1fr_2fr_auto] gap-3 items-start">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div>
+            <label for="new-name" class="sr-only">Name</label>
+            <input id="new-name" name="name" required maxlength="60" placeholder="Name, e.g. Client A" class="w-full {{ input_cls }}">
+        </div>
+        <div>
+            <label for="new-members" class="sr-only">Domains, IPs and CIDR ranges</label>
+            <textarea id="new-members" name="members" rows="2" placeholder="example.com, example.org, 203.0.113.0/27 (optional)" class="w-full {{ input_cls }}"></textarea>
+        </div>
+        <button type="submit" class="{{ btn_cls }} py-2.5"><i class="fas fa-plus mr-1"></i>Create</button>
+    </form>
+</section>
+
+{% for g in named %}
+<section class="bg-white dark:bg-dark-card rounded-2xl border border-border dark:border-white/5 p-5 mb-4">
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+        <i class="fas fa-folder text-accent" aria-hidden="true"></i>
+        <form action="/groups/{{ g.group_id }}/rename" method="POST" class="flex gap-2 items-center flex-1 min-w-[220px]">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <label for="name-{{ g.group_id }}" class="sr-only">Group name</label>
+            <input id="name-{{ g.group_id }}" name="name" value="{{ g.name }}" required maxlength="60" class="font-bold flex-1 {{ input_cls }}">
+            <button type="submit" class="text-xs font-bold text-slate-500 hover:text-accent">Rename</button>
+        </form>
+        <span class="text-xs text-slate-400">{{ counts.get(g.key, 0) }} assets</span>
+        <a href="/groups/select?group={{ g.key | urlencode }}&next=/assets" class="text-xs font-bold text-accent hover:underline">Show</a>
+        <form action="/groups/{{ g.group_id }}/delete" method="POST" onsubmit="return confirm(this.dataset.confirm)"
+              data-confirm="Remove the group {{ g.name }}? Its assets are kept and show under their root domains again.">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit" class="text-xs font-bold text-red-500 hover:underline">Remove group</button>
+        </form>
+    </div>
+    <div class="flex flex-wrap gap-2 mb-3">
+        {% for kind, values in [('domain', g.domains), ('cidr', g.cidrs)] %}{% for value in values %}
+        <form action="/groups/{{ g.group_id }}/members/remove" method="POST" class="inline-flex items-center gap-1.5 pl-3 pr-1 py-1 rounded-full bg-slate-100 dark:bg-white/5 text-xs font-mono">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="kind" value="{{ kind }}"><input type="hidden" name="value" value="{{ value }}">
+            <i class="fas {{ 'fa-globe' if kind == 'domain' else 'fa-network-wired' }} text-slate-400" aria-hidden="true"></i>{{ value }}
+            <button type="submit" class="w-5 h-5 rounded-full hover:bg-red-500/10 hover:text-red-500" aria-label="Remove {{ value }}"><i class="fas fa-xmark"></i></button>
+        </form>
+        {% endfor %}{% endfor %}
+        {% if not g.domains and not g.cidrs %}<span class="text-xs text-slate-400">Empty: add domains or ranges below.</span>{% endif %}
+    </div>
+    <form action="/groups/{{ g.group_id }}/members/add" method="POST" class="flex gap-2">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label for="add-{{ g.group_id }}" class="sr-only">Add domains, IPs or CIDR ranges</label>
+        <input id="add-{{ g.group_id }}" name="value" placeholder="Add a domain, IP or CIDR range" class="flex-1 {{ input_cls }}">
+        <button type="submit" class="{{ btn_cls }}">Add</button>
+    </form>
+</section>
+{% endfor %}
+
+{% if menu.roots %}
+<section class="bg-white dark:bg-dark-card rounded-2xl border border-border dark:border-white/5 p-5 mb-4">
+    <h2 class="font-bold dark:text-white mb-1">Root domains (automatic groups)</h2>
+    <p class="text-xs text-slate-500 dark:text-slate-400 mb-3">Each is its own group until you add it to a named group.</p>
+    <div class="divide-y divide-slate-100 dark:divide-white/5">
+        {% for g in menu.roots %}
+        <div class="flex flex-wrap items-center gap-3 py-2">
+            <i class="fas fa-globe text-slate-400 text-xs" aria-hidden="true"></i>
+            <span class="font-mono text-sm flex-1 dark:text-slate-200">{{ g.name }}</span>
+            <span class="text-xs text-slate-400">{{ g.count }} assets</span>
+            {% if named %}
+            <form action="/groups/assign" method="POST" class="flex gap-2 items-center">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="value" value="{{ g.name }}">
+                <label for="assign-{{ loop.index }}" class="sr-only">Add {{ g.name }} to a group</label>
+                <select id="assign-{{ loop.index }}" name="group_id" class="{{ input_cls }} py-1.5">
+                    {% for n in named %}<option value="{{ n.group_id }}">{{ n.name }}</option>{% endfor %}
+                </select>
+                <button type="submit" class="text-xs font-bold text-accent hover:underline">Add to group</button>
+            </form>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+</section>
+{% endif %}
+
+{% if menu.ungrouped %}
+<p class="text-xs text-slate-500 dark:text-slate-400">{{ menu.ungrouped }} assets are in no group (IPs submitted on their own, or hostnames whose domain was removed). Add their IPs or ranges to a group to include them.</p>
+{% endif %}
+{% endblock %}
