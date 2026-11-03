@@ -222,7 +222,7 @@ def run_phase1(asset_id: int, asset_type: str, asset_name: str) -> Dict:
             for ip, reason in stats['skip_reasons']:
                 msg += f"\n  • {ip}: {reason}"
         
-        send_message(msg)
+        send_message(msg, hosts=[asset_name])
         
     except Exception as e:
         logger.error(f"Discord notification failed: {e}")

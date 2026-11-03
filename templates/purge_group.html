@@ -52,11 +52,15 @@
         <form action="/groups/{{ group_id }}/purge" method="POST" class="space-y-3">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <h2 class="font-bold dark:text-white">2. Delete</h2>
+            {% if backup_count %}
             <label class="flex items-start gap-2 cursor-pointer text-sm">
                 <input type="checkbox" name="delete_backups" value="1" checked class="mt-1 w-4 h-4 accent-[#CC9ACC]">
-                <span class="dark:text-slate-200">Also delete the {{ backup_count }} existing backups and take a fresh one.
+                <span class="dark:text-slate-200">Also delete the {{ 'existing backup' if backup_count == 1 else backup_count ~ ' existing backups' }} and take a fresh one.
                     <span class="block text-xs text-slate-500">Backups are copies of the whole database, so they still contain this group (and every other one). Copies you made elsewhere are not touched.</span></span>
             </label>
+            {% else %}
+            <p class="text-xs text-slate-500">There are no local backups yet, so none contain this group. Copies you made elsewhere are not touched.</p>
+            {% endif %}
             <div>
                 <label for="purge-password" class="text-xs font-bold text-slate-500 uppercase tracking-wider">Your password</label>
                 <input id="purge-password" type="password" name="password" required autocomplete="current-password"

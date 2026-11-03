@@ -88,7 +88,8 @@ def check_all_liveness() -> dict:
     from datetime import datetime, timezone
     from utils.db_utils import get_db_connection
     
-    assets = get_all_assets_for_liveness()
+    from utils.groups import scannable
+    assets = scannable(get_all_assets_for_liveness(), key=lambda a: a['name'])
     
     if not assets:
         logger.info("No assets to check for liveness")

@@ -253,7 +253,8 @@ def run_screenshots(hosts: List[str] = None) -> dict:
         summary.update(available=False, error='Screenshots are disabled in settings')
         return summary
 
-    targets = get_screenshot_targets(hosts)
+    from utils.groups import scannable
+    targets = scannable(get_screenshot_targets(hosts), key=lambda t: t['host'])
     if not targets:
         return summary
 

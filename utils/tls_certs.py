@@ -89,7 +89,9 @@ def refresh_served_certificates(hosts: Optional[List[str]] = None) -> dict:
     """
     from utils.db_utils import get_https_services, record_served_certificate, retire_served_certificates
 
-    targets = get_https_services(hosts)
+    from utils.groups import scannable
+    served = get_https_services(hosts)
+    targets = scannable(served, key=lambda t: t[0])
     summary = {'checked': len(targets), 'new': 0, 'changed': [], 'errors': 0}
     if not targets:
         return summary
@@ -117,7 +119,8 @@ def refresh_served_certificates(hosts: Optional[List[str]] = None) -> dict:
 
     if hosts is None:
         # Services that are no longer HTTPS (or gone) no longer serve a certificate
-        retire_served_certificates(targets)
+        # (paused hosts were not contacted, so their certificates stay as they were)
+        retire_served_certificates(served)
 
     logger.info(f"Served certificates: {summary['checked']} services, {summary['new']} new, "
                 f"{len(summary['changed'])} changed, {summary['errors']} unreachable")

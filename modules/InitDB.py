@@ -575,15 +575,37 @@ def init_db():
         CREATE TABLE IF NOT EXISTS asset_groups (
             group_id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-            created_at TEXT
+            created_at TEXT,
+            starts_on TEXT,
+            ends_on TEXT
         )
     ''')
+    cursor.execute("PRAGMA table_info(asset_groups)")
+    group_columns = [col[1] for col in cursor.fetchall()]
+    for column in ('starts_on', 'ends_on'):
+        if column not in group_columns:
+            cursor.execute(f"ALTER TABLE asset_groups ADD COLUMN {column} TEXT")
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS asset_group_members (
             group_id INTEGER NOT NULL,
             kind TEXT NOT NULL CHECK (kind IN ('domain', 'cidr')),
             value TEXT NOT NULL,
             PRIMARY KEY (group_id, kind, value),
+            FOREIGN KEY(group_id) REFERENCES asset_groups(group_id) ON DELETE CASCADE
+        )
+    ''')
+    # Per-group notification channels: alerts about a group's hosts go here
+    # instead of (or also to, with also_default) the channels in .env
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS asset_group_channels (
+            group_id INTEGER PRIMARY KEY,
+            discord_webhook TEXT,
+            discord_user_id TEXT,
+            slack_webhook TEXT,
+            webhook_url TEXT,
+            webhook_secret TEXT,
+            email_to TEXT,
+            also_default INTEGER NOT NULL DEFAULT 1,
             FOREIGN KEY(group_id) REFERENCES asset_groups(group_id) ON DELETE CASCADE
         )
     ''')

@@ -123,8 +123,9 @@ def run_wappalyzer_scan() -> dict:
     """
     from datetime import datetime, timezone
     from modules.Wappalyzer import WappalyzerScanner
+    from utils.groups import scannable
 
-    hosts = get_hosts_for_wappalyzer()
+    hosts = scannable(get_hosts_for_wappalyzer(), key=lambda h: h['host'])
 
     if not hosts:
         logger.info("No hosts with HTTP services to scan")

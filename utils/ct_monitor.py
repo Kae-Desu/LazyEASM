@@ -94,7 +94,9 @@ def poll_all_domains() -> Dict:
     from utils.tls_certs import refresh_served_certificates
 
     new_subdomains, ct_errors = [], {}
-    domains = get_all_monitored_domains()
+    from utils.groups import scan_filter
+    allowed = scan_filter()
+    domains = [d for d in get_all_monitored_domains() if allowed(d)]
     if domains:
         logger.info(f"Polling CT logs for {len(domains)} domains")
         known = get_known_subdomains()
@@ -113,7 +115,9 @@ def poll_all_domains() -> Dict:
 
     certificates = refresh_served_certificates()
     _cleanup_old_certs()
-    expiry_alerts = check_certificate_expiry_thresholds()
+    # No alerts for groups outside their engagement dates (their certificates are not rechecked)
+    expiry_alerts = {days: [c for c in certs if allowed(c['hostname'])]
+                     for days, certs in check_certificate_expiry_thresholds().items()}
 
     set_setting('last_ctlogs_check', utc_now_str())
     logger.info(

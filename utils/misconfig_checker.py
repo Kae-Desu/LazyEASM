@@ -445,6 +445,12 @@ def run_misconfig_check(hosts: List[str] = None, ips: List[str] = None, max_work
     services = get_http_services_by_host(hosts)
     risky_ports = get_risky_ports_by_ip(list(RISKY_PORTS), ips)
     unserved = get_unserved_candidates(hosts)
+    # Nothing of a group outside its engagement dates is contacted
+    from utils.groups import scan_filter
+    allowed = scan_filter()
+    services = {h: v for h, v in services.items() if allowed(h)}
+    risky_ports = {ip: v for ip, v in risky_ports.items() if allowed(ip)}
+    unserved = {h: v for h, v in unserved.items() if allowed(h)}
 
     jobs = [(check_web, host, svc) for host, svc in services.items()] + \
            [(check_ports, ip, ports) for ip, ports in risky_ports.items()] + \

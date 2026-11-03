@@ -17,6 +17,8 @@ the same worker and threat intelligence serve every group.
       CDN/shared-hosting IPs, which would otherwise merge every client
       behind the same CDN.
     - Hosts that match no group are "Ungrouped".
+    - A named group can have its own notification channels and engagement
+      dates (outside them its hosts are not scanned); see the sections below.
 
 Group keys (switcher, ?group=, cookie): 'all', 'ungrouped', 'g:<group id>',
 'd:<root domain>'. Pages filter their queries through bind(), which puts the
@@ -102,7 +104,9 @@ def member_kind(value: str) -> str:
 def list_named_groups() -> List[dict]:
     conn = _db()
     try:
-        groups = [dict(r) for r in conn.execute('SELECT group_id, name, created_at FROM asset_groups ORDER BY name')]
+        groups = [dict(r) for r in conn.execute(
+            'SELECT group_id, name, created_at, starts_on, ends_on FROM asset_groups ORDER BY name')]
+        channels = {r['group_id']: r for r in conn.execute('SELECT * FROM asset_group_channels')}
         members = conn.execute('SELECT group_id, kind, value FROM asset_group_members ORDER BY kind, value').fetchall()
     finally:
         conn.close()
@@ -110,6 +114,9 @@ def list_named_groups() -> List[dict]:
         group['key'] = f"g:{group['group_id']}"
         group['domains'] = [m['value'] for m in members if m['group_id'] == group['group_id'] and m['kind'] == 'domain']
         group['cidrs'] = [m['value'] for m in members if m['group_id'] == group['group_id'] and m['kind'] == 'cidr']
+        group['engagement'] = engagement_state(group['starts_on'], group['ends_on'])
+        row = channels.get(group['group_id'])
+        group['channels'] = [f for f in DESTINATIONS if row and row[f]]
     return groups
 
 
@@ -200,7 +207,10 @@ class Inventory:
         self.named = {}
         for row in conn.execute('SELECT group_id, kind, value FROM asset_group_members'):
             self.named.setdefault(row['group_id'], {'domain': set(), 'cidr': set()})[row['kind']].add(row['value'])
-        self.names = {r['group_id']: r['name'] for r in conn.execute('SELECT group_id, name FROM asset_groups')}
+        self.names, self.dates = {}, {}
+        for r in conn.execute('SELECT group_id, name, starts_on, ends_on FROM asset_groups'):
+            self.names[r['group_id']] = r['name']
+            self.dates[r['group_id']] = (r['starts_on'], r['ends_on'])
         for group_id in self.names:
             self.named.setdefault(group_id, {'domain': set(), 'cidr': set()})
 
@@ -220,6 +230,29 @@ class Inventory:
         for name in names:
             ips |= {ip for ip in self.links.get(name, ()) if not self.ips.get(ip)}
         return names | ips
+
+    def contains(self, group_id: int, host: str) -> bool:
+        """
+        Whether a hostname or IP belongs to the named group, also for names not
+        (yet) in the database, e.g. a subdomain that was just discovered.
+        """
+        members = self.named.get(group_id)
+        if not members:
+            return False
+        host = host.lower()
+        if any(host == d or host.endswith('.' + d) for d in members['domain']):
+            return True
+        try:
+            address = ipaddress.ip_address(host)
+        except ValueError:
+            return False
+        if any(address.version == n.version and address in n
+               for n in (ipaddress.ip_network(c) for c in members['cidr'])):
+            return True
+        if self.ips.get(host):
+            return False            # CDN / shared hosting: not joined through hostnames
+        return any(host in ips and any(name == d or name.endswith('.' + d) for d in members['domain'])
+                   for name, ips in self.links.items())
 
     def named_domains(self) -> Set[str]:
         return {d for members in self.named.values() for d in members['domain']}
@@ -302,6 +335,206 @@ def bind(conn, key: Optional[str]) -> bool:
 # SQL condition for a hostname/IP column, used after bind()
 def in_group(column: str) -> str:
     return f"LOWER({column}) IN (SELECT host FROM temp.group_hosts)"
+
+
+# ---------------------------------------------------------------------------
+# Engagement dates
+# ---------------------------------------------------------------------------
+#
+# A named group can have a start and an end date (inclusive, UTC). Outside
+# them its hosts are not scanned: the checks skip them and queued jobs for
+# them are dropped. Their data stays (findings are not closed) until the
+# group is purged. A host that is also in a group without dates, or in one
+# whose engagement is running, is still scanned.
+
+def today() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).strftime('%Y-%m-%d')
+
+
+def normalize_date(value: str) -> Optional[str]:
+    from datetime import date
+    value = (value or '').strip()
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(value).isoformat()
+    except ValueError:
+        raise GroupError(f'"{value}" is not a date (YYYY-MM-DD)')
+
+
+def engagement_state(starts_on: Optional[str], ends_on: Optional[str], on: str = None) -> Optional[str]:
+    """'upcoming', 'running' or 'ended'; None for a group without dates."""
+    if not starts_on and not ends_on:
+        return None
+    on = on or today()
+    if starts_on and on < starts_on:
+        return 'upcoming'
+    if ends_on and on > ends_on:
+        return 'ended'
+    return 'running'
+
+
+def set_engagement(group_id: int, starts_on: str, ends_on: str):
+    starts_on, ends_on = normalize_date(starts_on), normalize_date(ends_on)
+    if starts_on and ends_on and ends_on < starts_on:
+        raise GroupError('The end date is before the start date')
+    conn = _db()
+    try:
+        if not conn.execute('UPDATE asset_groups SET starts_on = ?, ends_on = ? WHERE group_id = ?',
+                            (starts_on, ends_on, group_id)).rowcount:
+            raise GroupError('Group not found')
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def ended_engagements() -> List[dict]:
+    """Groups whose end date has passed (the dashboard reminds to export and purge them)."""
+    conn = _db()
+    try:
+        rows = conn.execute('SELECT group_id, name, ends_on FROM asset_groups WHERE ends_on < ? ORDER BY ends_on',
+                            (today(),)).fetchall()
+    finally:
+        conn.close()
+    return [dict(r) for r in rows]
+
+
+def scan_filter():
+    """
+    A predicate host -> bool: False for hosts that must not be scanned now
+    (only in groups whose engagement has not started or has ended).
+    """
+    on = today()
+    conn = _db()
+    try:
+        if not conn.execute('SELECT 1 FROM asset_groups WHERE starts_on > ? OR ends_on < ? LIMIT 1',
+                            (on, on)).fetchone():
+            return lambda host: True
+        inventory = Inventory(conn)
+    finally:
+        conn.close()
+    stopped = [g for g, (start, end) in inventory.dates.items()
+               if engagement_state(start, end, on) in ('upcoming', 'ended')]
+    active = [g for g in inventory.names if g not in stopped]
+
+    def allowed(host: str) -> bool:
+        if not host or not any(inventory.contains(g, host) for g in stopped):
+            return True
+        return any(inventory.contains(g, host) for g in active)
+    return allowed
+
+
+def scannable(items, key=None) -> list:
+    """The items whose host may be scanned now; key gets the host from an item."""
+    items = list(items)
+    allowed = scan_filter()
+    kept = [item for item in items if allowed(key(item) if key else item)]
+    if len(kept) < len(items):
+        import logging
+        logging.getLogger(__name__).info(
+            f"Skipped {len(items) - len(kept)} targets outside their group's engagement dates")
+    return kept
+
+
+def may_scan(host: str) -> bool:
+    return scan_filter()(host)
+
+
+# ---------------------------------------------------------------------------
+# Notification channels
+# ---------------------------------------------------------------------------
+#
+# A named group can have its own channels, so alerts about one client never
+# reach another client's Slack or webhook. Alerts about a group's hosts go to
+# its channels (and also to the default channels in .env unless that is
+# turned off); hosts in no group with channels use the default channels.
+# Server alerts (worker stopped, disk full) always use the default channels.
+
+CHANNEL_FIELDS = ('discord_webhook', 'discord_user_id', 'slack_webhook', 'webhook_url', 'webhook_secret', 'email_to')
+DESTINATIONS = ('discord_webhook', 'slack_webhook', 'webhook_url', 'email_to')
+# Same rules as the default channels in Settings
+CHANNEL_RULES = {
+    'discord_webhook': 'DISCORD_WEBHOOK_URL',
+    'discord_user_id': 'DISCORD_USER_ID',
+    'slack_webhook': 'SLACK_WEBHOOK_URL',
+    'webhook_url': 'NOTIFY_WEBHOOK_URL',
+    'email_to': 'SMTP_TO',
+}
+
+
+def get_channels(group_id: int) -> dict:
+    conn = _db()
+    try:
+        row = conn.execute('SELECT * FROM asset_group_channels WHERE group_id = ?', (group_id,)).fetchone()
+    finally:
+        conn.close()
+    channels = {field: (row[field] if row else None) or '' for field in CHANNEL_FIELDS}
+    channels['also_default'] = bool(row['also_default']) if row else True
+    return channels
+
+
+def set_channels(group_id: int, values: dict, also_default: bool):
+    """
+    Store the group's channels. A field missing from values keeps its value;
+    an empty string clears it.
+    """
+    from utils.env_manager import VALIDATION_RULES
+
+    current = get_channels(group_id)
+    for field in CHANNEL_FIELDS:
+        if field not in values:
+            continue
+        value = (values[field] or '').strip()
+        rule = VALIDATION_RULES.get(CHANNEL_RULES.get(field, ''))
+        if value and rule and not re.match(rule['pattern'], value):
+            raise GroupError(rule['message'])
+        current[field] = value
+    columns = ', '.join(CHANNEL_FIELDS)
+    marks = ', '.join('?' * len(CHANNEL_FIELDS))
+    conn = _db()
+    try:
+        if not conn.execute('SELECT 1 FROM asset_groups WHERE group_id = ?', (group_id,)).fetchone():
+            raise GroupError('Group not found')
+        conn.execute(f'INSERT OR REPLACE INTO asset_group_channels (group_id, {columns}, also_default) '
+                     f'VALUES (?, {marks}, ?)',
+                     [group_id] + [current[f] or None for f in CHANNEL_FIELDS] + [1 if also_default else 0])
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def has_channels(channels: dict) -> bool:
+    """Whether the group has a channel that can deliver (email needs the SMTP server from Settings)."""
+    from utils.config import get_env
+    usable = DESTINATIONS if get_env('SMTP_HOST') else tuple(f for f in DESTINATIONS if f != 'email_to')
+    return any(channels.get(field) for field in usable)
+
+
+def notification_routes(hosts) -> Dict[Optional[int], Set[str]]:
+    """
+    Who hears about which hosts: {group_id: hosts} for groups with their own
+    channels, {None: hosts} for the default channels. A host in two groups
+    with channels goes to both.
+    """
+    hosts = {h for h in hosts if h}
+    conn = _db()
+    try:
+        rows = conn.execute('SELECT * FROM asset_group_channels').fetchall()
+        configured = {r['group_id']: bool(r['also_default']) for r in rows if has_channels(dict(r))}
+        inventory = Inventory(conn) if configured and hosts else None
+    finally:
+        conn.close()
+    if inventory is None:
+        return {None: hosts} if hosts else {}
+    routes: Dict[Optional[int], Set[str]] = {}
+    for host in hosts:
+        groups = [g for g in configured if inventory.contains(g, host)]
+        if not groups or any(configured[g] for g in groups):
+            routes.setdefault(None, set()).add(host)
+        for g in groups:
+            routes.setdefault(g, set()).add(host)
+    return routes
 
 
 # ---------------------------------------------------------------------------

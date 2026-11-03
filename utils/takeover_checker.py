@@ -241,6 +241,8 @@ def run_takeover_check(hosts: List[str] = None, max_workers: int = 20) -> dict:
 
     if hosts is None:
         hosts = get_hostnames_for_takeover_check()
+    from utils.groups import scannable
+    hosts = scannable(hosts)
 
     services = load_services()
     resolver = dns.resolver.Resolver()

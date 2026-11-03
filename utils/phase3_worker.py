@@ -31,55 +31,33 @@ _phase3_running = False
 def send_liveness_notification(result: dict):
     """
     Send bundled Discord notification for liveness changes.
-    
+
     Args:
         result: Dict from check_all_liveness()
     """
     try:
-        from modules.Notify import send_message
-        
-        lines = ["**Liveness Status Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
-        
-        if result['down']:
-            lines.append(f"**Down ({len(result['down'])}):**")
-            for name in result['down'][:10]:  # Limit to 10
-                lines.append(f"• {name}")
-            if len(result['down']) > 10:
-                lines.append(f"• ... and {len(result['down']) - 10} more")
-        
-        if result['recovered']:
-            lines.append(f"**Recovered ({len(result['recovered'])}):**")
-            for name in result['recovered'][:10]:
-                lines.append(f"• {name}")
-            if len(result['recovered']) > 10:
-                lines.append(f"• ... and {len(result['recovered']) - 10} more")
-        
-        if result.get('new_up'):
-            lines.append(f"**New Assets Up ({len(result['new_up'])}):**")
-            for name in result['new_up'][:10]:
-                lines.append(f"• {name}")
-            if len(result['new_up']) > 10:
-                lines.append(f"• ... and {len(result['new_up']) - 10} more")
-        
-        if result.get('new_down'):
-            lines.append(f"**New Assets Down ({len(result['new_down'])}):**")
-            for name in result['new_down'][:10]:
-                lines.append(f"• {name}")
-            if len(result['new_down']) > 10:
-                lines.append(f"• ... and {len(result['new_down']) - 10} more")
-        
-        if result.get('still_down'):
-            lines.append(f"**Still Down ({len(result['still_down'])}):**")
-            for name in result['still_down'][:5]:
-                lines.append(f"• {name}")
-            if len(result['still_down']) > 5:
-                lines.append(f"• ... and {len(result['still_down']) - 5} more")
-        
-        # Only send if there are actual changes
-        has_changes = result['down'] or result['recovered'] or result.get('new_up') or result.get('new_down')
-        if has_changes:
-            send_message('\n'.join(lines))
-        
+        from modules.Notify import send_about
+
+        sections = (('down', 'Down', 10), ('recovered', 'Recovered', 10), ('new_up', 'New Assets Up', 10),
+                    ('new_down', 'New Assets Down', 10), ('still_down', 'Still Down', 5))
+
+        def build(keep):
+            part = {key: [n for n in result.get(key) or [] if keep(n)] for key, _, _ in sections}
+            # Only send if there are actual changes
+            if not (part['down'] or part['recovered'] or part['new_up'] or part['new_down']):
+                return None
+            lines = ["**Liveness Status Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
+            for key, title, limit in sections:
+                names = part[key]
+                if names:
+                    lines.append(f"**{title} ({len(names)}):**")
+                    lines.extend(f"• {name}" for name in names[:limit])
+                    if len(names) > limit:
+                        lines.append(f"• ... and {len(names) - limit} more")
+            return '\n'.join(lines)
+
+        send_about({n for key, _, _ in sections for n in result.get(key) or []}, build)
+
     except Exception as e:
         logger.error(f"Failed to send liveness notification: {e}")
 
@@ -87,43 +65,45 @@ def send_liveness_notification(result: dict):
 def send_ctlogs_notification(result: dict):
     """
     Send bundled Discord notification for CT logs discoveries.
-    
+
     Args:
         result: Dict from poll_all_domains()
     """
     try:
-        from modules.Notify import send_message, send_cert_expiry_threshold_alert
+        from modules.Notify import send_about, send_cert_expiry_threshold_alert
         from utils.db_utils import mark_cert_notified
-        
-        lines = ["**Certificates & CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
-        
-        if result['new_subdomains']:
-            lines.append(f"\n**New Subdomains ({len(result['new_subdomains'])}):**")
-            for domain, subdomain in result['new_subdomains'][:10]:
-                lines.append(f"• {subdomain} (queued)")
-            if len(result['new_subdomains']) > 10:
-                lines.append(f"• ... and {len(result['new_subdomains']) - 10} more")
-        
-        if result.get('certificate_changes'):
-            lines.append(f"\n**Certificates Replaced ({len(result['certificate_changes'])}):**")
-            for change in result['certificate_changes'][:5]:
-                lines.append(f"• {change['hostname']}: {change['summary']}")
-            if len(result['certificate_changes']) > 5:
-                lines.append(f"• ... and {len(result['certificate_changes']) - 5} more")
-        
-        if len(lines) > 2:
-            send_message('\n'.join(lines))
-        
+
+        def build(keep):
+            subdomains = [sub for _, sub in result['new_subdomains'] if keep(sub)]
+            changes = [c for c in result.get('certificate_changes') or [] if keep(c['hostname'])]
+            if not subdomains and not changes:
+                return None
+            lines = ["**Certificates & CT Logs Update**", "━━━━━━━━━━━━━━━━━━━━━━━━━"]
+            if subdomains:
+                lines.append(f"\n**New Subdomains ({len(subdomains)}):**")
+                lines.extend(f"• {subdomain} (queued)" for subdomain in subdomains[:10])
+                if len(subdomains) > 10:
+                    lines.append(f"• ... and {len(subdomains) - 10} more")
+            if changes:
+                lines.append(f"\n**Certificates Replaced ({len(changes)}):**")
+                lines.extend(f"• {change['hostname']}: {change['summary']}" for change in changes[:5])
+                if len(changes) > 5:
+                    lines.append(f"• ... and {len(changes) - 5} more")
+            return '\n'.join(lines)
+
+        send_about([sub for _, sub in result['new_subdomains']] +
+                   [c['hostname'] for c in result.get('certificate_changes') or []], build)
+
         # Send cert expiry threshold alerts separately
         expiry_alerts = result.get('expiry_alerts', {})
         if any(expiry_alerts.values()):
             success, msg = send_cert_expiry_threshold_alert(expiry_alerts)
             logger.info(f"Cert expiry alert: {msg}")
-            
+
             for threshold, certs in expiry_alerts.items():
                 for cert in certs:
                     mark_cert_notified(cert['cert_id'], cert['hostname'], threshold)
-    
+
     except Exception as e:
         logger.error(f"Failed to send CT logs notification: {e}")
 
@@ -131,42 +111,46 @@ def send_ctlogs_notification(result: dict):
 def send_wappalyzer_notification(result: dict):
     """
     Send Discord notification for Wappalyzer re-scan results.
-    
+
     Only sends if new CVEs were detected.
-    
+
     Args:
         result: Dict from run_wappalyzer_scan()
     """
     try:
-        from modules.Notify import send_message
-        
-        lines = [
-            "**Wappalyzer Re-scan Complete**",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        ]
-        
-        lines.append(f"\n**Hosts Scanned:** {result['hosts_scanned']}")
-        lines.append(f"**Technologies Found:** {result['technologies_found']}")
-        lines.append(f"**Total CVEs:** {result['cves_found']}")
-        lines.append(f"**New CVEs:** {len(result['new_cves'])}")
-        
-        if result['new_cves']:
-            lines.append(f"\n**New CVEs Detected:**")
-            for cve in result['new_cves'][:10]:
-                cvss_str = f" (CVSS {cve['cvss']})" if cve.get('cvss') else ""
-                lines.append(f"• {cve['cve_id']}{cvss_str} on {cve['host']} ({cve['tech_name']})")
-            if len(result['new_cves']) > 10:
-                lines.append(f"• ... and {len(result['new_cves']) - 10} more")
-        
-        if result['errors']:
-            lines.append(f"\n**Errors ({len(result['errors'])}):**")
-            for err in result['errors'][:3]:
-                lines.append(f"• {err}")
-            if len(result['errors']) > 3:
-                lines.append(f"• ... and {len(result['errors']) - 3} more")
-        
-        send_message('\n'.join(lines))
-    
+        from modules.Notify import send_about
+
+        def build(keep):
+            new_cves = [cve for cve in result['new_cves'] if keep(cve['host'])]
+            if not new_cves and not keep.default:
+                return None
+            lines = [
+                "**Wappalyzer Re-scan Complete**",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            ]
+            # Totals across every group only go to the default channels
+            if keep.default:
+                lines.append(f"\n**Hosts Scanned:** {result['hosts_scanned']}")
+                lines.append(f"**Technologies Found:** {result['technologies_found']}")
+                lines.append(f"**Total CVEs:** {result['cves_found']}")
+            lines.append(f"**New CVEs:** {len(new_cves)}")
+            if new_cves:
+                lines.append(f"\n**New CVEs Detected:**")
+                for cve in new_cves[:10]:
+                    cvss_str = f" (CVSS {cve['cvss']})" if cve.get('cvss') else ""
+                    lines.append(f"• {cve['cve_id']}{cvss_str} on {cve['host']} ({cve['tech_name']})")
+                if len(new_cves) > 10:
+                    lines.append(f"• ... and {len(new_cves) - 10} more")
+            if result['errors'] and keep.default:
+                lines.append(f"\n**Errors ({len(result['errors'])}):**")
+                for err in result['errors'][:3]:
+                    lines.append(f"• {err}")
+                if len(result['errors']) > 3:
+                    lines.append(f"• ... and {len(result['errors']) - 3} more")
+            return '\n'.join(lines)
+
+        send_about([cve['host'] for cve in result['new_cves']], build)
+
     except Exception as e:
         logger.error(f"Failed to send Wappalyzer notification: {e}")
 
@@ -179,21 +163,23 @@ def send_takeover_notification(result: dict):
         result: Dict from run_takeover_check()
     """
     try:
-        from modules.Notify import send_message
+        from modules.Notify import send_about
 
-        lines = [
-            "**Subdomain Takeover Check**",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"\n**Hosts Checked:** {result['hosts_checked']}",
-            f"**New Findings:** {len(result['new_findings'])}",
-            "",
-        ]
-        for finding in result['new_findings'][:10]:
-            lines.append(f"• [{finding['severity'].upper()}] {finding['host']}: {finding['title']}")
-        if len(result['new_findings']) > 10:
-            lines.append(f"• ... and {len(result['new_findings']) - 10} more")
+        def build(keep):
+            findings = [f for f in result['new_findings'] if keep(f['host'])]
+            if not findings:
+                return None
+            lines = ["**Subdomain Takeover Check**", "━━━━━━━━━━━━━━━━━━━━━━━━━━"]
+            if keep.default:
+                lines.append(f"\n**Hosts Checked:** {result['hosts_checked']}")
+            lines += [f"**New Findings:** {len(findings)}", ""]
+            for finding in findings[:10]:
+                lines.append(f"• [{finding['severity'].upper()}] {finding['host']}: {finding['title']}")
+            if len(findings) > 10:
+                lines.append(f"• ... and {len(findings) - 10} more")
+            return '\n'.join(lines)
 
-        send_message('\n'.join(lines))
+        send_about([f['host'] for f in result['new_findings']], build)
 
     except Exception as e:
         logger.error(f"Failed to send takeover notification: {e}")
@@ -207,23 +193,29 @@ def send_kev_notification(result: dict):
         result: Dict from refresh_threat_intel()
     """
     try:
-        from modules.Notify import send_message
+        from modules.Notify import send_about
 
-        lines = [
-            "**Actively Exploited CVEs on Your Assets (CISA KEV)**",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-        ]
-        for item in result['newly_kev'][:10]:
-            hosts = ', '.join(item['hosts'][:5]) + (f" (+{len(item['hosts']) - 5} more)" if len(item['hosts']) > 5 else '')
-            ransomware = " · used in ransomware" if item.get('ransomware') else ""
-            lines.append(f"\n• **{item['cve_id']}**{ransomware} · CISA due date {item.get('due_date') or '-'}")
-            lines.append(f"  Hosts: {hosts}")
-            if item.get('required_action'):
-                lines.append(f"  Action: {item['required_action'][:200]}")
-        if len(result['newly_kev']) > 10:
-            lines.append(f"\n• ... and {len(result['newly_kev']) - 10} more")
+        def build(keep):
+            items = [dict(item, hosts=[h for h in item['hosts'] if keep(h)]) for item in result['newly_kev']]
+            items = [item for item in items if item['hosts']]
+            if not items:
+                return None
+            lines = [
+                "**Actively Exploited CVEs on Your Assets (CISA KEV)**",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            ]
+            for item in items[:10]:
+                hosts = ', '.join(item['hosts'][:5]) + (f" (+{len(item['hosts']) - 5} more)" if len(item['hosts']) > 5 else '')
+                ransomware = " · used in ransomware" if item.get('ransomware') else ""
+                lines.append(f"\n• **{item['cve_id']}**{ransomware} · CISA due date {item.get('due_date') or '-'}")
+                lines.append(f"  Hosts: {hosts}")
+                if item.get('required_action'):
+                    lines.append(f"  Action: {item['required_action'][:200]}")
+            if len(items) > 10:
+                lines.append(f"\n• ... and {len(items) - 10} more")
+            return '\n'.join(lines)
 
-        send_message('\n'.join(lines))
+        send_about([h for item in result['newly_kev'] for h in item['hosts']], build)
 
     except Exception as e:
         logger.error(f"Failed to send KEV notification: {e}")
@@ -238,22 +230,28 @@ def send_misconfig_notification(result: dict):
         result: Dict from run_misconfig_check()
     """
     try:
-        from modules.Notify import send_message
+        from modules.Notify import send_about
 
         order = {'critical': 0, 'high': 1, 'medium': 2}
-        findings = sorted(result['new_findings'], key=lambda f: order.get(f['severity'], 3))
-        lines = [
-            "**Misconfiguration Check**",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"\n**New Findings:** {len(findings)}",
-            "",
-        ]
-        for finding in findings[:15]:
-            lines.append(f"• [{finding['severity'].upper()}] {finding['host']}: {finding['title']}")
-        if len(findings) > 15:
-            lines.append(f"• ... and {len(findings) - 15} more")
+        all_findings = sorted(result['new_findings'], key=lambda f: order.get(f['severity'], 3))
 
-        send_message('\n'.join(lines))
+        def build(keep):
+            findings = [f for f in all_findings if keep(f['host'])]
+            if not findings:
+                return None
+            lines = [
+                "**Misconfiguration Check**",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                f"\n**New Findings:** {len(findings)}",
+                "",
+            ]
+            for finding in findings[:15]:
+                lines.append(f"• [{finding['severity'].upper()}] {finding['host']}: {finding['title']}")
+            if len(findings) > 15:
+                lines.append(f"• ... and {len(findings) - 15} more")
+            return '\n'.join(lines)
+
+        send_about([f['host'] for f in all_findings], build)
 
     except Exception as e:
         logger.error(f"Failed to send misconfiguration notification: {e}")
@@ -267,21 +265,24 @@ def send_discovery_notification(result: dict):
         result: Dict from run_discovery_monitor()
     """
     try:
-        from modules.Notify import send_message
+        from modules.Notify import send_about
 
-        new = result['new_subdomains']
-        lines = [
-            "**Subdomain Discovery**",
-            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
-            f"\n**New Subdomains:** {len(new)} (queued for scanning)",
-            "",
-        ]
-        for domain, subdomain in new[:15]:
-            lines.append(f"• {subdomain}")
-        if len(new) > 15:
-            lines.append(f"• ... and {len(new) - 15} more")
+        def build(keep):
+            new = [subdomain for _, subdomain in result['new_subdomains'] if keep(subdomain)]
+            if not new:
+                return None
+            lines = [
+                "**Subdomain Discovery**",
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                f"\n**New Subdomains:** {len(new)} (queued for scanning)",
+                "",
+            ]
+            lines.extend(f"• {subdomain}" for subdomain in new[:15])
+            if len(new) > 15:
+                lines.append(f"• ... and {len(new) - 15} more")
+            return '\n'.join(lines)
 
-        send_message('\n'.join(lines))
+        send_about([subdomain for _, subdomain in result['new_subdomains']], build)
 
     except Exception as e:
         logger.error(f"Failed to send discovery notification: {e}")

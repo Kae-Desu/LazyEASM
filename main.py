@@ -618,7 +618,8 @@ def inject_group_switcher():
     def group_switcher():
         from utils import groups
         key = selected_group()
-        return {'current': key, 'label': groups.label(key), 'menu': groups.menu()}
+        return {'current': key, 'label': groups.label(key), 'menu': groups.menu(),
+                'ended': groups.ended_engagements()}
     return dict(group_switcher=group_switcher)
 
 
@@ -646,7 +647,25 @@ def select_group():
 def groups_page():
     """Create named groups and choose their domains and CIDRs."""
     from utils import groups
-    return render_template('groups.html', named=groups.list_named_groups(), menu=groups.menu())
+    from modules.Notify import configured_channels
+    from utils.config import get_env
+    from urllib.parse import urlsplit
+
+    def masked(field, value):
+        # Webhook URLs carry their token: show only the host
+        if field in ('discord_user_id', 'email_to'):
+            return value
+        if field == 'webhook_secret':
+            return 'set'
+        return f'{urlsplit(value).netloc}/…'
+
+    named = groups.list_named_groups()
+    for g in named:
+        stored = groups.get_channels(g['group_id'])
+        g['also_default'] = stored.pop('also_default')
+        g['masked'] = {field: masked(field, value) for field, value in stored.items() if value}
+    return render_template('groups.html', named=named, menu=groups.menu(),
+                           default_channels=configured_channels(), smtp_ready=bool(get_env('SMTP_HOST')))
 
 
 def _group_action(action):
@@ -727,6 +746,54 @@ def assign_to_group():
         value = groups.add_member(int(group_id), 'domain', request.form.get('value'))
         return f'{value} added to "{groups.label(f"g:{group_id}")}".'
     return _group_action(action)
+
+
+@app.route('/groups/<int:group_id>/engagement', methods=['POST'])
+@token_required
+@csrf_protected
+def set_group_engagement(group_id):
+    """Engagement dates (form: starts_on, ends_on; empty for none). Outside them the group is not scanned."""
+    from utils import groups
+
+    def action():
+        groups.set_engagement(group_id, request.form.get('starts_on'), request.form.get('ends_on'))
+        return 'Engagement dates saved.'
+    return _group_action(action)
+
+
+@app.route('/groups/<int:group_id>/channels', methods=['POST'])
+@token_required
+@csrf_protected
+def set_group_channels(group_id):
+    """
+    The group's own notification channels. An empty field keeps the stored
+    value (they are not shown again); clear_<field>=1 removes it.
+    """
+    from utils import groups
+
+    def action():
+        values = {}
+        for field in groups.CHANNEL_FIELDS:
+            if request.form.get(f'clear_{field}') == '1':
+                values[field] = ''
+            elif (request.form.get(field) or '').strip():
+                values[field] = request.form.get(field)
+        groups.set_channels(group_id, values, also_default=request.form.get('also_default') == '1')
+        return 'Notification channels saved.'
+    return _group_action(action)
+
+
+@app.route('/groups/<int:group_id>/channels/test', methods=['POST'])
+@token_required
+@csrf_protected
+def test_group_channels(group_id):
+    from modules.Notify import send_group_test
+    try:
+        success, message = send_group_test(group_id)
+    except Exception as e:
+        success, message = False, str(e)
+    flash(f'Test notification: {message}', 'success' if success else 'error')
+    return redirect(url_for('groups_page'))
 
 
 @app.route('/groups/<int:group_id>/purge', methods=['GET'])
@@ -1548,6 +1615,26 @@ def process_assets():
         flash('No valid assets found. Please check your input format.' + invalid_note, 'error')
         return redirect(url_for('scans_page'))
     
+    # A group outside its engagement dates is not scanned (Groups page)
+    from utils import groups
+    group_id = (request.form.get('group_id') or '').strip()
+    if group_id.isdigit():
+        chosen = next((g for g in groups.list_named_groups() if g['group_id'] == int(group_id)), None)
+        if chosen and chosen['engagement'] in ('upcoming', 'ended'):
+            when = f"starts on {chosen['starts_on']}" if chosen['engagement'] == 'upcoming' else f"ended on {chosen['ends_on']}"
+            flash(f'The engagement of "{chosen["name"]}" {when}; nothing was queued. '
+                  'Change its dates under Groups to scan it.', 'error')
+            return redirect(url_for('scans_page'))
+    allowed = groups.scan_filter()
+    paused = [v for key in ('domains', 'subdomains', 'ips') for v in targets.get(key, []) if not allowed(v)]
+    for key in ('domains', 'subdomains', 'ips'):
+        targets[key] = [v for v in targets.get(key, []) if allowed(v)]
+    paused_note = (f' Skipped {len(paused)} targets of groups outside their engagement dates: '
+                   f"{', '.join(paused[:5])}{' ...' if len(paused) > 5 else ''}." if paused else '')
+    if not any(v for k, v in targets.items() if k != 'invalid'):
+        flash('Nothing was queued.' + paused_note, 'error')
+        return redirect(url_for('scans_page'))
+
     # Log counts
     counts = {k: len(v) for k, v in targets.items()}
     print(f"[Phase 1] Assets received: {counts}")
@@ -1558,9 +1645,7 @@ def process_assets():
     # New targets join the chosen named group; what discovery finds under a
     # domain or inside a range follows automatically
     group_note = ''
-    group_id = (request.form.get('group_id') or '').strip()
     if group_id.isdigit():
-        from utils import groups
         try:
             for kind, key in (('domain', 'domains'), ('domain', 'subdomains'), ('cidr', 'ips'), ('cidr', 'cidrs')):
                 for value in targets.get(key, []):
@@ -1570,7 +1655,7 @@ def process_assets():
             group_note = f' Not added to a group: {e}.'
 
     flash('Asset accepted. Processing may take up to 10 minutes. Initialization will start automatically after parsing.'
-          + group_note + invalid_note, 'success')
+          + group_note + paused_note + invalid_note, 'success')
     return redirect(url_for('scans_page'))
 
 
@@ -1645,7 +1730,8 @@ def queue_phase2_scan():
                 f"━━━━━━━━━━━━━━━━━━\n"
                 f"Asset: {asset_name}\n"
                 f"Type: {asset_type}\n"
-                f"Queue ID: {queue_id}"
+                f"Queue ID: {queue_id}",
+                hosts=[asset_name]
             )
         except Exception as e:
             print(f"[Phase2] Discord notification failed: {e}")
@@ -1707,7 +1793,8 @@ def cancel_phase2_scan():
             send_message(
                 f"**Deep Scan Cancelled**\n"
                 f"━━━━━━━━━━━━━━━━━━\n"
-                f"Asset: {asset_name}"
+                f"Asset: {asset_name}",
+                hosts=[asset_name]
             )
         except Exception as e:
             print(f"[Phase2] Discord notification failed: {e}")

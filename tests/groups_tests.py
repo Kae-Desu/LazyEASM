@@ -295,5 +295,167 @@ class ClientSeparationTests(RouteTestCase):
         self.assertEqual(self.client.post(f'/groups/{self.corp}/purge').status_code, 403)   # CSRF required
 
 
+class EngagementTests(GroupsTestCase):
+    def test_states_and_validation(self):
+        self.assertIsNone(groups.engagement_state(None, None))
+        self.assertEqual(groups.engagement_state('2026-11-10', None, on='2026-11-09'), 'upcoming')
+        self.assertEqual(groups.engagement_state('2026-11-10', '2026-11-20', on='2026-11-10'), 'running')
+        self.assertEqual(groups.engagement_state(None, '2026-11-20', on='2026-11-20'), 'running')   # inclusive
+        self.assertEqual(groups.engagement_state(None, '2026-11-20', on='2026-11-21'), 'ended')
+        for start, end in (('2026-11-20', '2026-11-10'), ('20.11.2026', ''), ('', 'soon')):
+            with self.assertRaises(groups.GroupError):
+                groups.set_engagement(self.corp, start, end)
+
+    def test_hosts_of_an_ended_engagement_are_not_scanned(self):
+        self.assertTrue(groups.may_scan('www.example.com'))                 # no dates yet
+        groups.set_engagement(self.corp, '2026-01-01', '2026-01-31')
+        allowed = groups.scan_filter()
+        for host in ('example.com', 'www.example.com', 'new.example.com', '203.0.113.10', '203.0.113.40'):
+            self.assertFalse(allowed(host), host)
+        for host in ('blog.example.org', '198.51.100.23', '192.0.2.5', 'shop.example.net'):
+            self.assertTrue(allowed(host), host)                            # other clients, and the CDN
+        self.assertEqual([g['name'] for g in groups.ended_engagements()], ['Example Corp'])
+        self.assertEqual(groups.scannable([{'name': 'www.example.com'}, {'name': 'blog.example.org'}],
+                                          key=lambda a: a['name']), [{'name': 'blog.example.org'}])
+
+        running = groups.create_group('Shared infra')                       # still running for another group
+        groups.add_member(running, 'cidr', '203.0.113.40/32')
+        self.assertTrue(groups.may_scan('203.0.113.40'))
+        self.assertFalse(groups.may_scan('www.example.com'))
+
+    def test_upcoming_engagement_waits(self):
+        groups.set_engagement(self.corp, '2999-01-01', '')
+        self.assertFalse(groups.may_scan('www.example.com'))
+        self.assertEqual(groups.ended_engagements(), [])
+
+    def test_queued_jobs_are_dropped(self):
+        from utils import queue_manager
+        groups.set_engagement(self.corp, '2026-01-01', '2026-01-31')
+        worker = queue_manager.Phase1Worker()
+        worker._in_flight = 1
+        with patch('modules.phase1_runner.run_phase1') as run:
+            worker._run_task({'queue_id': 1, 'target': 'www.example.com', 'target_id': 1, 'target_type': 'subdomain'})
+        run.assert_not_called()
+        conn = db_utils.get_db_connection()
+        try:
+            row = conn.execute('SELECT status, error_message FROM scan_queue WHERE queue_id = 1').fetchone()
+        finally:
+            conn.close()
+        self.assertEqual(row['status'], 'failed')
+        self.assertIn('engagement dates', row['error_message'])
+
+
+class ChannelTests(GroupsTestCase):
+    def setUp(self):
+        super().setUp()
+        p = patch('modules.Notify.get_env', side_effect=lambda key, default=None: {
+            'DISCORD_WEBHOOK_URL': 'https://discord.com/api/webhooks/1/default'}.get(key, default))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def deliveries(self, send):
+        from modules import Notify
+        sent = []
+        with patch.object(Notify, '_deliver', side_effect=lambda channels, message, user_id=None:
+                          sent.append((channels['discord_webhook'], message)) or (True, 'ok')):
+            send()
+        return dict(sent)
+
+    def test_routes(self):
+        hosts = {'www.example.com', 'blog.example.org', '203.0.113.40'}
+        self.assertEqual(groups.notification_routes(hosts), {None: hosts})      # no group channels yet
+        groups.set_channels(self.corp, {'discord_webhook': 'https://discord.com/api/webhooks/2/corp'}, also_default=False)
+        self.assertEqual(groups.notification_routes(hosts),
+                         {self.corp: {'www.example.com', '203.0.113.40'}, None: {'blog.example.org'}})
+        groups.set_channels(self.corp, {}, also_default=True)                   # keeps the webhook
+        self.assertEqual(groups.notification_routes(hosts)[None], hosts)
+
+    def test_validation_and_clearing(self):
+        with self.assertRaises(groups.GroupError):
+            groups.set_channels(self.corp, {'slack_webhook': 'https://evil.example/hook'}, True)
+        groups.set_channels(self.corp, {'email_to': 'a@example.com, b@example.com'}, True)
+        for smtp_host, usable in (('smtp.example.com', True), (None, False)):     # email needs the SMTP server
+            with patch('utils.config.get_env', side_effect=lambda key, default=None: smtp_host if key == 'SMTP_HOST' else default):
+                self.assertEqual(groups.has_channels(groups.get_channels(self.corp)), usable)
+        groups.set_channels(self.corp, {'email_to': '', 'slack_webhook': 'https://hooks.slack.com/services/T/B/X'}, True)
+        channels = groups.get_channels(self.corp)
+        self.assertEqual((channels['email_to'], groups.has_channels(channels)), ('', True))
+        groups.set_channels(self.corp, {'slack_webhook': ''}, True)
+        self.assertFalse(groups.has_channels(groups.get_channels(self.corp)))
+
+    def test_each_client_only_hears_about_its_own_hosts(self):
+        from utils import phase3_worker
+        groups.set_channels(self.corp, {'discord_webhook': 'https://discord.com/api/webhooks/2/corp'}, also_default=False)
+        sent = self.deliveries(lambda: phase3_worker.send_misconfig_notification({'new_findings': [
+            {'host': 'www.example.com', 'title': 'Git repository exposed', 'severity': 'high'},
+            {'host': 'blog.example.org', 'title': 'Git repository exposed', 'severity': 'high'}]}))
+        corp, default = sent['https://discord.com/api/webhooks/2/corp'], sent['https://discord.com/api/webhooks/1/default']
+        self.assertIn('www.example.com', corp)
+        self.assertNotIn('blog.example.org', corp)
+        self.assertIn('blog.example.org', default)
+        self.assertNotIn('www.example.com', default)
+
+        # Only the default channels get liveness news about hosts in no group with channels
+        sent = self.deliveries(lambda: phase3_worker.send_liveness_notification(
+            {'down': ['blog.example.org'], 'recovered': [], 'still_down': ['www.example.com']}))
+        self.assertEqual(list(sent), ['https://discord.com/api/webhooks/1/default'])
+        self.assertNotIn('www.example.com', sent['https://discord.com/api/webhooks/1/default'])
+
+        # Single-host messages and the CVE / certificate alerts are routed too
+        from modules import Notify
+        sent = self.deliveries(lambda: Notify.send_message('Deep Scan Queued: www.example.com', hosts=['www.example.com']))
+        self.assertEqual(list(sent), ['https://discord.com/api/webhooks/2/corp'])
+        sent = self.deliveries(lambda: Notify.send_message('Disk almost full'))
+        self.assertEqual(list(sent), ['https://discord.com/api/webhooks/1/default'])
+
+    def test_embed_alerts_are_split(self):
+        from modules import Notify
+        groups.set_channels(self.corp, {'discord_webhook': 'https://discord.com/api/webhooks/2/corp'}, also_default=False)
+        posted = []
+        with patch.object(Notify, '_send_embeds', side_effect=lambda channels, heading, embeds:
+                          posted.append((channels['discord_webhook'], [e.get('title') or e.get('description') for e in embeds]))
+                          or {'discord': (True, 'HTTP 204')}):
+            Notify.send_cert_expiry_threshold_alert({3: [{'cert_id': 1, 'hostname': 'www.example.com'},
+                                                         {'cert_id': 2, 'hostname': 'blog.example.org'}]})
+            Notify.send_vulnerability_alert({h: {'cves': [{'cve_id': 'CVE-2021-44228', 'cvss': 10.0}]}
+                                             for h in ('www.example.com', 'blog.example.org')})
+        for url, items in posted:
+            text = ' '.join(str(i) for i in items)
+            if url.endswith('/corp'):
+                self.assertNotIn('blog.example.org', text)
+            else:
+                self.assertNotIn('www.example.com', text)
+        self.assertEqual(len(posted), 4)
+
+
+class EngagementRouteTests(RouteTestCase):
+    def test_dates_channels_and_reminder(self):
+        self.post(f'/groups/{self.corp}/engagement', starts_on='2026-01-01', ends_on='2026-01-31')
+        page = self.client.get('/').get_data(as_text=True)
+        self.assertIn('The engagement <strong>Example Corp</strong> ended on 2026-01-31', page)
+        self.assertIn(f'/groups/{self.corp}/purge', page)
+
+        with patch('utils.phase_lock.is_phase2_running', return_value=False), \
+                patch.object(self.main, 'enqueue_input_discovery') as enqueue:
+            self.post('/process_assets', group_id=str(self.corp), asset_input='example.edu')
+            enqueue.assert_not_called()                                     # ended: nothing queued
+            self.post('/process_assets', asset_input='new.example.com\nexample.edu')
+            self.assertEqual(enqueue.call_args.args[0]['subdomains'], [])   # Example Corp's host skipped
+            self.assertEqual(enqueue.call_args.args[0]['domains'], ['example.edu'])
+
+        token = 'https://discord.com/api/webhooks/123/very-secret-token'
+        self.post(f'/groups/{self.corp}/channels', discord_webhook=token, also_default='1')
+        self.assertEqual(groups.get_channels(self.corp)['discord_webhook'], token)
+        page = self.client.get('/groups').get_data(as_text=True)
+        self.assertNotIn('very-secret-token', page)                         # shown masked only
+        self.assertIn('discord.com/…', page)
+        self.post(f'/groups/{self.corp}/channels', discord_webhook='', also_default='1')   # empty: kept
+        self.assertEqual(groups.get_channels(self.corp)['discord_webhook'], token)
+        self.post(f'/groups/{self.corp}/channels', clear_discord_webhook='1')
+        self.assertEqual(groups.get_channels(self.corp)['discord_webhook'], '')
+        self.assertFalse(groups.get_channels(self.corp)['also_default'])
+        self.assertEqual(self.client.post(f'/groups/{self.corp}/channels').status_code, 403)   # CSRF required
+
+
 if __name__ == '__main__':
     unittest.main()

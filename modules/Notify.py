@@ -3,7 +3,8 @@ Module: Notify.py
 Purpose: Notifications for LazyEASM
 
 Channels (each enabled by its settings; all configured channels receive
-every notification):
+every notification, except that alerts about the hosts of a group with its
+own channels go to that group's channels, see utils/groups.py):
     - Discord   DISCORD_WEBHOOK_URL (+ DISCORD_USER_ID to ping)
     - Slack     SLACK_WEBHOOK_URL (incoming webhook)
     - Webhook   NOTIFY_WEBHOOK_URL: JSON POST; with NOTIFY_WEBHOOK_SECRET the
@@ -14,6 +15,7 @@ every notification):
 
 Functions:
     - send_message: Send a message to every configured channel
+    - send_about: Send an alert listing several hosts, split per group
     - test_webhook: Send a test message to every configured channel
     - send_vulnerability_alert: Grouped CVE alerts (Discord embeds, text elsewhere)
     - send_cert_expiry_threshold_alert: Certificate expiry alerts
@@ -98,25 +100,37 @@ def _post(url: str, **kwargs) -> tuple:
         return False, f'Request error: {e}'
 
 
-def _send_discord(message: str = None, payload: dict = None, user_id: str = None):
-    webhook_url = get_env('DISCORD_WEBHOOK_URL')
+def default_channels() -> dict:
+    """The channels set in .env (Settings > Notifications)."""
+    return {
+        'discord_webhook': get_env('DISCORD_WEBHOOK_URL'),
+        'discord_user_id': get_env('DISCORD_USER_ID'),
+        'slack_webhook': get_env('SLACK_WEBHOOK_URL'),
+        'webhook_url': get_env('NOTIFY_WEBHOOK_URL'),
+        'webhook_secret': get_env('NOTIFY_WEBHOOK_SECRET'),
+        'email_to': get_env('SMTP_TO'),
+    }
+
+
+def _send_discord(channels: dict, message: str = None, payload: dict = None, user_id: str = None):
+    webhook_url = channels.get('discord_webhook')
     if not webhook_url:
         return None
     if payload is None:
-        ping_user = user_id or get_env('DISCORD_USER_ID')
+        ping_user = user_id or channels.get('discord_user_id')
         payload = {"content": f"<@{ping_user}> {message}" if ping_user else message}
     return _post(webhook_url, json=payload)
 
 
-def _send_slack(message: str):
-    url = get_env('SLACK_WEBHOOK_URL')
+def _send_slack(channels: dict, message: str):
+    url = channels.get('slack_webhook')
     if not url:
         return None
     return _post(url, json={'text': _slack(message)})
 
 
-def _send_webhook(message: str):
-    url = get_env('NOTIFY_WEBHOOK_URL')
+def _send_webhook(channels: dict, message: str):
+    url = channels.get('webhook_url')
     if not url:
         return None
     body = json.dumps({
@@ -127,16 +141,17 @@ def _send_webhook(message: str):
         'sent_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'),
     }, ensure_ascii=False).encode('utf-8')
     headers = {'Content-Type': 'application/json'}
-    secret = get_env('NOTIFY_WEBHOOK_SECRET')
+    secret = channels.get('webhook_secret')
     if secret:
         signature = hmac.new(secret.encode('utf-8'), body, hashlib.sha256).hexdigest()
         headers['X-LazyEASM-Signature'] = f'sha256={signature}'
     return _post(url, data=body, headers=headers)
 
 
-def _send_email(message: str):
+def _send_email(channels: dict, message: str):
+    # The SMTP server is always the one in .env; groups only choose recipients
     host = get_env('SMTP_HOST')
-    recipients = [r.strip() for r in (get_env('SMTP_TO') or '').split(',') if r.strip()]
+    recipients = [r.strip() for r in (channels.get('email_to') or '').split(',') if r.strip()]
     if not host or not recipients:
         return None
 
@@ -184,38 +199,123 @@ def _summarize(results: dict) -> tuple:
     return bool(ok), message
 
 
-def _send_to_other_channels(message: str) -> dict:
-    return {name: send(message) for name, send in OTHER_CHANNELS.items()}
+def _send_to_other_channels(channels: dict, message: str) -> dict:
+    return {name: send(channels, message) for name, send in OTHER_CHANNELS.items()}
+
+
+class Destination:
+    """
+    One set of channels: the default channels (group_id None) or a group's.
+    Passed to the message builders of send_about() as the host filter.
+    """
+
+    def __init__(self, group_id, hosts, channels):
+        self.group_id = group_id
+        self.hosts = {h.lower() for h in hosts}
+        self.channels = channels
+
+    @property
+    def default(self) -> bool:
+        return self.group_id is None
+
+    def __call__(self, host) -> bool:
+        return bool(host) and host.lower() in self.hosts
+
+
+def _destinations(hosts) -> list:
+    """The destinations for alerts about these hosts (all default when routing fails)."""
+    hosts = [h for h in hosts if h]
+    try:
+        from utils import groups
+        found = []
+        for group_id, routed in groups.notification_routes(hosts).items():
+            channels = default_channels() if group_id is None else groups.get_channels(group_id)
+            found.append(Destination(group_id, routed, channels))
+        return found
+    except Exception as e:
+        print(f"[Notify] Group routing failed, using the default channels: {e}")
+        return [Destination(None, hosts, default_channels())] if hosts else []
+
+
+def _merge(outcomes: list) -> tuple:
+    """Combine (success, message) of several destinations."""
+    if not outcomes:
+        return True, 'Nothing to send'
+    if len(outcomes) == 1:
+        return outcomes[0]
+    return any(ok for ok, _ in outcomes), ' / '.join(message for _, message in outcomes)
 
 
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
-def send_message(message: str, user_id: str = None) -> tuple:
+def _deliver(channels: dict, message: str, user_id: str = None) -> tuple:
+    results = {'discord': _send_discord(channels, message, user_id=user_id)}
+    results.update(_send_to_other_channels(channels, message))
+    return _summarize(results)
+
+
+def send_message(message: str, user_id: str = None, hosts=None) -> tuple:
     """
     Send a message to every configured channel.
 
     Args:
         message: Message content (Discord markdown)
         user_id: Optional Discord user ID to ping (overrides env default)
+        hosts: hostnames/IPs the message is about; it then goes to the
+            channels of their groups (see utils/groups.py) instead of only
+            the default channels. Leave out for messages about the server.
 
     Returns:
         Tuple of (success: bool, message: str); success if any channel delivered
     """
     if not REQUESTS_AVAILABLE:
         return False, 'requests library not installed'
-    results = {'discord': _send_discord(message, user_id=user_id)}
-    results.update(_send_to_other_channels(message))
-    return _summarize(results)
+    if hosts is None:
+        return _deliver(default_channels(), message, user_id)
+    return _merge([_deliver(d.channels, message, user_id if d.default else None) for d in _destinations(hosts)])
 
 
-def _send_embeds(heading: str, embeds: list) -> dict:
+def send_about(hosts, build) -> tuple:
+    """
+    Send an alert that lists several hosts, split by destination so a group's
+    channels only see that group's hosts.
+
+    Args:
+        hosts: every host the alert may mention
+        build: build(keep) -> message or None; keep(host) says whether a host
+            belongs in this copy, keep.default whether it goes to the default
+            channels (which may also get totals across all hosts)
+    """
+    if not REQUESTS_AVAILABLE:
+        return False, 'requests library not installed'
+    outcomes = []
+    for destination in _destinations(hosts):
+        message = build(destination)
+        if message:
+            outcomes.append(_deliver(destination.channels, message))
+    return _merge(outcomes)
+
+
+def send_group_test(group_id: int) -> tuple:
+    """Send a test message to one group's own channels."""
+    from utils import groups
+    channels = groups.get_channels(group_id)
+    if not groups.has_channels(channels):
+        return False, 'This group has no channels of its own'
+    if not REQUESTS_AVAILABLE:
+        return False, 'requests library not installed'
+    name = groups.label(f"g:{group_id}")
+    return _deliver(channels, f'**Notification Test**\nAlerts about the group "{name}" will arrive here.')
+
+
+def _send_embeds(channels: dict, heading: str, embeds: list) -> dict:
     """Discord gets the embeds; other channels get a text rendering."""
-    ping_user = get_env('DISCORD_USER_ID')
+    ping_user = channels.get('discord_user_id')
     payload = {"content": f"{'<@' + ping_user + '>' if ping_user else ''} **{heading}**", "embeds": embeds}
-    results = {'discord': _send_discord(payload=payload)}
-    results.update(_send_to_other_channels(_embeds_as_text(f"**{heading}**", embeds)))
+    results = {'discord': _send_discord(channels, payload=payload)}
+    results.update(_send_to_other_channels(channels, _embeds_as_text(f"**{heading}**", embeds)))
     return results
 
 
@@ -247,6 +347,16 @@ def send_vulnerability_alert(assets_with_cves: dict, min_cvss: float = 5.0) -> t
     if not assets_with_cves:
         return True, 'No CVEs to report'
 
+    outcomes = []
+    for destination in _destinations(list(assets_with_cves)):
+        part = {host: data for host, data in assets_with_cves.items() if destination(host)}
+        outcome = _vulnerability_alert(destination.channels, part, min_cvss)
+        if outcome:
+            outcomes.append(outcome)
+    return _merge(outcomes) if outcomes else (True, 'No CVEs above threshold')
+
+
+def _vulnerability_alert(channels: dict, assets_with_cves: dict, min_cvss: float):
     embeds = []
 
     total_cves = 0
@@ -300,7 +410,7 @@ def send_vulnerability_alert(assets_with_cves: dict, min_cvss: float = 5.0) -> t
         })
 
     if not embeds:
-        return True, 'No CVEs above threshold'
+        return None
 
     hidden = len(embeds) - 10
     embeds = embeds[:10]
@@ -320,7 +430,7 @@ def send_vulnerability_alert(assets_with_cves: dict, min_cvss: float = 5.0) -> t
         ]
     })
 
-    success, message = _summarize(_send_embeds('Vulnerability Alert', embeds))
+    success, message = _summarize(_send_embeds(channels, 'Vulnerability Alert', embeds))
     if success:
         message = f'Alert sent - {total_cves} CVEs across {total_assets} assets ({message})'
     return success, message
@@ -339,6 +449,17 @@ def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
     if not REQUESTS_AVAILABLE:
         return False, 'requests library not installed'
 
+    hosts = [c['hostname'] for certs in threshold_certs.values() for c in certs]
+    outcomes = []
+    for destination in _destinations(hosts):
+        part = {t: [c for c in certs if destination(c['hostname'])] for t, certs in threshold_certs.items()}
+        outcome = _cert_expiry_alert(destination.channels, part)
+        if outcome:
+            outcomes.append(outcome)
+    return _merge(outcomes) if outcomes else (True, 'No certificate alerts to send')
+
+
+def _cert_expiry_alert(channels: dict, threshold_certs: dict):
     colors = {7: 16098851, 5: 16027660, 3: 15158332, 1: 15548997}
     severity = {7: "Warning", 5: "Warning", 3: "Critical", 1: "Critical"}
 
@@ -364,9 +485,9 @@ def send_cert_expiry_threshold_alert(threshold_certs: dict) -> tuple:
         })
 
     if not embeds:
-        return True, 'No certificate alerts to send'
+        return None
 
-    success, message = _summarize(_send_embeds('SSL Certificate Expiry Alert', embeds))
+    success, message = _summarize(_send_embeds(channels, 'SSL Certificate Expiry Alert', embeds))
     if success:
         total = sum(len(c) for c in threshold_certs.values())
         message = f'Alert sent - {total} certificate(s) across {len(embeds)} threshold(s) ({message})'

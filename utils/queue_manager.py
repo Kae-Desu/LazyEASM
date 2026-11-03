@@ -206,6 +206,11 @@ class Phase1Worker:
         name = task['target']
         logger.info(f"[Phase1] Processing: {name}")
         try:
+            from utils.groups import may_scan
+            if not may_scan(name):
+                self._finish(task['queue_id'], 'failed', {'error_message': "Not scanned: outside the group's engagement dates"})
+                logger.info(f"[Phase1] Dropped: {name} (outside its group's engagement dates)")
+                return
             from modules.phase1_runner import run_phase1
             stats = run_phase1(asset_id=task['target_id'], asset_type=task['target_type'], asset_name=name)
             self._finish(task['queue_id'], 'completed', stats)

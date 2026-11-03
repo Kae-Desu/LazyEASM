@@ -397,7 +397,7 @@ def send_asset_notification(asset: Dict, nmap_result: Dict, dirsearch_result: Di
         else:
             msg += f"**Dirsearch:** Failed ({dirsearch_result.get('error', 'Unknown')})\n"
         
-        send_message(msg)
+        send_message(msg, hosts=[name])
         
     except Exception as e:
         logger.error(f"Discord notification failed: {e}")
@@ -515,7 +515,8 @@ def run_phase2_daily():
     logger.info("=" * 60)
     
     # Get all assets with http_services
-    assets = get_assets_for_phase2()
+    from utils.groups import scannable
+    assets = scannable(get_assets_for_phase2(), key=lambda a: a['name'])
     
     if not assets:
         logger.info("No assets found for Phase 2 scan")

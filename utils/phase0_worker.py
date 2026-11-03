@@ -172,6 +172,12 @@ def process_phase0_item(item: dict):
     queue_id = item['queue_id']
     
     logger.info(f"[Phase0] Processing: {subdomain}")
+
+    from utils.groups import may_scan
+    if not may_scan(subdomain):
+        mark_queue_item_failed(queue_id, "Not scanned: outside the group's engagement dates")
+        logger.info(f"[Phase0] Dropped: {subdomain} (outside its group's engagement dates)")
+        return True
     
     # Check if already exists in subdomain_asset
     conn = get_db_connection()

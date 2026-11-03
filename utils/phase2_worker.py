@@ -170,11 +170,11 @@ def update_asset_last_scan(target: str, target_type: str, timestamp: str):
         conn.close()
 
 
-def send_discord_notification(message: str):
-    """Send Discord notification."""
+def send_discord_notification(message: str, host: str = None):
+    """Send a notification (to the channels of the host's group, if it has its own)."""
     try:
         from modules.Notify import send_message
-        send_message(message)
+        send_message(message, hosts=[host] if host else None)
     except Exception as e:
         logger.error(f"Discord notification failed: {e}")
 
@@ -197,7 +197,13 @@ def process_phase2_queue():
     target = scan['target']
     target_id = scan['target_id']
     target_type = scan['target_type']
-    
+
+    from utils.groups import may_scan
+    if not may_scan(target):
+        update_queue_status(queue_id, 'failed', error_message="Not scanned: outside the group's engagement dates")
+        logger.info(f"Phase 2 scan for {target} dropped: outside its group's engagement dates")
+        return True
+
     logger.info(f"Processing Phase 2 scan for {target}")
     
     update_queue_status(queue_id, 'processing')
@@ -206,7 +212,8 @@ def process_phase2_queue():
         f"**Phase 2 Deep Scan Started**\n"
         f"━━━━━━━━━━━━━━━━━━\n"
         f"Asset: {target}\n"
-        f"Type: {target_type}"
+        f"Type: {target_type}",
+        host=target
     )
     
     result = run_phase2_on_asset(target, target_id, target_type)
@@ -236,7 +243,8 @@ def process_phase2_queue():
             f"━━━━━━━━━━━━━━━━━━\n"
             f"Asset: {target}\n"
             f"{nmap_info}"
-            f"Directories found: {result['dirs_found']}"
+            f"Directories found: {result['dirs_found']}",
+            host=target
         )
         
         logger.info(f"Phase 2 scan completed for {target}: {result['dirs_found']} directories")
@@ -251,7 +259,8 @@ def process_phase2_queue():
             f"**Phase 2 Deep Scan Failed**\n"
             f"━━━━━━━━━━━━━━━━━━\n"
             f"Asset: {target}\n"
-            f"Error: {result.get('error', 'Unknown error')}"
+            f"Error: {result.get('error', 'Unknown error')}",
+            host=target
         )
         
         logger.error(f"Phase 2 scan failed for {target}: {result.get('error')}")

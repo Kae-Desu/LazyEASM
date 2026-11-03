@@ -67,6 +67,69 @@
         <input id="add-{{ g.group_id }}" name="value" placeholder="Add a domain, IP or CIDR range" class="flex-1 {{ input_cls }}">
         <button type="submit" class="{{ btn_cls }}">Add</button>
     </form>
+
+    <div class="grid lg:grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-100 dark:border-white/5">
+        <form action="/groups/{{ g.group_id }}/engagement" method="POST" class="space-y-2">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <p class="text-xs font-bold text-slate-500 uppercase tracking-wider">
+                Engagement
+                {% if g.engagement == 'running' %}<span class="ml-1 normal-case tracking-normal font-semibold text-emerald-600 dark:text-emerald-400">running</span>
+                {% elif g.engagement == 'upcoming' %}<span class="ml-1 normal-case tracking-normal font-semibold text-amber-600 dark:text-amber-400">not started: not scanned yet</span>
+                {% elif g.engagement == 'ended' %}<span class="ml-1 normal-case tracking-normal font-semibold text-red-500">ended: no longer scanned</span>{% endif %}
+            </p>
+            <div class="flex flex-wrap items-end gap-2">
+                <label class="text-xs text-slate-500">From
+                    <input type="date" name="starts_on" value="{{ g.starts_on or '' }}" class="block mt-1 {{ input_cls }} py-1.5"></label>
+                <label class="text-xs text-slate-500">To
+                    <input type="date" name="ends_on" value="{{ g.ends_on or '' }}" class="block mt-1 {{ input_cls }} py-1.5"></label>
+                <button type="submit" class="text-xs font-bold text-accent hover:underline pb-2">Save dates</button>
+            </div>
+            <p class="text-xs text-slate-400">Optional, inclusive (UTC). Outside these dates the group's assets are not scanned; their data is kept until you purge the group.</p>
+        </form>
+
+        <details {% if g.channels %}open{% endif %}>
+            <summary class="text-xs font-bold text-slate-500 uppercase tracking-wider cursor-pointer select-none">
+                Notifications
+                <span class="ml-1 normal-case tracking-normal font-semibold {{ 'text-accent' if g.channels else 'text-slate-400' }}">
+                    {% if g.channels %}own channels{% if g.also_default %} and the default ones{% endif %}{% else %}default channels{% endif %}</span>
+            </summary>
+            <form action="/groups/{{ g.group_id }}/channels" method="POST" class="space-y-2 mt-2">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <p class="text-xs text-slate-400">Alerts about this group's assets go to these channels, so one client's alerts never reach another's.
+                    Leave a field empty to keep what is stored.</p>
+                {% for field, label, placeholder in [
+                    ('discord_webhook', 'Discord webhook URL', 'https://discord.com/api/webhooks/...'),
+                    ('discord_user_id', 'Discord user ID to ping', ''),
+                    ('slack_webhook', 'Slack webhook URL', 'https://hooks.slack.com/...'),
+                    ('webhook_url', 'Generic webhook URL', 'https://example.com/hooks/lazyeasm'),
+                    ('webhook_secret', 'Webhook signing secret', ''),
+                    ('email_to', 'Email recipients' ~ ('' if smtp_ready else ' (needs the SMTP server in Settings)'), 'secops@example.com')] %}
+                <div>
+                    <label for="{{ field }}-{{ g.group_id }}" class="text-xs text-slate-500">{{ label }}</label>
+                    <div class="flex items-center gap-2 mt-0.5">
+                        <input id="{{ field }}-{{ g.group_id }}" name="{{ field }}" autocomplete="off"
+                               type="{{ 'password' if field == 'webhook_secret' else 'text' }}"
+                               placeholder="{{ g.masked.get(field) or placeholder }}" class="flex-1 min-w-0 {{ input_cls }} py-1.5">
+                        {% if g.masked.get(field) %}
+                        <label class="text-xs text-slate-500 whitespace-nowrap"><input type="checkbox" name="clear_{{ field }}" value="1" class="mr-1 accent-[#CC9ACC]">Remove</label>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+                <label class="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
+                    <input type="checkbox" name="also_default" value="1" {% if g.also_default %}checked{% endif %} class="accent-[#CC9ACC]">
+                    Also send to the default channels{% if default_channels %} ({{ default_channels|join(', ') }}){% endif %}
+                </label>
+                <div class="flex gap-3 items-center">
+                    <button type="submit" class="{{ btn_cls }}">Save channels</button>
+                    {% if g.channels %}
+                    <button type="submit" formaction="/groups/{{ g.group_id }}/channels/test" formnovalidate class="text-xs font-bold text-emerald-600 dark:text-emerald-400 hover:underline">
+                        <i class="fas fa-paper-plane mr-1"></i>Send test</button>
+                    {% endif %}
+                </div>
+            </form>
+        </details>
+    </div>
 </section>
 {% endfor %}
 

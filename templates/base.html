@@ -149,6 +149,14 @@
             </div>
             {% endif %}
             {% include '_system_banner.html' %}
+            {% for g in gs.ended %}
+            <div class="mb-6 p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300 text-xs leading-relaxed flex gap-3" role="status">
+                <i class="fas fa-calendar-xmark mt-0.5" aria-hidden="true"></i>
+                <p>The engagement <strong>{{ g.name }}</strong> ended on {{ g.ends_on }}; its assets are no longer scanned.
+                    <a href="/groups/{{ g.group_id }}/purge" class="font-semibold underline">Export and purge it</a>,
+                    or change its dates under <a href="/groups" class="font-semibold underline">Groups</a>.</p>
+            </div>
+            {% endfor %}
             {% with messages = get_flashed_messages(with_categories=true) %}
                 {% if messages %}
                     {% for category, message in messages %}

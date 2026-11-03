@@ -33,6 +33,18 @@ def ok_response():
 
 
 class NotifyTests(unittest.TestCase):
+    def setUp(self):
+        # Alerts about hosts look up group channels in the database
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        db_path = os.path.join(tmp.name, 'test.db')
+        for target, attr in ((InitDB, 'DB_NAME'), (db_utils, 'DB_PATH')):
+            p = patch.object(target, attr, db_path)
+            p.start()
+            self.addCleanup(p.stop)
+        with contextlib.redirect_stdout(io.StringIO()):
+            InitDB.init_db()
+
     def test_fans_out_to_configured_channels(self):
         env = dict(DISCORD_WEBHOOK_URL='https://discord.test/hook', DISCORD_USER_ID='42',
                    SLACK_WEBHOOK_URL='https://hooks.slack.com/services/T/B/X',

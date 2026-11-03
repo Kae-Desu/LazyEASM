@@ -339,7 +339,8 @@ def run_discovery_monitor() -> dict:
 
     known = get_known_subdomains()
     result = {'domains': 0, 'new_subdomains': [], 'stats': {}}
-    for domain in get_all_monitored_domains():
+    from utils.groups import scannable
+    for domain in scannable(get_all_monitored_domains()):
         result['domains'] += 1
         found, stats = discover(domain, {k for k in known if k.endswith('.' + domain)})
         result['stats'][domain] = stats
