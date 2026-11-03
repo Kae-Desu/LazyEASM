@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **Asset groups**: a switcher to view one client, brand or engagement at a time. Every root domain is a group of its own; named groups combine domains, IPs and CIDR ranges. Every page, count and export follows the selected group, and export file names carry the group name. Targets added on the Scans page can join a group; asset pages show their groups and warn about overlaps.
 - **Purge group**: delete a whole client after an engagement, with its exports offered first, password confirmation, and the option to replace existing backups with a fresh one.
+- **Per-group notification channels**: a group can have its own Discord, Slack, webhook and email recipients, so alerts about one client never reach another client's channel. Alerts listing several hosts are split per group.
+- **Engagement dates**: a group can have a start and an end date. Outside them its assets are not scanned (their data is kept), and an ended engagement shows a reminder to export and purge it.
 
 ### Changed
 

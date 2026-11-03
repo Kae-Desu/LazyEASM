@@ -55,6 +55,15 @@ def asset_url(host: str) -> str:
     return f'/assets/subdomain/{row[0]}'
 
 
+def group_id() -> int:
+    from utils.db_utils import get_db_connection
+    conn = get_db_connection()
+    try:
+        return conn.execute('SELECT MIN(group_id) FROM asset_groups').fetchone()[0]
+    finally:
+        conn.close()
+
+
 def save_jpeg(png: bytes, path: str, width: int = None, quality: int = 82):
     from PIL import Image
     image = Image.open(io.BytesIO(png)).convert('RGB')
@@ -105,7 +114,8 @@ def main():
             return page.screenshot(type='png')
 
         pages = [('overview', '/'), ('assets', '/assets?sort=kev_count:desc'), ('asset-detail', asset),
-                 ('findings', '/findings'), ('changes', '/changes'), ('settings', '/settings#schedule')]
+                 ('findings', '/findings'), ('changes', '/changes'), ('settings', '/settings#schedule'),
+                 ('groups', '/groups'), ('purge-group', f'/groups/{group_id()}/purge'), ('scans', '/scans')]
         for name, path in pages:
             visit(path)
             save_jpeg(shot(), os.path.join(args.out, f'{name}.jpg'))

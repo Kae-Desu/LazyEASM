@@ -16,7 +16,7 @@ External Attack Surface Management (EASM): discover what you expose on the inter
 - **Security findings** - Exposed `.git`/`.env` and similar files, weak TLS, missing security headers, internet-exposed databases and admin services, subdomain takeovers, and hostnames pointing at servers that no longer serve them
 - **Continuous monitoring** - Up/down, new subdomains, certificate expiry and replacement, technology changes, page appearance changes (screenshots), all recorded in a change history
 - **Web screenshots** - Every web service captured in an isolated headless browser, so login portals, default pages and parked domains stand out
-- **Groups** - View one client, brand or engagement at a time: every root domain is a group on its own, or combine domains and IP ranges into named groups; exports per group, and one action to purge a client after an engagement
+- **Groups** - View one client, brand or engagement at a time: every root domain is a group on its own, or combine domains and IP ranges into named groups; per-group alert channels and engagement dates, exports per group, and one action to purge a client after an engagement
 - **Triage** - One findings list across all assets, most urgent first; mark findings fixed, accepted or false positive in bulk; resolved findings close themselves on rescan
 - **Alerts and export** - Discord, Slack, email or any webhook, including when LazyEASM itself stops scanning or its disk fills up; CSV/JSON export; optional AI explanation of each CVE (Gemini, Claude, OpenAI or a local model)
 - **Install once and forget** - Configured from the dashboard, encrypted (HTTPS) out of the box, self-updating detection data, daily backups
@@ -27,6 +27,7 @@ External Attack Surface Management (EASM): discover what you expose on the inter
 |---|---|---|
 | [![Overview](docs/images/overview.jpg)](docs/images/overview.jpg)<br>Overview | [![Findings](docs/images/findings.jpg)](docs/images/findings.jpg)<br>Findings | [![Asset page](docs/images/asset-detail.jpg)](docs/images/asset-detail.jpg)<br>Asset page |
 | [![Assets](docs/images/assets.jpg)](docs/images/assets.jpg)<br>Assets | [![Changes](docs/images/changes.jpg)](docs/images/changes.jpg)<br>Changes | [![Settings](docs/images/settings.jpg)](docs/images/settings.jpg)<br>Settings |
+| [![Scans](docs/images/scans.jpg)](docs/images/scans.jpg)<br>Scans | [![Groups](docs/images/groups.jpg)](docs/images/groups.jpg)<br>Groups | [![Purge group](docs/images/purge-group.jpg)](docs/images/purge-group.jpg)<br>Purge group |
 
 All screenshots show fictional demo data (`python scripts/demo_seed.py --serve` to try it, nothing is scanned).
 
@@ -129,6 +130,8 @@ python run.py
 **What gets scanned**: a domain you submit (`example.com`) is explored: its subdomains are found, scanned and monitored. A subdomain or IP you submit is scanned on its own; to explore its whole domain, use *Expand* on its page or submit the domain. Only scan what you are authorized to test.
 
 **Groups**: the switcher at the bottom of the sidebar shows one group at a time; every page, export and count follows it. Every root domain is a group of its own; in **Manage groups** you combine domains, IPs and CIDR ranges into named groups (e.g. one per client). A domain includes everything under it, a range includes the IPs inside it, and IPs your hostnames point to join their group (CDN addresses excepted). Targets added on the Scans page can go straight into a group.
+
+**Per client**: each named group can have its own **notification channels** (Discord, Slack, webhook, email recipients), so alerts about one client never reach another client's channel; alerts that list several hosts are split per group. Server alerts (worker stopped, disk full) always go to the channels in Settings. A group can also have **engagement dates**: before the start and after the end its assets are not scanned (their data is kept), and once it has ended every page reminds you to export and purge it.
 
 **After an engagement**: in **Manage groups**, *Purge* the client's group. It offers the group's exports first, asks for your password, deletes every asset of the group and everything recorded about it, and can replace the existing backups (which still contain the client) with a fresh one. Log files and the service journal still mention hostnames: rotate or delete them if your contract requires it.
 

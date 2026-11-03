@@ -194,6 +194,8 @@ Groups filter the one shared database; the worker and threat intelligence serve 
 - **Keys**: `all`, `ungrouped`, `g:<group_id>`, `d:<root domain>`. The switcher stores the key in the `lazyeasm_group` cookie (HttpOnly); `?group=` overrides it. Unknown or deleted keys mean all assets.
 - **Filtering**: `bind(conn, key)` resolves the group to its hostnames and IPs once per request and loads them into `temp.group_hosts`; the asset, findings, Overview, change and scan queries add `LOWER(host) IN (SELECT host FROM temp.group_hosts)`. Scan jobs also match dashboard submissions naming a group host (`json_tree`). Worker and queue counts stay global.
 - **Submissions** (`/process_assets`, `group_id`): domains and single subdomains become domain members, IPs and CIDRs range members.
+- **Notification channels** (`asset_group_channels`): Discord webhook and user ID, Slack webhook, generic webhook URL and secret, email recipients (the SMTP server stays the one in `.env`; without it email is not a usable channel). `notification_routes(hosts)` maps each host to the groups with channels that contain it (`Inventory.contains`, which also matches names not in the database yet), else to the default channels; with `also_default` the default channels get it too, and a host in two such groups goes to both. `Notify.send_message(..., hosts=[...])` routes single-host messages; `Notify.send_about(hosts, build)` builds one message per destination from only its hosts (totals across groups only for the default channels); CVE and certificate expiry alerts are split the same way. Messages about the server or run totals use the default channels. Stored webhook URLs are shown only as their host on the Groups page.
+- **Engagement dates** (`asset_groups.starts_on`, `ends_on`, inclusive, UTC): outside them `scan_filter()` excludes the group's hosts from every check (liveness, certificates and CT logs including expiry alerts, technology re-scan, takeover, misconfiguration, discovery, screenshots, deep scans) and Phase 0/1/2 jobs for them fail with *outside the group's engagement dates*. A host also in a group without dates or with a running engagement is still scanned. Findings are not closed (only checked hosts are reconciled) and served certificates are not retired. Submitting targets into a group outside its dates is refused; other submissions skip those hosts. Ended engagements show a reminder on every page.
 - **Purge** (`utils/asset_deletion.purge_group`): deletes the group's domains (with their subdomains), its other subdomains and the IPs submitted on their own or inside its ranges through the complete asset delete, then the group. IPs the deleted hostnames pointed to go only when no remaining asset uses them. Optionally deletes every local backup and takes a fresh one. Password required (login rate limit); the log records counts only.
 
 ---
@@ -216,7 +218,8 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 | `scan_queue`, `scan_history`, `scan_progress`, `phase_status`, `scan_hints` | Jobs and scan bookkeeping |
 | `settings` | Dashboard settings, check intervals, last runs, heartbeat, migration markers |
 | `admin_user`, `token_blacklist` | Admin account (scrypt hash, token version), revoked refresh tokens |
-| `asset_groups`, `asset_group_members` | Named groups and their domains and CIDRs |
+| `asset_groups`, `asset_group_members` | Named groups (with optional engagement dates) and their domains and CIDRs |
+| `asset_group_channels` | A group's own notification channels |
 
 - **Timestamps** are UTC (`YYYY-MM-DD HH:MM:SS`, `utils/timeutil.py`); the browser shows them in local time (`<time>` elements via the `localtime` template filter and `static/js/app.js`). Installs that stored local time were converted once by the server's UTC offset (marker `timestamps_in_utc`).
 - **Retention**: change history 365 days; finished queue items 90 days; screenshots 5 per service; replaced certificates expired more than 90 days; backups per [Backups](#backups-internals); expired blacklisted tokens are removed as new ones are added.
@@ -297,7 +300,7 @@ SQLite in `db/lazyeasm.db` (WAL mode, file mode 0600). Main tables:
 | `ASSET_API_MAX_PAGE_SIZE` | No | Page size cap of `/api/assets` (default 100) |
 | `LAZYEASM_LOG_DIR` | No | Log folder (default `logs/`) |
 
-Every configured notification channel receives every alert.
+Every configured notification channel receives every alert, except alerts about the hosts of a group with its own channels (see Asset groups).
 
 ### AI analysis
 
@@ -354,6 +357,9 @@ All routes need a logged-in session (JWT cookie) unless noted. "CSRF" routes als
 | `/groups/create`, `/groups/<id>/rename`, `/groups/<id>/delete` | POST | CSRF | Named groups (deleting keeps the assets) |
 | `/groups/<id>/members/add`, `/groups/<id>/members/remove`, `/groups/assign` | POST | CSRF | Domains, IPs and CIDRs of a group |
 | `/groups/<id>/purge` | POST | CSRF + password | Delete every asset of the group, then the group (`delete_backups=1`: replace the backups) |
+| `/groups/<id>/engagement` | POST | CSRF | `starts_on`, `ends_on` (YYYY-MM-DD, empty for none) |
+| `/groups/<id>/channels` | POST | CSRF | The group's channels; an empty field keeps the stored value, `clear_<field>=1` removes it, `also_default=1` also uses the default channels |
+| `/groups/<id>/channels/test` | POST | CSRF | Send a test notification to the group's own channels |
 | `/api/changes` | GET | Session | Change history: `host`, `type`, `since`, `limit` (max 500), `offset` |
 | `/api/export/<assets\|findings>.<csv\|json>` | GET | Session | Export; findings accept `status`. CSV cells starting with a formula character are neutralized |
 | `/screenshots/<id>/<full\|thumb>` | GET | Session | Screenshot image |

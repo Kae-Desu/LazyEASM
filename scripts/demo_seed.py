@@ -193,6 +193,10 @@ FINDINGS = [
 GROUPS = {
     'Example Corp': [('domain', 'example.com'), ('cidr', '203.0.113.30/31')],
 }
+# Engagement dates: group -> (days ago it started, days until it ends)
+ENGAGEMENTS = {'Example Corp': (30, 60)}
+# Group channels: group -> (Slack webhook, email recipients)
+GROUP_CHANNELS = {'Example Corp': ('https://hooks.slack.com/services/T0000/B0000/demo', 'security@example.com')}
 
 # Certificates presented by HTTPS services: host -> days until expiry (negative: expired)
 CERT_EXPIRY = {
@@ -403,11 +407,17 @@ def seed(demo_dir: str = DEMO_DIR):
                        ago(4) if status != 'open' else None, ago(days), ago(hours=1)))
 
         for name, members in GROUPS.items():
-            c.execute('INSERT INTO asset_groups (name, created_at) VALUES (?, ?)', (name, ago(30)))
+            start, end = ENGAGEMENTS.get(name, (None, None))
+            c.execute('INSERT INTO asset_groups (name, created_at, starts_on, ends_on) VALUES (?, ?, ?, ?)',
+                      (name, ago(30), ago(start)[:10] if start is not None else None,
+                       ahead(end)[:10] if end is not None else None))
             group_id = c.lastrowid
             for kind, value in members:
                 c.execute('INSERT INTO asset_group_members (group_id, kind, value) VALUES (?, ?, ?)',
                           (group_id, kind, value))
+            if name in GROUP_CHANNELS:      # fictional; the demo sends nothing
+                c.execute('INSERT INTO asset_group_channels (group_id, slack_webhook, email_to, also_default) '
+                          'VALUES (?, ?, ?, 0)', (group_id, *GROUP_CHANNELS[name]))
 
         for host, days in CERT_EXPIRY.items():
             port = WEB[host][0]
